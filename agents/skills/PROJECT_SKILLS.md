@@ -62,6 +62,74 @@ Related files:
 
 ---
 
+### One-Time Token Storage (email verify / password reset)
+
+Use when:
+
+Generating any short-lived one-time token sent to a user via email (email verification, password reset, magic link).
+
+Pattern:
+
+```typescript
+import { randomBytes, createHash } from 'crypto';
+
+function newToken() {
+  const rawToken = randomBytes(32).toString('hex');  // 64 hex chars, 256 bits
+  const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+  return { rawToken, tokenHash };
+}
+```
+
+Store `tokenHash` in the DB (`CHAR(64)` column). Send `rawToken` in the email only. Lookup by `tokenHash`. On use, check `usedAt IS NULL` and `expiresAt > NOW()` before accepting.
+
+When a password reset succeeds, increment `tokenVersion` on the user row so existing refresh tokens are also revoked.
+
+Do not:
+
+- Do not store the raw token.
+- Do not use bcrypt for tokens — tokens are already max entropy, bcrypt is overkill and slow.
+- Do not reuse the SHA-256 Checksum Columns pattern (that is for document integrity, uses `CHAR(64) NOT NULL` with a hex CHECK). Tokens should have a nullable `usedAt` and an `expiresAt`.
+
+Related files:
+
+`apps/api/src/modules/vendor-auth/vendor-auth.service.ts` (`newToken()`/`hashToken()` helpers), `database/migrations/001_initial_schema.sql` (token tables)
+
+---
+
+### Vendor Account Login Gate
+
+Use when:
+
+Implementing any login or authenticated action for vendor users.
+
+Pattern:
+
+Check all four gates in order before issuing tokens:
+
+```typescript
+if (user.lockedUntil && user.lockedUntil > new Date()) throw lockout error
+if (!passwordMatch) { increment failedLoginCount, set lockedUntil at threshold; throw }
+if (!user.emailVerifiedAt) throw forbidden
+if (vendor.status !== 'APPROVED') throw forbidden
+if (user.status !== 'ACTIVE') throw unauthorized
+```
+
+On success: reset `failedLoginCount = 0`, `lockedUntil = null`, set `lastLoginAt`.
+
+Lockout config: `auth.maxFailedLogins` (default 5), `auth.lockoutMinutes` (default 15).
+
+Do not:
+
+- Do not check the password before checking lockout — avoids bcrypt timing attack on locked accounts.
+- Do not reveal whether the email exists via different error messages.
+- Do not issue tokens to vendors with `vendor.status = PENDING` even after email verification — admin approval is required.
+
+Related files:
+
+`apps/api/src/modules/vendor-auth/vendor-auth.service.ts`
+
+---
+
 ### SHA-256 Checksum Columns
 
 Use when:

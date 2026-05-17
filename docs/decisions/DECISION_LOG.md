@@ -18,6 +18,69 @@ Related files:
 
 ## Decisions
 
+### 2026-05-17 - Vendor Registration Creates Vendor+VendorUser Before Admin Approval
+
+Date: 2026-05-17
+
+Decision:
+
+Vendor self-registration immediately creates a `Vendor` (status `PENDING`) + `VendorUser` record in an atomic transaction, even though admin approval hasn't happened yet.
+
+Context:
+
+The `vendor_email_verification_tokens` and `vendor_password_reset_tokens` tables have a NOT NULL FK to `vendor_users`, and `vendor_users` has a NOT NULL FK to `vendors`. There is no way to issue verification tokens without both rows existing. The spec requires email verification before the admin review step.
+
+Options considered:
+
+1. Add `password_hash` + `contact_name` to `vendor_registration_requests` and defer `Vendor`/`VendorUser` creation until admin approval. Requires schema migration.
+2. Create `Vendor (PENDING)` + `VendorUser` immediately at registration time. No schema change required.
+
+Outcome:
+
+Option 2. Login gates explicitly on `vendor.status === 'APPROVED'` — a PENDING vendor user cannot authenticate even after email verification.
+
+Impact:
+
+Admin "approve" action must update `vendor.status` to `APPROVED` and `vendor_user.status` to `ACTIVE`; "reject" must set `vendor.status = REJECTED` and optionally delete or suspend the `VendorUser`.
+
+Related files:
+
+`apps/api/src/modules/vendor-auth/vendor-auth.service.ts`, `database/migrations/001_initial_schema.sql`
+
+---
+
+### 2026-05-17 - Verification/Reset Tokens Stored as SHA-256 Hashes Only
+
+Date: 2026-05-17
+
+Decision:
+
+Email verification tokens and password reset tokens are stored in the database as SHA-256 hex hashes of the raw 32-byte random token. The raw token is only present in the outbound email.
+
+Context:
+
+If the database is compromised, stored tokens must not be directly usable to take over accounts.
+
+Options considered:
+
+1. Store raw token (simple, common in low-security apps).
+2. Store SHA-256(token). No bcrypt needed — token is already high entropy (256 bits).
+3. Store bcrypt(token). Unnecessary CPU cost; tokens are already max entropy.
+
+Outcome:
+
+Option 2. `crypto.randomBytes(32).toString('hex')` generates the raw token; `createHash('sha256').update(raw).digest('hex')` is stored. Lookup is by exact hash match.
+
+Impact:
+
+Any future token table must follow this pattern. Do not store raw tokens.
+
+Related files:
+
+`apps/api/src/modules/vendor-auth/vendor-auth.service.ts` (`newToken()`/`hashToken()` helpers)
+
+---
+
 ### 2026-05-17 - ORM: Prisma Selected Over TypeORM
 
 Date: 2026-05-17
