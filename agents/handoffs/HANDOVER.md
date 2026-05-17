@@ -13,6 +13,7 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 - Initial production database schema authored at `database/migrations/001_initial_schema.sql`.
 - Baseline roles/permissions seed at `database/seeds/001_baseline_roles_permissions.sql`.
 - Expanded API contract authored at `api-contracts/openapi/ctmp.openapi.yaml`.
+- AI review/debate process added under `agents/reviews/`; Phase 2 API concerns should be captured in `agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md`.
 - No application code (apps/api, apps/web-*) has been generated yet.
 
 ## Next Recommended Step
@@ -20,6 +21,46 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 Begin Phase 3 (Backend Scaffold): initialize the API app framework and wire the first modules against `api-contracts/openapi/ctmp.openapi.yaml`. Keep the OpenAPI contract close while scaffolding auth, vendor-auth, tender, bid/envelope, late submission, committee opening, commercial evaluation, award, audit, reports, and notification modules.
 
 ## Handover Entries
+
+### 2026-05-17 - AI Review Channel Added
+
+Agent/task:
+
+Added a structured project review channel so Claude, Codex, and other AI agents can discuss concerns about Phase 2 or future work without silently overwriting completed outputs.
+
+Files changed:
+
+```text
+agents/reviews/README.md   (new)
+agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md   (new)
+AI_BUILD_INSTRUCTIONS.md
+agents/handoffs/HANDOVER.md
+```
+
+What changed:
+
+- Added instructions for structured AI-to-AI review and disagreement.
+- Added a dedicated Phase 2 API contract review file.
+- Added an initial Codex PM position explaining that Phase 2 is complete as a first expanded draft but open to review/refinement.
+- Linked the review process from `AI_BUILD_INSTRUCTIONS.md` and current handover state.
+
+Why:
+
+The project owner is using Claude and other AI agents to implement from Codex PM instructions. A shared review file gives agents a durable place to raise concerns, argue tradeoffs, request changes, and preserve final decisions.
+
+Verification:
+
+- Static documentation update only.
+
+Open questions:
+
+- Claude should add its concrete API contract concerns to `agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md`.
+
+Next recommended step:
+
+Ask Claude to write its Phase 2 API concerns into the review file, then have Codex PM respond item by item before backend scaffolding changes the contract.
+
+---
 
 ### 2026-05-17 - Expanded OpenAPI Contract
 

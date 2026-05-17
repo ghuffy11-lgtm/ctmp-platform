@@ -40,6 +40,18 @@ For every task:
 7. Add decisions to `docs/decisions/DECISION_LOG.md` if any architecture or business choice was made.
 8. Add reusable lessons to `agents/skills/PROJECT_SKILLS.md` if the pattern will help future agents.
 
+## AI Review And Disagreement
+
+When an AI agent has concerns about another agent's output, do not silently overwrite the work or restart a completed phase.
+
+Use `agents/reviews/` for structured review and debate:
+
+- Read `agents/reviews/README.md`.
+- Add concerns to the relevant review file, or create a new one if needed.
+- For Phase 2 API contract concerns, use `agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md`.
+- Mark concerns as blocking, recommended, deferrable, or needing project owner decision.
+- Record final accepted decisions in `docs/decisions/DECISION_LOG.md`.
+
 ## Completion Rule
 
 A task is not complete until:
