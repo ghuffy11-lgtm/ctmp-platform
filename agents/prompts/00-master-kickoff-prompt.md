@@ -6,6 +6,7 @@ Your first action is to read these files:
 
 ```text
 START_HERE_FOR_AI_AGENTS.md
+agents/prompts/CODEX_PM_SELF_INSTRUCTIONS.md   (if acting as Codex PM/project manager)
 docs/specs/implementation-spec.md
 agents/backlog/MASTER_TASK_TRACKER.md
 agents/handoffs/HANDOVER.md

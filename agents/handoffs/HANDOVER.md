@@ -13,14 +13,55 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 - Initial production database schema authored at `database/migrations/001_initial_schema.sql`.
 - Baseline roles/permissions seed at `database/seeds/001_baseline_roles_permissions.sql`.
 - Expanded API contract authored at `api-contracts/openapi/ctmp.openapi.yaml`.
+- Accepted Phase 2 API contract correction patch applied.
 - AI review/debate process added under `agents/reviews/`; Phase 2 API concerns should be captured in `agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md`.
+- Codex PM session recovery instructions added at `agents/prompts/CODEX_PM_SELF_INSTRUCTIONS.md`.
 - No application code (apps/api, apps/web-*) has been generated yet.
 
 ## Next Recommended Step
 
-Apply the accepted Phase 2 API contract correction patch from `agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md`, then begin Phase 3 (Backend Scaffold). The correction patch should address auth refresh/MFA security overrides, missing vendor login, TenderStatus enum alignment, PATCH request semantics, commercial opening checksum semantics, explicit award bid selection, document download routes, and report export job routes.
+Begin Phase 3 (Backend Scaffold). Start with `Initialize API app framework` per `MASTER_TASK_TRACKER.md`, using the corrected `api-contracts/openapi/ctmp.openapi.yaml` as the contract baseline.
 
 ## Handover Entries
+
+### 2026-05-17 - Codex PM Session Recovery Instructions Added
+
+Agent/task:
+
+Created persistent self-instructions so Codex can resume as project manager after a lost or new session.
+
+Files changed:
+
+```text
+agents/prompts/CODEX_PM_SELF_INSTRUCTIONS.md   (new)
+START_HERE_FOR_AI_AGENTS.md
+agents/prompts/00-master-kickoff-prompt.md
+agents/handoffs/HANDOVER.md
+```
+
+What changed:
+
+- Added Codex PM role definition, startup reading order, current phase state, remote server development context, non-negotiable guardrails, and Claude-management workflow.
+- Updated `START_HERE_FOR_AI_AGENTS.md` so the current recommended next task is no longer the completed database migration.
+- Linked the PM self-instructions from the master kickoff prompt and handover.
+
+Why:
+
+The project owner is coordinating Claude and other AI agents from Codex PM instructions. A persistent recovery file prevents future sessions from losing context or accidentally acting as an implementation agent.
+
+Verification:
+
+- Static documentation update only.
+
+Open questions:
+
+- None.
+
+Next recommended step:
+
+Use `agents/prompts/CODEX_PM_SELF_INSTRUCTIONS.md` as the first recovery file in any new Codex PM session. Continue with Phase 3 backend scaffold.
+
+---
 
 ### 2026-05-17 - Phase 2 API Contract Correction Patch Applied
 
@@ -68,7 +109,6 @@ Open questions:
 Next recommended step:
 
 Phase 3 backend scaffold is now unblocked. Begin with `Initialize API app framework` per `MASTER_TASK_TRACKER.md`.
-
 ---
 
 ### 2026-05-17 - Codex PM Response To Claude API Review

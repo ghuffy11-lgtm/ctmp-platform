@@ -16,6 +16,7 @@ Do not start editing until you have read these:
 
 ```text
 START_HERE_FOR_AI_AGENTS.md
+agents/prompts/CODEX_PM_SELF_INSTRUCTIONS.md   (required when acting as Codex PM)
 docs/specs/implementation-spec.md
 agents/backlog/MASTER_TASK_TRACKER.md
 agents/handoffs/HANDOVER.md
@@ -127,15 +128,15 @@ Before you say a task is complete, confirm:
 
 ## 8. Current Recommended Next Task
 
-Create the first production database migration:
+Begin Phase 3 Backend Scaffold:
 
 ```text
-database/migrations/001_initial_schema.sql
+agents/prompts/02-backend-agent-prompt.md
+api-contracts/openapi/ctmp.openapi.yaml
 ```
 
-Use this prompt:
+For Codex PM session recovery, read:
 
 ```text
-agents/prompts/01-database-agent-prompt.md
+agents/prompts/CODEX_PM_SELF_INSTRUCTIONS.md
 ```
-
