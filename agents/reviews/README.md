@@ -1,49 +1,49 @@
-# Agent Reviews
+# AI Review And Debate Instructions
 
-This directory holds structured review documents produced by AI agents during phase transitions.
-Human reviewers (Codex PM, tech leads) respond directly in the review file before the next phase begins.
+Use this folder when one AI agent has concerns about another agent's plan, contract, schema, implementation, security control, deployment approach, or acceptance criteria.
 
----
+The goal is constructive technical disagreement that leaves a clear decision trail for the project owner.
 
-## Review Entry Format
+## Review Rules
 
-Each concern must follow this template exactly:
+1. Read the source files before commenting.
+2. Quote exact file paths and section names where possible.
+3. Separate facts, assumptions, risks, and recommendations.
+4. Do not rewrite another agent's position.
+5. Add a new dated entry under the relevant discussion thread.
+6. Keep commercial-envelope, audit, late-submission, and vendor-registration guardrails stronger or equal to the current design.
+7. If an issue changes scope, permissions, API shape, database schema, deployment, or security posture, record the final decision in `docs/decisions/DECISION_LOG.md`.
+8. If the debate produces a concrete task, add it to `agents/backlog/MASTER_TASK_TRACKER.md`.
+9. If implementation state changes, add a handover entry to `agents/handoffs/HANDOVER.md`.
 
+## Entry Format
+
+```text
+### YYYY-MM-DD HH:mm - Agent Name - Position
+
+Topic:
+Files reviewed:
+Concern or proposal:
+Reasoning:
+Recommended change:
+Impact if accepted:
+Impact if rejected:
+Status:
 ```
-### [REVIEW-XXX] Short title
 
-**Location:** file path and line range (or "global" / "schema" / "auth flow")
-**Raised by:** agent name or initials, date
-**Status:** <see labels below>
+Status values:
 
-**Observation:**
-What was found. Facts only — no editorial. Quote the relevant YAML/SQL/code inline.
-
-**Risk if unresolved:**
-What breaks, who is affected, when does it matter.
-
-**Proposed resolution:**
-Concrete fix or question that must be answered before the status can change.
-
-**PM/Owner response:** _(leave blank — PM fills this in)_
+```text
+OPEN
+ACCEPTED
+REJECTED
+NEEDS_OWNER_DECISION
+SUPERSEDED
+IMPLEMENTED
 ```
 
----
+## Decision Discipline
 
-## Status Labels
+Use the review file for debate. Use `docs/decisions/DECISION_LOG.md` for final accepted decisions.
 
-| Label | Meaning |
-|-------|---------|
-| `BLOCKING` | Must be resolved before backend scaffold begins. Proceeding without a decision will produce conflicting code. |
-| `RECOMMENDED` | Should be resolved before backend scaffold. Can proceed with a documented assumption, but the assumption may cost rework. |
-| `REFINE-IN-IMPL` | Contract intent is clear enough to start coding. Exact shape can be tightened during backend implementation without breaking other phases. |
-| `NEEDS-PM-DECISION` | Cannot be resolved by inspection alone. Requires a business or architecture decision from the project owner. |
-| `RESOLVED` | PM or owner has responded and a clear path is recorded. |
-
----
-
-## Review Document Naming
-
-`PHASE_<N>_<AREA>_REVIEW.md`
-
-Example: `PHASE_2_API_CONTRACT_REVIEW.md`
+If two agents disagree and the answer affects compliance, permissions, commercial visibility, auditability, or deployment security, mark the review item `NEEDS_OWNER_DECISION` and ask the project owner before changing implementation files.
