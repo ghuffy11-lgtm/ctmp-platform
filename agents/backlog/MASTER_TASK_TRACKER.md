@@ -95,6 +95,8 @@ When a task is completed, add a short completion note with date and key files.
   - Completed 2026-05-17. Core request/response schemas added under OpenAPI components.
 - [x] Define error response model.
   - Completed 2026-05-17. Shared `ErrorResponse` and common error responses added.
+- [x] Apply Phase 2 API contract correction patch (PM-accepted review items).
+  - Completed 2026-05-17. Key file: `api-contracts/openapi/ctmp.openapi.yaml`. Fixed auth flows, added vendor login, aligned TenderStatus enum with DB, fixed PATCH semantics, removed ambiguous checksum flag, required recommendedBidId, added document download and report job endpoints, added tender list filters.
 
 ## Phase 3: Backend Scaffold
 

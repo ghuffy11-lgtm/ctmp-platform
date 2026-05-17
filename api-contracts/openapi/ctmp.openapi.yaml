@@ -59,6 +59,7 @@ paths:
     post:
       tags: [Auth]
       summary: Refresh an access token
+      security: []
       requestBody:
         required: true
         content:
@@ -76,6 +77,7 @@ paths:
     post:
       tags: [Auth]
       summary: Verify internal MFA challenge
+      security: []
       requestBody:
         required: true
         content:
@@ -114,6 +116,32 @@ paths:
                 $ref: '#/components/schemas/VendorRegistrationAccepted'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /vendor-auth/login:
+    post:
+      tags: [Vendor Auth]
+      summary: Vendor user login
+      description: >
+        Authenticates vendor users by email and password. Returns an access
+        token or, when MFA is enabled for the account, a challengeId for use
+        with POST /vendor-auth/mfa/verify.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorLoginRequest'
+      responses:
+        '200':
+          description: Login succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/RateLimited'
   /vendor-auth/verify-email:
@@ -191,6 +219,26 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/TenderStatus'
+        - name: departmentId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: visibility
+          in: query
+          schema:
+            type: string
+            enum: [PUBLIC, INVITATION_ONLY]
+        - name: submissionDeadlineBefore
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: submissionDeadlineAfter
+          in: query
+          schema:
+            type: string
+            format: date-time
       responses:
         '200':
           description: Tender list.
@@ -250,6 +298,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Tender'
+  /tenders/{tenderId}/documents/{documentId}:
+    get:
+      tags: [Tenders]
+      summary: Download a tender document
+      description: >
+        Streams the requested tender document. Respects tender visibility and
+        document-level visibility. Sensitive internal documents are audit logged
+        on access.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Document file stream.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /tenders/{tenderId}/submit-for-approval:
     post:
       tags: [Tenders]
@@ -472,6 +545,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/BidSubmissionReceipt'
 
+  /bids/{bidId}/documents/{documentId}:
+    get:
+      tags: [Bids]
+      summary: Download a bid document
+      description: >
+        Streams the requested bid document. Technical documents require
+        technical:view and the technical envelope to be OPENED. Commercial
+        documents require the commercial envelope to be OPENED plus
+        commercial:download permission. Every commercial document download is
+        audit logged. No generic /files/{id}/download route exists — all
+        downloads go through this endpoint so permission and state checks
+        are always enforced.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BidId'
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Document file stream.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /tenders/{tenderId}/late-submission-exceptions:
     parameters:
       - $ref: '#/components/parameters/TenderId'
@@ -844,6 +946,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/ReportExportJob'
 
+  /reports/jobs/{jobId}:
+    get:
+      tags: [Reports]
+      summary: Get report export job status
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Export job status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportExportJob'
+  /reports/jobs/{jobId}/download:
+    get:
+      tags: [Reports]
+      summary: Download completed report export
+      description: >
+        Streams the completed export file. Requires reports:export. Commercial
+        report downloads additionally require commercial:export. Every download
+        is audit logged.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Export file stream.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -874,6 +1014,20 @@ components:
         format: uuid
     SessionId:
       name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DocumentId:
+      name: documentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    JobId:
+      name: jobId
       in: path
       required: true
       schema:
@@ -925,6 +1079,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
   schemas:
     ErrorResponse:
       type: object
@@ -944,6 +1104,16 @@ components:
               additionalProperties: true
             traceId:
               type: string
+    VendorLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
     LoginRequest:
       type: object
       required: [username, password]
@@ -1041,23 +1211,23 @@ components:
     TenderStatus:
       type: string
       enum:
-        - Draft
-        - Internal Review
-        - Approved
-        - Published
-        - Clarification Period
-        - Submission Closed
-        - Technical Opening
-        - Technical Evaluation
-        - Commercial Sealed
-        - Committee Commercial Opening
-        - Commercial Evaluation / Comparison
-        - Award Recommendation
-        - Awarded
-        - Tender Closed
-        - Cancelled
-        - Suspended
-        - Archived
+        - DRAFT
+        - INTERNAL_REVIEW
+        - APPROVED
+        - PUBLISHED
+        - CLARIFICATION_PERIOD
+        - SUBMISSION_CLOSED
+        - TECHNICAL_OPENING
+        - TECHNICAL_EVALUATION
+        - COMMERCIAL_SEALED
+        - COMMITTEE_COMMERCIAL_OPENING
+        - COMMERCIAL_EVALUATION
+        - AWARD_RECOMMENDATION
+        - AWARDED
+        - TENDER_CLOSED
+        - CANCELLED
+        - SUSPENDED
+        - ARCHIVED
     EnvelopeType:
       type: string
       enum: [TECHNICAL, COMMERCIAL]
@@ -1123,8 +1293,27 @@ components:
             type: string
             format: uuid
     TenderUpdateRequest:
-      allOf:
-        - $ref: '#/components/schemas/TenderCreateRequest'
+      type: object
+      description: All fields optional for partial update (PATCH semantics).
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        visibility:
+          type: string
+          enum: [PUBLIC, INVITATION_ONLY]
+        departmentId:
+          type: string
+          format: uuid
+        submissionDeadline:
+          type: string
+          format: date-time
+        invitedVendorIds:
+          type: array
+          items:
+            type: string
+            format: uuid
     TenderListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginatedResponse'
@@ -1452,8 +1641,6 @@ components:
       properties:
         remarks:
           type: string
-        confirmChecksumVerification:
-          type: boolean
     CommercialOpeningResult:
       type: object
       required: [sessionId, openedEnvelopeCount, records]
@@ -1568,7 +1755,7 @@ components:
           type: string
     AwardRecommendationRequest:
       type: object
-      required: [recommendedVendorId, reason]
+      required: [recommendedVendorId, recommendedBidId, reason]
       properties:
         recommendedVendorId:
           type: string

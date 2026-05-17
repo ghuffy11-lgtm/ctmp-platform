@@ -22,6 +22,55 @@ Apply the accepted Phase 2 API contract correction patch from `agents/reviews/PH
 
 ## Handover Entries
 
+### 2026-05-17 - Phase 2 API Contract Correction Patch Applied
+
+Agent/task:
+
+Applied all PM-accepted corrections from `agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md` to the OpenAPI contract.
+
+Files changed:
+
+```text
+api-contracts/openapi/ctmp.openapi.yaml
+agents/backlog/MASTER_TASK_TRACKER.md
+agents/handoffs/HANDOVER.md
+agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md
+```
+
+What changed:
+
+- `/auth/refresh` and `/auth/mfa/verify`: added `security: []` — both were incorrectly inheriting global `bearerAuth`.
+- Added `POST /vendor-auth/login` with `security: []` and `VendorLoginRequest` schema — vendors had no login endpoint.
+- Added `GET /tenders/{tenderId}/documents/{documentId}` — tender document download with visibility and audit rules.
+- Added `GET /bids/{bidId}/documents/{documentId}` — bid document download; commercial documents require envelope OPENED + `commercial:download`; every commercial download is audit logged.
+- Added `GET /reports/jobs/{jobId}` and `GET /reports/jobs/{jobId}/download` — report export job polling and result download with `reports:export` + `commercial:export` requirements.
+- Added `departmentId`, `visibility`, `submissionDeadlineBefore`, `submissionDeadlineAfter` query params to `GET /tenders`.
+- Added `DocumentId` and `JobId` path parameters to `components.parameters`.
+- Added `NotFound` shared response to `components.responses`.
+- `TenderStatus` enum: converted 17 values from human-readable strings to `SCREAMING_SNAKE_CASE`, matching `database/migrations/001_initial_schema.sql` exactly.
+- `TenderUpdateRequest`: replaced `allOf: [TenderCreateRequest]` with standalone partial schema — no required fields (correct PATCH semantics).
+- `CommercialOpeningRequest`: removed `confirmChecksumVerification` — server always verifies; result is already in `CommercialOpeningRecord.checksumVerified`.
+- `AwardRecommendationRequest`: added `recommendedBidId` to required array.
+
+Why:
+
+PM reviewed and accepted all blocking/recommended concerns. Contract had authentication-flow errors (infinite logout loop risk), missing vendor login, enum divergence from DB, and missing download/export routes.
+
+Verification:
+
+- Static review only. `security: []` confirmed on 9 public endpoints. `TenderStatus` confirmed as 17 SCREAMING_SNAKE_CASE values matching DB migration. `VendorLoginRequest` referenced by `/vendor-auth/login`. `NotFound` response referenced by both download endpoints. `confirmChecksumVerification` confirmed absent.
+- No OpenAPI validator available in this environment. First Phase 3 task should run `npx @stoplight/spectral-cli lint api-contracts/openapi/ctmp.openapi.yaml`.
+
+Open questions:
+
+- Multipart `EnvelopeUploadRequest` encoding deferred to Phase 3 (NestJS file upload tooling selection).
+
+Next recommended step:
+
+Phase 3 backend scaffold is now unblocked. Begin with `Initialize API app framework` per `MASTER_TASK_TRACKER.md`.
+
+---
+
 ### 2026-05-17 - Codex PM Response To Claude API Review
 
 Agent/task:

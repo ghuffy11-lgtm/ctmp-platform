@@ -114,7 +114,7 @@ Backend agents would need undocumented carve-outs or would invent endpoints outs
 
 Status:
 
-ACCEPTED - create a focused OpenAPI correction patch before Phase 3 backend scaffold.
+IMPLEMENTED - correction patch applied 2026-05-17.
 
 ---
 
@@ -171,7 +171,7 @@ OPEN
 
 Topic:
 
-`/auth/refresh` inherits global `bearerAuth` — endpoint should be unauthenticated.
+[IMPLEMENTED 2026-05-17] `/auth/refresh` inherits global `bearerAuth` — endpoint should be unauthenticated.
 
 Files reviewed:
 
@@ -201,7 +201,7 @@ Backend will silently deviate from the contract. Frontend auth interceptor must 
 
 Status:
 
-OPEN — blocking backend scaffold
+IMPLEMENTED
 
 ---
 
@@ -239,7 +239,7 @@ Internal users with MFA enabled cannot log in. Backend must add an undocumented 
 
 Status:
 
-OPEN — blocking backend scaffold
+IMPLEMENTED
 
 ---
 
@@ -277,7 +277,7 @@ Phase 3 must invent the endpoint independently and it will not appear in the con
 
 Status:
 
-OPEN — blocking backend scaffold
+IMPLEMENTED
 
 ---
 
@@ -323,7 +323,7 @@ Backend and frontend must handle two enum conventions. The `/` value requires sp
 
 Status:
 
-OPEN — blocking backend scaffold
+IMPLEMENTED
 
 ---
 
@@ -367,7 +367,7 @@ Frontend must always send all three fields on any edit, or backend must silently
 
 Status:
 
-OPEN — recommended before backend scaffold
+IMPLEMENTED
 
 ---
 
@@ -415,7 +415,7 @@ Backend implementation defines the behavior; the contract remains ambiguous on a
 
 Status:
 
-OPEN — needs project owner decision
+IMPLEMENTED
 
 ---
 
@@ -454,7 +454,7 @@ Backend must infer the bid — safe only if alternative bids are definitively ou
 
 Status:
 
-OPEN — needs project owner decision
+IMPLEMENTED
 
 ---
 
@@ -498,7 +498,7 @@ Phase 3 invents download endpoints without a contract target. Commercial downloa
 
 Status:
 
-OPEN — needs project owner decision
+IMPLEMENTED
 
 ---
 
@@ -532,7 +532,7 @@ Phase 3 invents these endpoints without a contract target, risking permission ga
 
 Status:
 
-OPEN — recommended before backend scaffold
+IMPLEMENTED
 
 ---
 
@@ -566,7 +566,7 @@ Phase 4 admin portal and Phase 5 vendor portal will need to load all tenders and
 
 Status:
 
-OPEN — can be refined during backend implementation
+DEFER — refine during Phase 3 implementation
 
 ---
 
@@ -612,7 +612,7 @@ Low risk until Phase 3 integration. Surface during implementation.
 
 Status:
 
-OPEN — can be refined during backend implementation
+DEFER — refine during Phase 3 implementation
 
 ## Resolved Threads
 
