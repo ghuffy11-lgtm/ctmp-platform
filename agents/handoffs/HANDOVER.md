@@ -18,9 +18,48 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ## Next Recommended Step
 
-Begin Phase 3 (Backend Scaffold): initialize the API app framework and wire the first modules against `api-contracts/openapi/ctmp.openapi.yaml`. Keep the OpenAPI contract close while scaffolding auth, vendor-auth, tender, bid/envelope, late submission, committee opening, commercial evaluation, award, audit, reports, and notification modules.
+Apply the accepted Phase 2 API contract correction patch from `agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md`, then begin Phase 3 (Backend Scaffold). The correction patch should address auth refresh/MFA security overrides, missing vendor login, TenderStatus enum alignment, PATCH request semantics, commercial opening checksum semantics, explicit award bid selection, document download routes, and report export job routes.
 
 ## Handover Entries
+
+### 2026-05-17 - Codex PM Response To Claude API Review
+
+Agent/task:
+
+Reviewed Claude's Phase 2 API contract concerns and added a consolidated Codex PM response.
+
+Files changed:
+
+```text
+agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md
+agents/handoffs/HANDOVER.md
+```
+
+What changed:
+
+- Accepted Claude's blocking concerns for `/auth/refresh`, `/auth/mfa/verify`, missing `/vendor-auth/login`, `TenderStatus` enum mismatch, and `TenderUpdateRequest` PATCH semantics.
+- Made PM calls on ambiguous items: checksum verification is mandatory server-side and should not depend on an optional request flag; award recommendation should require explicit `recommendedBidId`; MVP file serving should use explicit API streaming proxy endpoints so permission checks and audit logging happen on every download.
+- Accepted report export job status/download routes.
+- Deferred tender list filters and multipart upload encoding to backend implementation unless included in the same contract patch.
+
+Why:
+
+Backend scaffolding should not begin from a contract with known authentication-flow and enum/schema issues. Fixing the contract now reduces drift between API, frontend, database, and security/audit expectations.
+
+Verification:
+
+- Checked `database/migrations/001_initial_schema.sql`; `tender_status` already uses `SCREAMING_SNAKE_CASE`.
+- Reviewed Claude's entries against the OpenAPI contract and implementation spec.
+
+Open questions:
+
+- None requiring owner decision at this stage; Codex PM accepted the safer compliance-preserving interpretations.
+
+Next recommended step:
+
+Ask Claude to apply a focused OpenAPI correction patch based on the accepted items in `agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md`, then update tracker/handover.
+
+---
 
 ### 2026-05-17 - AI Review Channel Added
 
