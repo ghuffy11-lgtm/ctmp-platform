@@ -18,6 +18,66 @@ Related files:
 
 ## Decisions
 
+### 2026-05-17 - ORM: Prisma Selected Over TypeORM
+
+Date: 2026-05-17
+
+Decision:
+
+Prisma v6 selected as the ORM for `apps/api`. TypeORM was the main alternative.
+
+Context:
+
+Phase 3 scaffold required selecting an ORM before adding the database connection module. Both are first-class NestJS options.
+
+Options considered:
+
+1. **TypeORM** — Decorator-based, ships with `@nestjs/typeorm`. Closer to SQL. Rougher migration tooling historically; generated migrations are sometimes incomplete for complex schemas. More boilerplate for complex relations.
+2. **Prisma v6** — Schema-first (`schema.prisma`). Generates a fully-typed client. `prisma migrate` produces clean, reviewable SQL diffs. Strong N+1 protection via `include`/`select`. Better DX for maintainability of a long-running enterprise system.
+
+Outcome:
+
+Prisma v6 adopted. Schema at `apps/api/prisma/schema.prisma` (33 models, 17+ enums). Client generated via `prisma generate`. Migration workflow: `prisma migrate dev` for development, `prisma migrate deploy` for on-prem production.
+
+Impact:
+
+- All service code uses `PrismaService` (extends `PrismaClient`) injected from `DatabaseModule` (global).
+- Database schema changes require a new Prisma migration file, not TypeORM `synchronize`.
+- SHA-256 hash format is enforced at DB layer (CHECK constraint in migration 002); Prisma passes values through without transformation — application must produce lowercase hex.
+- `prisma generate` must be run after any `schema.prisma` change before TypeScript compilation.
+
+Related files:
+
+`apps/api/prisma/schema.prisma`, `apps/api/src/database/prisma.service.ts`, `apps/api/src/database/database.module.ts`
+
+---
+
+### 2026-05-17 - Spectral OAS Lint: 0 Errors, 71 Warnings (operationId missing)
+
+Date: 2026-05-17
+
+Decision:
+
+Spectral lint run on `api-contracts/openapi/ctmp.openapi.yaml` as first Phase 3 task. Result: 0 errors, 71 warnings. Warnings deferred.
+
+Context:
+
+71 warnings are all `operation-operationId` (every endpoint missing `operationId`) plus 1 unused component (`VendorStatus`). No structural or semantic errors. Contract is valid for Phase 3 implementation.
+
+Outcome:
+
+`operationId` population deferred to a dedicated API annotation pass. Controllers in Phase 3 scaffold already include `operationId` values in `@ApiOperation()` decorators — the OpenAPI YAML file itself is the backlog item.
+
+Impact:
+
+`operationId` values in YAML must match the controller decorator values when the annotation pass happens.
+
+Related files:
+
+`api-contracts/openapi/ctmp.openapi.yaml`, `ctmp-platform/.spectral.yaml`
+
+---
+
 ### 2026-05-17 - SHA-256 Hex Format Enforced At Database Layer
 
 Decision:

@@ -6,24 +6,120 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ## Current Project State
 
-- Dev environment fully provisioned. Phase 3 scaffold is unblocked and ready to start.
-- Workspace scaffold created under `ctmp-platform/`.
-- Final implementation spec copied into `docs/specs/implementation-spec.md`.
-- Original implementation spec also copied as `CTMP_Implementation_Spec.md`.
-- Agent guidance, build sequence, and ownership docs created.
-- Initial production database schema authored at `database/migrations/001_initial_schema.sql`.
-- Baseline roles/permissions seed at `database/seeds/001_baseline_roles_permissions.sql`.
-- Expanded API contract authored at `api-contracts/openapi/ctmp.openapi.yaml`.
-- Accepted Phase 2 API contract correction patch applied.
-- AI review/debate process added under `agents/reviews/`; Phase 2 API concerns should be captured in `agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md`.
-- Codex PM session recovery instructions added at `agents/prompts/CODEX_PM_SELF_INSTRUCTIONS.md`.
-- No application code (apps/api, apps/web-*) has been generated yet.
+- **Phase 3 Backend Scaffold COMPLETE.** All 18 tasks done.
+- NestJS v11 app fully scaffolded at `apps/api/`. pnpm workspace configured.
+- Prisma v6 selected as ORM. Schema: 33 models, 17+ enums. Client generated.
+- All 16 domain modules scaffolded with stubs: auth, vendor-auth, users, roles, permissions, vendors, tenders, clarifications, bids, late-submissions, technical-evaluation, committee, commercial-evaluation, award, audit, notifications, reports.
+- Common guards (`JwtAuthGuard`, `VendorJwtAuthGuard`, `PermissionsGuard`), decorators (`@CurrentUser`, `@RequirePermissions`, `@Public`), interceptor (`AuditLogInterceptor`), and global exception filter wired.
+- `packages/shared-types` stub created with domain enums.
+- 842 packages installed via pnpm. bcrypt native bindings compiled.
+- Spectral lint: 0 errors, 71 warnings (all `operationId` missing in YAML — deferred to annotation pass).
+- No implementation logic exists yet — all service methods throw `Error('Not implemented')`.
 
 ## Next Recommended Step
 
-Begin Phase 3 (Backend Scaffold). Start with `Initialize API app framework` per `MASTER_TASK_TRACKER.md`, using the corrected `api-contracts/openapi/ctmp.openapi.yaml` as the contract baseline.
+**Phase 3 implementation** — fill in the stub service methods module by module, starting with:
+1. `auth` service — AD bind via ldapts, JWT issue.
+2. `vendor-auth` service — bcrypt, email verify, CAPTCHA validation.
+3. `users`/`roles`/`permissions` services — Prisma queries.
+4. Then domain modules in lifecycle order: tenders → bids → evaluations → award.
+
+Or start **Phase 4 (Admin Portal)** if backend implementation is deferred to a later sprint.
+
+ORM decision is recorded in `docs/decisions/DECISION_LOG.md`.
 
 ## Handover Entries
+
+### 2026-05-17 - Phase 3 Backend Scaffold Complete
+
+Agent/task:
+
+Full Phase 3 NestJS backend scaffold.
+
+Files changed:
+
+```text
+apps/api/package.json
+apps/api/tsconfig.json
+apps/api/tsconfig.build.json
+apps/api/nest-cli.json
+apps/api/.eslintrc.js
+apps/api/.prettierrc
+apps/api/.env.example
+apps/api/src/main.ts
+apps/api/src/app.module.ts
+apps/api/src/app.controller.ts
+apps/api/src/app.service.ts
+apps/api/src/config/app.config.ts
+apps/api/src/config/database.config.ts
+apps/api/src/config/jwt.config.ts
+apps/api/src/config/ad.config.ts
+apps/api/src/database/database.module.ts
+apps/api/src/database/prisma.service.ts
+apps/api/src/common/decorators/current-user.decorator.ts
+apps/api/src/common/decorators/permissions.decorator.ts
+apps/api/src/common/decorators/public.decorator.ts
+apps/api/src/common/guards/jwt-auth.guard.ts
+apps/api/src/common/guards/vendor-jwt.guard.ts
+apps/api/src/common/guards/permissions.guard.ts
+apps/api/src/common/filters/global-exception.filter.ts
+apps/api/src/common/interceptors/audit-log.interceptor.ts
+apps/api/src/modules/auth/** (module, controller, service, 2 strategies, 3 DTOs)
+apps/api/src/modules/vendor-auth/** (module, controller, service, 1 strategy, 6 DTOs)
+apps/api/src/modules/users/** (module, controller, service, 2 DTOs)
+apps/api/src/modules/roles/** (module, controller, service)
+apps/api/src/modules/permissions/** (module, controller, service)
+apps/api/src/modules/vendors/** (module, controller, service, 1 DTO)
+apps/api/src/modules/tenders/** (module, controller, service, 3 DTOs)
+apps/api/src/modules/clarifications/** (module, controller, service, 2 DTOs)
+apps/api/src/modules/bids/** (module, controller, service, 1 DTO)
+apps/api/src/modules/late-submissions/** (module, controller, service, 1 DTO)
+apps/api/src/modules/technical-evaluation/** (module, controller, service, 1 DTO)
+apps/api/src/modules/committee/** (module, controller, service, 2 DTOs)
+apps/api/src/modules/commercial-evaluation/** (module, controller, service, 1 DTO)
+apps/api/src/modules/award/** (module, controller, service, 2 DTOs)
+apps/api/src/modules/audit/** (module, controller, service, 1 DTO)
+apps/api/src/modules/notifications/** (module, service — no controller)
+apps/api/src/modules/reports/** (module, controller, service, 1 DTO)
+apps/api/prisma/schema.prisma (33 models, 17+ enums)
+packages/shared-types/package.json
+packages/shared-types/src/index.ts + 4 enum files
+package.json (workspace root)
+pnpm-workspace.yaml
+.spectral.yaml
+.spectral.js (removed)
+agents/backlog/MASTER_TASK_TRACKER.md
+agents/handoffs/HANDOVER.md
+docs/decisions/DECISION_LOG.md
+```
+
+What changed:
+
+Complete NestJS v11 backend scaffold for all Phase 3 tasks. pnpm workspace with `apps/*` and `packages/*`. Prisma v6 ORM with full schema. All 16 domain modules as stubs. Common auth infrastructure (guards, decorators, interceptors, filter). `.env.example` template. Spectral lint verified 0 errors on OpenAPI contract.
+
+Why:
+
+Phase 3 backbone required to begin implementing business logic in Phase 3 implementation sprints.
+
+Verification:
+
+- `pnpm install` → 842 packages, Done in 22s
+- `prisma generate` → Prisma Client (v6.19.3) generated successfully
+- `spectral lint api-contracts/openapi/ctmp.openapi.yaml` → 0 errors, 71 warnings (operationId missing in YAML — all controllers have operationId in @ApiOperation decorators)
+
+Open questions:
+
+- operationId values in `ctmp.openapi.yaml` need population to match controller @ApiOperation operationId values (deferred annotation pass)
+- AD/LDAP implementation requires access to the customer's Active Directory server config
+- CAPTCHA provider needs confirmation (Google reCAPTCHA v3 assumed in `.env.example`; could switch to hCaptcha)
+- SMTP server details needed for notification module testing
+- File storage strategy (local filesystem vs S3-compatible) undecided — will affect bid document upload implementation
+
+Next recommended step:
+
+Phase 3 implementation: start with `auth` service (AD bind) + `vendor-auth` service (bcrypt + email). Or begin Phase 4 (Admin Portal) if backend implementation is deferred.
+
+
 
 ### 2026-05-17 - Dev Environment Provisioned
 

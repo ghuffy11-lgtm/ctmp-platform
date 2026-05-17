@@ -1,0 +1,22 @@
+{
+  "name": "ctmp-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Corporate Tender Management Platform monorepo",
+  "scripts": {
+    "lint:api": "spectral lint api-contracts/openapi/ctmp.openapi.yaml",
+    "build:api": "pnpm --filter @ctmp/api build",
+    "start:api": "pnpm --filter @ctmp/api start",
+    "start:api:dev": "pnpm --filter @ctmp/api start:dev",
+    "db:generate": "pnpm --filter @ctmp/api db:generate",
+    "db:migrate": "pnpm --filter @ctmp/api db:migrate"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ghuffy11-lgtm/ctmp-platform.git"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "@stoplight/spectral-rulesets": "^1.22.2"
+  }
+}

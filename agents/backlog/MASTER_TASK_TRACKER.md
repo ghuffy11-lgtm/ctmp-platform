@@ -100,24 +100,42 @@ When a task is completed, add a short completion note with date and key files.
 
 ## Phase 3: Backend Scaffold
 
-- [ ] Initialize API app framework.
-- [ ] Add configuration module.
-- [ ] Add database connection/migration tooling.
-- [ ] Add auth module.
-- [ ] Add vendor-auth module with CAPTCHA and password reset.
-- [ ] Add users, roles, permissions modules.
-- [ ] Add vendor management module.
-- [ ] Add tender module.
-- [ ] Add clarification module.
-- [ ] Add bid/envelope module.
-- [ ] Add late submission exception module.
-- [ ] Add technical evaluation module.
-- [ ] Add committee commercial opening module.
-- [ ] Add commercial evaluation module.
-- [ ] Add award module.
-- [ ] Add audit module.
-- [ ] Add notification module.
-- [ ] Add reports module.
+- [x] Initialize API app framework.
+  - Completed 2026-05-17. NestJS v11 app scaffolded manually at `apps/api/`. pnpm workspace root configured with `pnpm-workspace.yaml`. All 842 packages installed. Key files: `apps/api/package.json`, `apps/api/tsconfig.json`, `apps/api/nest-cli.json`, `apps/api/src/main.ts`.
+- [x] Add configuration module.
+  - Completed 2026-05-17. Typed config factories for app, database, jwt, ad. Key files: `apps/api/src/config/`.
+- [x] Add database connection/migration tooling.
+  - Completed 2026-05-17. ORM: Prisma v6. Full schema generated from SQL migrations (33 models, 17+ enums). Prisma client generated. Key files: `apps/api/prisma/schema.prisma`, `apps/api/src/database/prisma.service.ts`, `apps/api/src/database/database.module.ts`.
+- [x] Add auth module.
+  - Completed 2026-05-17. JWT + AD strategy skeleton. Public/protected guards. Key files: `apps/api/src/modules/auth/`.
+- [x] Add vendor-auth module with CAPTCHA and password reset.
+  - Completed 2026-05-17. Vendor JWT strategy with separate secret. CAPTCHA, rate-limit, email-verify, MFA, password-reset stubs. Key files: `apps/api/src/modules/vendor-auth/`.
+- [x] Add users, roles, permissions modules.
+  - Completed 2026-05-17. RBAC-gated controllers with `RequirePermissions` decorator. `PermissionsService.getPermissionsForUser()` stub. Key files: `apps/api/src/modules/users/`, `apps/api/src/modules/roles/`, `apps/api/src/modules/permissions/`.
+- [x] Add vendor management module.
+  - Completed 2026-05-17. Registration approval/rejection flow, vendor profile management. Key files: `apps/api/src/modules/vendors/`.
+- [x] Add tender module.
+  - Completed 2026-05-17. Full lifecycle endpoints: create, update, submit-for-approval, publish, cancel, close-submissions, document download. Key files: `apps/api/src/modules/tenders/`.
+- [x] Add clarification module.
+  - Completed 2026-05-17. Vendor-scoped vs public reply visibility enforced in service TODOs. Key files: `apps/api/src/modules/clarifications/`.
+- [x] Add bid/envelope module.
+  - Completed 2026-05-17. Immutability guardrail documented in submit stub. Envelope-state + permission check documented for download. Key files: `apps/api/src/modules/bids/`.
+- [x] Add late submission exception module.
+  - Completed 2026-05-17. One active exception per (tender, vendor) enforced by DB. Key files: `apps/api/src/modules/late-submissions/`.
+- [x] Add technical evaluation module.
+  - Completed 2026-05-17. Open-only-after-Submission-Closed guardrail documented. Key files: `apps/api/src/modules/technical-evaluation/`.
+- [x] Add committee commercial opening module.
+  - Completed 2026-05-17. Only path to open commercial envelopes. Envelope-state-only change; visibility still requires explicit permissions. System Admin commercial exclusion noted. Key files: `apps/api/src/modules/committee/`.
+- [x] Add commercial evaluation module.
+  - Completed 2026-05-17. Gated by `commercial:view` and `commercial:evaluate` separately. Key files: `apps/api/src/modules/commercial-evaluation/`.
+- [x] Add award module.
+  - Completed 2026-05-17. Recommend → approve/reject → issue award lifecycle. Key files: `apps/api/src/modules/award/`.
+- [x] Add audit module.
+  - Completed 2026-05-17. Append-only `log()` method. System-wide + tender-scoped search. Key files: `apps/api/src/modules/audit/`.
+- [x] Add notification module.
+  - Completed 2026-05-17. Template-driven email via nodemailer. No controller (internal only). Key files: `apps/api/src/modules/notifications/`.
+- [x] Add reports module.
+  - Completed 2026-05-17. Async job pattern: enqueue → poll → download. Key files: `apps/api/src/modules/reports/`.
 
 ## Phase 4: Admin Portal
 
