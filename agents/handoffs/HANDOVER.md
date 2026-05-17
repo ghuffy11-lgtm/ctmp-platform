@@ -4,6 +4,32 @@ This is the live handover document for CTMP.
 
 Every agent must add the newest entry at the top. Do not remove previous entries.
 
+---
+
+## 2026-05-17 — Auth Service Implementation (TDD)
+
+**Date/time:** 2026-05-17
+**Agent/task:** Backend — implement AuthService (TDD cycle)
+**Files changed:**
+- `apps/api/src/modules/auth/auth.service.ts` — full implementation replacing stub
+- `apps/api/src/modules/auth/auth.service.spec.ts` — 20-test spec (RED then GREEN)
+- `database/migrations/003_auth_tokens.sql` — new migration: adds token_version + mfa_secret to users
+- `apps/api/prisma/schema.prisma` — User model: added mfaEnabled, mfaSecret, tokenVersion fields
+
+**What changed:** AuthService fully implemented and tested. Covers: `login` (AD bind via ldapts UPN, MFA gate, permissions-in-JWT), `logout` (tokenVersion increment for refresh revocation), `refresh` (version-based stale check), `verifyMfa` (TOTP via otplib v12 TOTP class, async verify), `validateUser`.
+
+**Why:** TDD cycle required: wrote 20 tests RED (18 failing), wrote minimal implementation, fixed three TS type issues (otplib TOTP API change in v12, JwtSignOptions.expiresIn brand type, ldapts url non-null), all 20 GREEN.
+
+**Verification:** `npx jest src/modules/auth/auth.service.spec.ts --no-coverage` → 20 passed, 0 failed.
+
+**Open questions:**
+- Remaining modules still have `throw new Error('Not implemented')` stubs — vendor-auth, users, roles, permissions, vendors, tenders, etc.
+- otplib TOTP requires a crypto plugin for production use — will need `@otplib/plugin-crypto` or configure with Node crypto adapter when running outside mocks.
+
+**Next recommended step:** Implement `VendorAuthService` (TDD) — vendor registration, email verify, login (email/password + bcrypt), password reset flow.
+
+---
+
 ## Current Project State
 
 - **Phase 3 Backend Scaffold COMPLETE.** All 18 tasks done.

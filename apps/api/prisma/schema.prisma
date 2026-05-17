@@ -257,11 +257,13 @@ model User {
   displayName  String       @map("display_name") @db.VarChar(255)
   authType     UserAuthType @default(AD) @map("auth_type")
   passwordHash String?      @map("password_hash") @db.Text
-  mfaEnabled   Boolean      @default(false) @map("mfa_enabled")
-  status       UserStatus   @default(ACTIVE)
-  lastLoginAt  DateTime?    @map("last_login_at")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @default(now()) @map("updated_at")
+  mfaEnabled    Boolean      @default(false) @map("mfa_enabled")
+  mfaSecret     String?      @map("mfa_secret") @db.Text
+  tokenVersion  Int          @default(0) @map("token_version")
+  status        UserStatus   @default(ACTIVE)
+  lastLoginAt   DateTime?    @map("last_login_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @default(now()) @map("updated_at")
 
   // Relations
   userDepartments         UserDepartment[]

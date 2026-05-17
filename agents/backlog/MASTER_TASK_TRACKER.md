@@ -108,6 +108,8 @@ When a task is completed, add a short completion note with date and key files.
   - Completed 2026-05-17. ORM: Prisma v6. Full schema generated from SQL migrations (33 models, 17+ enums). Prisma client generated. Key files: `apps/api/prisma/schema.prisma`, `apps/api/src/database/prisma.service.ts`, `apps/api/src/database/database.module.ts`.
 - [x] Add auth module.
   - Completed 2026-05-17. JWT + AD strategy skeleton. Public/protected guards. Key files: `apps/api/src/modules/auth/`.
+- [x] Implement auth service (TDD).
+  - Completed 2026-05-17. Full TDD cycle: 20 tests written RED, implementation written, all 20 GREEN. Covers login (AD bind, MFA gate, permissions in JWT), logout (tokenVersion increment), refresh (version-based revocation), verifyMfa (TOTP), validateUser. Migration 003 adds token_version + mfa_secret columns. Key files: `apps/api/src/modules/auth/auth.service.ts`, `apps/api/src/modules/auth/auth.service.spec.ts`, `database/migrations/003_auth_tokens.sql`, `apps/api/prisma/schema.prisma`.
 - [x] Add vendor-auth module with CAPTCHA and password reset.
   - Completed 2026-05-17. Vendor JWT strategy with separate secret. CAPTCHA, rate-limit, email-verify, MFA, password-reset stubs. Key files: `apps/api/src/modules/vendor-auth/`.
 - [x] Add users, roles, permissions modules.
