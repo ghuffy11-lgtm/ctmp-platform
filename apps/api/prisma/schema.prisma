@@ -440,6 +440,8 @@ model VendorUser {
   phone             String?     @db.VarChar(64)
   isPrimaryContact  Boolean     @default(false) @map("is_primary_contact")
   mfaEnabled        Boolean     @default(false) @map("mfa_enabled")
+  mfaSecret         String?     @map("mfa_secret") @db.Text
+  tokenVersion      Int         @default(0) @map("token_version")
   status            UserStatus  @default(ACTIVE)
   emailVerifiedAt   DateTime?   @map("email_verified_at")
   lastLoginAt       DateTime?   @map("last_login_at")

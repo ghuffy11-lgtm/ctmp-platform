@@ -6,6 +6,54 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-17 — Vendor Auth Service Implementation (TDD)
+
+**Date/time:** 2026-05-17
+**Agent/task:** Backend — implement VendorAuthService (TDD cycle)
+**Files changed:**
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.ts` — full implementation replacing stub
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.spec.ts` — 34-test spec
+- `apps/api/src/modules/vendor-auth/vendor-auth.module.ts` — wired `CaptchaService` + `NotificationsModule`
+- `apps/api/src/modules/vendor-auth/vendor-auth.controller.ts` — pass `RequestContext` (ip + UA) to `register`/`forgotPassword`; added `logout`/`refresh` endpoints
+- `apps/api/src/common/services/captcha.service.ts` — new injectable, validates token + writes `captcha_verification_logs` row, returns `logId`
+- `apps/api/prisma/schema.prisma` — `VendorUser`: added `mfaSecret`, `tokenVersion` fields
+- `database/migrations/004_vendor_auth_tokens.sql` — new migration: `vendor_users.token_version`, `vendor_users.mfa_secret`
+- `apps/api/src/modules/auth/auth.module.ts`, `strategies/jwt.strategy.ts`, `modules/vendor-auth/strategies/vendor-jwt.strategy.ts` — TS strict-mode fix: `secret`/`secretOrKey` use `?? ''`, `expiresIn` cast `as never` (matched `auth.service.ts` pattern). Unblocks `nest build`.
+
+**What changed:** VendorAuthService fully implemented and tested. 34 tests pass. Covers:
+- `register(dto, ctx)` — CAPTCHA validate → email-unique check → atomic `$transaction`: create `Vendor (PENDING)` + `VendorUser` (bcrypt-hashed password) + `VendorRegistrationRequest (PENDING_VERIFICATION)` linked to captcha log → create `VendorEmailVerificationToken` (SHA-256 hash of raw token, 24h TTL) → send `vendor-verify-email` notification.
+- `verifyEmail(dto)` — hash supplied token, look up record, reject if missing/expired/used; mark `usedAt` + set `vendorUser.emailVerifiedAt`.
+- `login(dto)` — load `vendorUser` (with `vendor`), reject if locked, bcrypt compare, on fail increment `failedLoginCount` and lock at threshold (default 5 / 15min), reject if email not verified, vendor not APPROVED, or user not ACTIVE; on success reset failure counters + set `lastLoginAt`; if `mfaEnabled` return temp `vendorMfaPending` token (5m), else issue `{ accessToken, refreshToken }` (vendor access via `jwt.vendorSecret`, refresh via `jwt.refreshSecret` with `type: 'vendor-refresh'`, version-bound).
+- `logout(vendorUserId)` — increment `tokenVersion`.
+- `refresh(token)` — verify signature, require `type === 'vendor-refresh'`, check `version === user.tokenVersion`, issue new access.
+- `forgotPassword(dto, ctx)` — always returns 204; if user exists, create `VendorPasswordResetToken` (SHA-256 hash, 60min TTL, records `request_ip` + `request_user_agent`) and send `vendor-reset-password` notification.
+- `resetPassword(dto)` — token validate, bcrypt-hash new password, mark token used, reset `failedLoginCount`/`lockedUntil`, bump `tokenVersion` (force re-login on existing sessions).
+- `verifyMfa(dto)` — verify temp token has `vendorMfaPending` claim, look up user + mfaSecret, TOTP-verify code, issue tokens.
+
+**Why:** Phase 3 next service per HANDOVER. Vendor portal is non-functional until login works; per spec, vendor self-registration requires CAPTCHA + email verify + admin approval. Followed the same TDD discipline as AuthService.
+
+Design decisions:
+- Registration creates `Vendor (PENDING)` + `VendorUser` immediately so the FK chain is valid (token tables require `vendorUserId`). Login gates on `vendor.status === 'APPROVED'` so PENDING vendors cannot log in even after email verification.
+- Email verification & password reset tokens are stored as SHA-256 hashes of the raw token; raw token only ever lives in the outbound email.
+- `CaptchaService` is its own injectable so the validation method is mockable and the real hCaptcha/reCAPTCHA HTTP call can be added later without touching `VendorAuthService`. Current `callProvider` is a stub (empty/literal "invalid" → fail).
+- `vendor-refresh` token uses the existing `jwt.refreshSecret` config (no new env var) with a distinct `type` claim to prevent token confusion between internal and vendor flows.
+- `resetPassword` bumps `tokenVersion` so any active refresh tokens on the account are revoked when the password changes.
+
+**Verification:**
+- `npx jest src/modules/vendor-auth/vendor-auth.service.spec.ts --no-coverage` → 34 passed, 0 failed.
+- Full suite `npx jest --no-coverage` → 54 passed (auth 20 + vendor-auth 34), 0 failed.
+- `npx nest build` → exit 0 (also fixed pre-existing strict-mode TS errors in auth.module/jwt.strategy and vendor counterparts that had been blocking the production build).
+
+**Open questions:**
+- `CaptchaService.callProvider` is a stub — real hCaptcha/reCAPTCHA HTTP call still needed before public deploy.
+- Vendor MFA enrollment endpoint (generate `mfaSecret`, return QR provisioning URI) not implemented; only verify path exists. Add when admin/vendor settings module is built.
+- `NotificationsService.sendEmail` still throws `Not implemented` — vendor-auth currently invokes it and would 500 at runtime. Implement notifications next OR temporarily catch+log.
+- Rate-limiting on `register` / `forgotPassword` / `login` should be applied via `@nestjs/throttler` (already a dep) at the controller — TODO.
+
+**Next recommended step:** Implement `NotificationsService.sendEmail` (nodemailer + template lookup + delivery log row) so vendor-auth doesn't crash at runtime; then `UsersService` / `RolesService` / `PermissionsService` CRUD.
+
+---
+
 ## 2026-05-17 — Auth Service Implementation (TDD)
 
 **Date/time:** 2026-05-17

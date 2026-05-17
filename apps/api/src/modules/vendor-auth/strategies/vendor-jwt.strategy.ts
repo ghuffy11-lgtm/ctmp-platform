@@ -9,7 +9,7 @@ export class VendorJwtStrategy extends PassportStrategy(Strategy, 'vendor-jwt') 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('jwt.vendorSecret'),
+      secretOrKey: config.get<string>('jwt.vendorSecret') ?? '',
     });
   }
 
