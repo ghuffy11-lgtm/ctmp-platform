@@ -6,6 +6,7 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ## Current Project State
 
+- Dev environment fully provisioned. Phase 3 scaffold is unblocked and ready to start.
 - Workspace scaffold created under `ctmp-platform/`.
 - Final implementation spec copied into `docs/specs/implementation-spec.md`.
 - Original implementation spec also copied as `CTMP_Implementation_Spec.md`.
@@ -23,6 +24,47 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 Begin Phase 3 (Backend Scaffold). Start with `Initialize API app framework` per `MASTER_TASK_TRACKER.md`, using the corrected `api-contracts/openapi/ctmp.openapi.yaml` as the contract baseline.
 
 ## Handover Entries
+
+### 2026-05-17 - Dev Environment Provisioned
+
+Agent/task:
+
+Installed and verified all Phase 3 development prerequisites on the build server (Windows Server 2022).
+
+Files changed:
+
+```text
+agents/handoffs/HANDOVER.md
+```
+
+What changed:
+
+- Docker Engine 27.5.1 installed via static binary at `C:\Program Files\docker\docker\`. Registered as Windows service (`docker`). Daemon running.
+- pnpm 11.1.2 installed globally.
+- NestJS CLI 11.0.21 installed globally.
+- Spectral CLI 6.16.0 installed globally (OpenAPI linter — run this as first Phase 3 task).
+- Bun 1.3.14 and Node 24.15.0 were already installed.
+
+Why:
+
+Phase 3 backend scaffold requires NestJS CLI to initialize the app, Docker to run PostgreSQL and Redis locally, pnpm for monorepo package management, and Spectral to validate the OpenAPI contract before implementation.
+
+Verification:
+
+- `docker --version` → 27.5.1 (run in new terminal after PATH refresh)
+- `pnpm --version` → 11.1.2
+- `nest --version` → 11.0.21
+- `spectral --version` → 6.16.0
+
+Open questions:
+
+- ORM decision not made: TypeORM vs Prisma. Decide before `Add database connection/migration tooling` task.
+
+Next recommended step:
+
+Open new terminal (Docker now in PATH). Run `spectral lint api-contracts/openapi/ctmp.openapi.yaml` to validate contract, then begin `Initialize API app framework` per MASTER_TASK_TRACKER.md.
+
+---
 
 ### 2026-05-17 - Codex PM Session Recovery Instructions Added
 
