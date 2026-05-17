@@ -44,15 +44,15 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ## Next Recommended Step
 
-**Phase 3 implementation** — fill in the stub service methods module by module, starting with:
-1. `auth` service — AD bind via ldapts, JWT issue.
-2. `vendor-auth` service — bcrypt, email verify, CAPTCHA validation.
-3. `users`/`roles`/`permissions` services — Prisma queries.
-4. Then domain modules in lifecycle order: tenders → bids → evaluations → award.
+**Phase 3 service implementation** — continue filling in stub service methods module by module:
+1. ~~`auth` service~~ — **DONE** (20/20 tests, committed 2026-05-17).
+2. `vendor-auth` service — bcrypt login, email verify token, CAPTCHA validation, password reset, vendor JWT. **START HERE.**
+3. `users`/`roles`/`permissions` services — Prisma CRUD queries.
+4. Domain modules in lifecycle order: tenders → clarifications → bids → late-submissions → technical-evaluation → committee → commercial-evaluation → award → audit → reports.
 
-Or start **Phase 4 (Admin Portal)** if backend implementation is deferred to a later sprint.
+File storage strategy (local disk vs MinIO/S3-compatible) must be decided before implementing bid document upload in the bids service.
 
-ORM decision is recorded in `docs/decisions/DECISION_LOG.md`.
+ORM decision recorded in `docs/decisions/DECISION_LOG.md`.
 
 ## Handover Entries
 
