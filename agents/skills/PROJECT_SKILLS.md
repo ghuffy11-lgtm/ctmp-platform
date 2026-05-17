@@ -16,6 +16,52 @@ Related files:
 
 ## Skills
 
+### Cross-Agent Review Process
+
+Use when:
+
+You have a concern about a completed-phase artifact (OpenAPI contract, database schema, seed data, security control, deployment approach). Do not silently edit the artifact — log the concern first.
+
+Pattern:
+
+1. Read `agents/reviews/README.md` for the entry format.
+2. Read or create the relevant review file (naming: `PHASE_<N>_<AREA>_REVIEW.md`).
+3. Add a new entry under `## Open Threads` using this structure:
+
+```text
+### YYYY-MM-DD HH:mm - Agent Name - Concern
+
+Topic:
+Files reviewed:
+Concern or proposal:
+Reasoning:
+Recommended change:
+Impact if accepted:
+Impact if rejected:
+Status: OPEN — <classification>
+```
+
+Classification must be one of:
+- `blocking backend scaffold` — must resolve before next phase starts
+- `recommended before backend scaffold` — address but not hard-blocking
+- `can be refined during backend implementation` — low risk, defer to impl
+- `needs project owner decision` — compliance/scope ambiguity; do not proceed without PM
+
+4. Commit the review file. Do not change the artifact.
+5. Wait for PM response in the review file before editing the artifact.
+
+Do not:
+
+- Edit a completed-phase file to fix a concern before logging it here.
+- Mark an item as ACCEPTED or IMPLEMENTED without a PM or tech-lead response in the review file.
+- Start the next phase if any item is classified `blocking`.
+
+Related files:
+
+`agents/reviews/README.md`, `agents/reviews/PHASE_2_API_CONTRACT_REVIEW.md`
+
+---
+
 ### SHA-256 Checksum Columns
 
 Use when:
