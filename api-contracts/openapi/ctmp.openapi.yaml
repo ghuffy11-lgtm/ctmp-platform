@@ -1,0 +1,1719 @@
+openapi: 3.0.3
+info:
+  title: CTMP API
+  version: 1.0.0
+  description: >
+    Corporate Tender Management Platform API contract. Commercial envelope state
+    and commercial visibility are separate controls: committee opening changes
+    envelope state only, while commercial details still require explicit
+    commercial permissions. All sensitive state changes, views, downloads,
+    exports, permission changes, and exceptions must be audit logged.
+servers:
+  - url: /api/v1
+    description: Versioned API root
+tags:
+  - name: Auth
+  - name: Vendor Auth
+  - name: Tenders
+  - name: Clarifications
+  - name: Bids
+  - name: Late Submission
+  - name: Technical Evaluation
+  - name: Committee
+  - name: Commercial Evaluation
+  - name: Award
+  - name: Audit
+  - name: Reports
+security:
+  - bearerAuth: []
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Internal user login
+      description: Authenticates internal users, typically backed by Active Directory.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout current user
+      responses:
+        '204':
+          description: Logout succeeded.
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh an access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+  /auth/mfa/verify:
+    post:
+      tags: [Auth]
+      summary: Verify internal MFA challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaVerifyRequest'
+      responses:
+        '200':
+          description: MFA verified.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+
+  /vendor-auth/register:
+    post:
+      tags: [Vendor Auth]
+      summary: Register a vendor organization
+      description: >
+        Public registration must validate CAPTCHA server-side, rate limit the
+        request, log suspicious attempts, create an email verification token, and
+        avoid creating an approved vendor before internal review.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorRegistrationRequest'
+      responses:
+        '202':
+          description: Registration accepted for verification and review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorRegistrationAccepted'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /vendor-auth/verify-email:
+    post:
+      tags: [Vendor Auth]
+      summary: Verify vendor email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+      responses:
+        '204':
+          description: Email verified.
+  /vendor-auth/forgot-password:
+    post:
+      tags: [Vendor Auth]
+      summary: Request vendor password reset
+      description: Uses CAPTCHA and rate limiting and must not reveal whether the email exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordRequest'
+      responses:
+        '202':
+          description: Request accepted.
+  /vendor-auth/reset-password:
+    post:
+      tags: [Vendor Auth]
+      summary: Reset vendor password
+      description: Reset token is single-use, expiring, audited, and invalidates active vendor sessions.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '204':
+          description: Password reset completed.
+  /vendor-auth/mfa/verify:
+    post:
+      tags: [Vendor Auth]
+      summary: Verify vendor MFA challenge
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaVerifyRequest'
+      responses:
+        '200':
+          description: MFA verified.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+
+  /tenders:
+    get:
+      tags: [Tenders]
+      summary: List tenders visible to the current user
+      description: Vendors see only public or invited tenders available to their organization.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TenderStatus'
+      responses:
+        '200':
+          description: Tender list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenderListResponse'
+    post:
+      tags: [Tenders]
+      summary: Create tender
+      description: Requires tender:create. State-changing action must be audit logged.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenderCreateRequest'
+      responses:
+        '201':
+          description: Tender created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tender'
+  /tenders/{tenderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenderId'
+    get:
+      tags: [Tenders]
+      summary: Get tender detail
+      description: Requires tender:view and respects vendor visibility rules.
+      responses:
+        '200':
+          description: Tender detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tender'
+    patch:
+      tags: [Tenders]
+      summary: Update draft or editable tender fields
+      description: Requires tender:edit. Regulated transitions use explicit action endpoints instead.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenderUpdateRequest'
+      responses:
+        '200':
+          description: Tender updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tender'
+  /tenders/{tenderId}/submit-for-approval:
+    post:
+      tags: [Tenders]
+      summary: Submit tender for approval
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '200':
+          description: Tender submitted for approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tender'
+  /tenders/{tenderId}/publish:
+    post:
+      tags: [Tenders]
+      summary: Publish tender
+      description: Requires tender:publish and writes an audit event.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '200':
+          description: Tender published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tender'
+  /tenders/{tenderId}/cancel:
+    post:
+      tags: [Tenders]
+      summary: Cancel tender
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: Tender cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tender'
+  /tenders/{tenderId}/close-submissions:
+    post:
+      tags: [Tenders]
+      summary: Close tender submissions
+      description: Requires tender:close_submission. Normal bid submission is blocked after this action.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '200':
+          description: Tender moved to Submission Closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tender'
+
+  /tenders/{tenderId}/clarifications:
+    parameters:
+      - $ref: '#/components/parameters/TenderId'
+    get:
+      tags: [Clarifications]
+      summary: List clarifications
+      description: Vendors see only their own private clarifications plus general/public replies.
+      responses:
+        '200':
+          description: Clarification list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClarificationListResponse'
+    post:
+      tags: [Clarifications]
+      summary: Create vendor clarification
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClarificationCreateRequest'
+      responses:
+        '201':
+          description: Clarification created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Clarification'
+  /clarifications/{clarificationId}/reply:
+    post:
+      tags: [Clarifications]
+      summary: Reply to clarification
+      description: Replies are private unless explicitly marked general/public by authorized users.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ClarificationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClarificationReplyRequest'
+      responses:
+        '201':
+          description: Reply created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClarificationReply'
+
+  /tenders/{tenderId}/bids/draft:
+    post:
+      tags: [Bids]
+      summary: Create or return current vendor bid draft
+      description: Vendor may submit one primary bid per tender unless alternative bids are enabled.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '201':
+          description: Draft bid created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bid'
+  /bids/{bidId}/technical-envelope:
+    put:
+      tags: [Bids]
+      summary: Upload or replace technical envelope contents before submission
+      description: Submitted bids are immutable; documents receive server-computed SHA-256 checksums on submission.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BidId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EnvelopeUploadRequest'
+      responses:
+        '200':
+          description: Technical envelope updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BidEnvelope'
+  /bids/{bidId}/commercial-envelope:
+    put:
+      tags: [Bids]
+      summary: Upload or replace commercial envelope contents before submission
+      description: This endpoint does not open, view, or download commercial content.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BidId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EnvelopeUploadRequest'
+      responses:
+        '200':
+          description: Commercial envelope updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BidEnvelope'
+  /bids/{bidId}/submit:
+    post:
+      tags: [Bids]
+      summary: Submit bid
+      description: >
+        Submission locks the bid and both envelopes, records checksums, creates a
+        receipt, and writes an audit event. After the submission deadline this
+        requires an active tender-specific and vendor-specific late submission
+        exception.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BidId'
+      responses:
+        '200':
+          description: Bid submitted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BidSubmissionReceipt'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /bids/{bidId}/receipt:
+    get:
+      tags: [Bids]
+      summary: Get bid submission receipt
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BidId'
+      responses:
+        '200':
+          description: Submission receipt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BidSubmissionReceipt'
+
+  /tenders/{tenderId}/late-submission-exceptions:
+    parameters:
+      - $ref: '#/components/parameters/TenderId'
+    get:
+      tags: [Late Submission]
+      summary: List late submission exceptions for a tender
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Late submission exception list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LateSubmissionExceptionListResponse'
+    post:
+      tags: [Late Submission]
+      summary: Grant or request late submission exception
+      description: Requires tender-specific vendor-specific reason, expiry, approving/granting user, and audit trail.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LateSubmissionExceptionCreateRequest'
+      responses:
+        '201':
+          description: Exception created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LateSubmissionException'
+
+  /tenders/{tenderId}/technical-opening:
+    post:
+      tags: [Technical Evaluation]
+      summary: Open technical envelopes
+      description: Technical envelopes can open only after Submission Closed. Commercial envelopes remain sealed.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '200':
+          description: Technical opening completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TechnicalOpeningResult'
+  /tenders/{tenderId}/technical-evaluations:
+    get:
+      tags: [Technical Evaluation]
+      summary: List technical evaluations for a tender
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '200':
+          description: Technical evaluations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TechnicalEvaluationListResponse'
+  /bids/{bidId}/technical-evaluations:
+    post:
+      tags: [Technical Evaluation]
+      summary: Submit technical evaluation for a bid
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BidId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TechnicalEvaluationRequest'
+      responses:
+        '201':
+          description: Technical evaluation recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TechnicalEvaluation'
+  /tenders/{tenderId}/finalize-technical-results:
+    post:
+      tags: [Technical Evaluation]
+      summary: Finalize technical pass/fail results
+      description: Only technically passed vendors proceed to commercial comparison.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '200':
+          description: Technical results finalized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TechnicalEvaluationListResponse'
+
+  /tenders/{tenderId}/committee-sessions:
+    post:
+      tags: [Committee]
+      summary: Create committee commercial opening session
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitteeSessionCreateRequest'
+      responses:
+        '201':
+          description: Committee session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitteeSession'
+  /committee-sessions/{sessionId}/attendance:
+    post:
+      tags: [Committee]
+      summary: Record committee attendance
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitteeAttendanceRequest'
+      responses:
+        '200':
+          description: Attendance recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitteeSession'
+  /committee-sessions/{sessionId}/open-commercial-envelopes:
+    post:
+      tags: [Committee]
+      summary: Open commercial envelopes through official committee session
+      description: >
+        The only endpoint that may change commercial envelopes from sealed to
+        opened. It opens only technically qualified vendors' commercial
+        envelopes, verifies checksums before access, records committee details,
+        and writes audit events. It must not return commercial prices or files;
+        details remain controlled by commercial:view/download/evaluate/export.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommercialOpeningRequest'
+      responses:
+        '200':
+          description: Commercial envelopes opened; status and opening records returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommercialOpeningResult'
+  /committee-sessions/{sessionId}/opening-records:
+    get:
+      tags: [Committee]
+      summary: List commercial opening records
+      description: Requires committee:view_minutes. Returns status and checksum results, not commercial details.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Opening records.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommercialOpeningRecordListResponse'
+
+  /tenders/{tenderId}/commercial-comparison:
+    get:
+      tags: [Commercial Evaluation]
+      summary: Get commercial comparison
+      description: >
+        Shows only technically passed vendors. Users without commercial:view see
+        status-only rows. Prices, scoring, documents, downloads, and exports
+        require explicit commercial permissions and must be audit logged.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '200':
+          description: Commercial comparison respecting caller permissions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommercialComparison'
+  /bids/{bidId}/commercial-evaluations:
+    post:
+      tags: [Commercial Evaluation]
+      summary: Submit commercial evaluation for a bid
+      description: Requires envelope OPENED and commercial:evaluate. The action is audit logged.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BidId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommercialEvaluationRequest'
+      responses:
+        '201':
+          description: Commercial evaluation recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommercialEvaluation'
+
+  /tenders/{tenderId}/award-recommendation:
+    post:
+      tags: [Award]
+      summary: Create award recommendation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AwardRecommendationRequest'
+      responses:
+        '201':
+          description: Award recommendation created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AwardRecommendation'
+  /tenders/{tenderId}/award-approval:
+    post:
+      tags: [Award]
+      summary: Approve or reject award recommendation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AwardApprovalRequest'
+      responses:
+        '200':
+          description: Award approval action recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AwardRecommendation'
+  /tenders/{tenderId}/award:
+    post:
+      tags: [Award]
+      summary: Finalize tender award
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '200':
+          description: Tender awarded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tender'
+
+  /audit-logs:
+    get:
+      tags: [Audit]
+      summary: Search audit logs
+      description: Requires audit:view. Audit export requires audit:export.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: eventType
+          in: query
+          schema:
+            type: string
+        - name: entityType
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Audit log results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogListResponse'
+  /tenders/{tenderId}/audit-logs:
+    get:
+      tags: [Audit]
+      summary: Search audit logs for a tender
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Tender audit logs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogListResponse'
+  /reports:
+    get:
+      tags: [Reports]
+      summary: List available reports
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Report definitions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportDefinitionListResponse'
+  /reports/{reportCode}/export:
+    post:
+      tags: [Reports]
+      summary: Export report
+      description: Commercial comparison exports require commercial:export in addition to reports:export and are audit logged.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: reportCode
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportExportRequest'
+      responses:
+        '202':
+          description: Export job accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportExportJob'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenderId:
+      name: tenderId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BidId:
+      name: bidId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ClarificationId:
+      name: clarificationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+  responses:
+    Unauthorized:
+      description: Authentication failed or token is missing.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Caller lacks the required permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    RateLimited:
+      description: Too many requests.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Request conflicts with current workflow state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: CTMP_VALIDATION_ERROR
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+            traceId:
+              type: string
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+    MfaVerifyRequest:
+      type: object
+      required: [challengeId, code]
+      properties:
+        challengeId:
+          type: string
+        code:
+          type: string
+    AuthTokenResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+    TokenRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+    ForgotPasswordRequest:
+      type: object
+      required: [email, captchaToken]
+      properties:
+        email:
+          type: string
+          format: email
+        captchaToken:
+          type: string
+    ResetPasswordRequest:
+      type: object
+      required: [token, newPassword, captchaToken]
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
+          format: password
+        captchaToken:
+          type: string
+    VendorRegistrationRequest:
+      type: object
+      required: [companyName, registrationNumber, contactName, email, password, captchaToken]
+      properties:
+        companyName:
+          type: string
+        registrationNumber:
+          type: string
+        taxNumber:
+          type: string
+        contactName:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        password:
+          type: string
+          format: password
+        captchaToken:
+          type: string
+    VendorRegistrationAccepted:
+      type: object
+      required: [registrationRequestId, status]
+      properties:
+        registrationRequestId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING_EMAIL_VERIFICATION, PENDING_REVIEW]
+    TenderStatus:
+      type: string
+      enum:
+        - Draft
+        - Internal Review
+        - Approved
+        - Published
+        - Clarification Period
+        - Submission Closed
+        - Technical Opening
+        - Technical Evaluation
+        - Commercial Sealed
+        - Committee Commercial Opening
+        - Commercial Evaluation / Comparison
+        - Award Recommendation
+        - Awarded
+        - Tender Closed
+        - Cancelled
+        - Suspended
+        - Archived
+    EnvelopeType:
+      type: string
+      enum: [TECHNICAL, COMMERCIAL]
+    EnvelopeStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, SEALED, OPENED, LOCKED]
+    BidStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, LATE_SUBMITTED, LATE_ACCEPTED, WITHDRAWN, DISQUALIFIED]
+    VendorStatus:
+      type: string
+      enum: [PENDING_REVIEW, APPROVED, REJECTED, SUSPENDED, BLACKLISTED]
+    Tender:
+      type: object
+      required: [id, title, status, submissionDeadline]
+      properties:
+        id:
+          type: string
+          format: uuid
+        referenceNumber:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/TenderStatus'
+        visibility:
+          type: string
+          enum: [PUBLIC, INVITATION_ONLY]
+        departmentId:
+          type: string
+          format: uuid
+        submissionDeadline:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TenderCreateRequest:
+      type: object
+      required: [title, visibility, submissionDeadline]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        visibility:
+          type: string
+          enum: [PUBLIC, INVITATION_ONLY]
+        departmentId:
+          type: string
+          format: uuid
+        submissionDeadline:
+          type: string
+          format: date-time
+        invitedVendorIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+    TenderUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/TenderCreateRequest'
+    TenderListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Tender'
+    ReasonRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+    Clarification:
+      type: object
+      required: [id, tenderId, question, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenderId:
+          type: string
+          format: uuid
+        vendorId:
+          type: string
+          format: uuid
+        question:
+          type: string
+        status:
+          type: string
+          enum: [OPEN, ANSWERED, CLOSED]
+        createdAt:
+          type: string
+          format: date-time
+    ClarificationCreateRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+    ClarificationReplyRequest:
+      type: object
+      required: [reply]
+      properties:
+        reply:
+          type: string
+        visibility:
+          type: string
+          enum: [PRIVATE_TO_VENDOR, GENERAL_PUBLIC]
+          default: PRIVATE_TO_VENDOR
+    ClarificationReply:
+      type: object
+      required: [id, clarificationId, reply, visibility]
+      properties:
+        id:
+          type: string
+          format: uuid
+        clarificationId:
+          type: string
+          format: uuid
+        reply:
+          type: string
+        visibility:
+          type: string
+          enum: [PRIVATE_TO_VENDOR, GENERAL_PUBLIC]
+    ClarificationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Clarification'
+    Bid:
+      type: object
+      required: [id, tenderId, vendorId, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenderId:
+          type: string
+          format: uuid
+        vendorId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/BidStatus'
+        isAlternative:
+          type: boolean
+        submittedAt:
+          type: string
+          format: date-time
+        envelopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/BidEnvelope'
+    BidEnvelope:
+      type: object
+      required: [id, bidId, envelopeType, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        bidId:
+          type: string
+          format: uuid
+        envelopeType:
+          $ref: '#/components/schemas/EnvelopeType'
+        status:
+          $ref: '#/components/schemas/EnvelopeStatus'
+        submittedAt:
+          type: string
+          format: date-time
+        openedAt:
+          type: string
+          format: date-time
+        committeeSessionId:
+          type: string
+          format: uuid
+    EnvelopeUploadRequest:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items:
+            type: string
+            format: binary
+    BidSubmissionReceipt:
+      type: object
+      required: [id, bidId, receiptNumber, receiptHash, submittedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        bidId:
+          type: string
+          format: uuid
+        receiptNumber:
+          type: string
+        receiptHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        submittedAt:
+          type: string
+          format: date-time
+        documentChecksums:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentChecksum'
+    DocumentChecksum:
+      type: object
+      required: [documentId, checksumSha256]
+      properties:
+        documentId:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        checksumSha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+    LateSubmissionExceptionCreateRequest:
+      type: object
+      required: [vendorId, reason, expiresAt]
+      properties:
+        vendorId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    LateSubmissionException:
+      type: object
+      required: [id, tenderId, vendorId, status, reason, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenderId:
+          type: string
+          format: uuid
+        vendorId:
+          type: string
+          format: uuid
+        grantedBy:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [PENDING_APPROVAL, GRANTED, REJECTED, EXPIRED, USED]
+        expiresAt:
+          type: string
+          format: date-time
+    LateSubmissionExceptionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/LateSubmissionException'
+    TechnicalOpeningResult:
+      type: object
+      required: [tenderId, openedEnvelopeCount]
+      properties:
+        tenderId:
+          type: string
+          format: uuid
+        openedEnvelopeCount:
+          type: integer
+    TechnicalEvaluationRequest:
+      type: object
+      required: [result]
+      properties:
+        result:
+          type: string
+          enum: [PASS, FAIL]
+        score:
+          type: number
+        comments:
+          type: string
+        scores:
+          type: array
+          items:
+            type: object
+            properties:
+              criterion:
+                type: string
+              score:
+                type: number
+              comments:
+                type: string
+    TechnicalEvaluation:
+      type: object
+      required: [id, bidId, result]
+      properties:
+        id:
+          type: string
+          format: uuid
+        bidId:
+          type: string
+          format: uuid
+        evaluatorUserId:
+          type: string
+          format: uuid
+        result:
+          type: string
+          enum: [PASS, FAIL]
+        score:
+          type: number
+    TechnicalEvaluationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/TechnicalEvaluation'
+    CommitteeSessionCreateRequest:
+      type: object
+      required: [scheduledAt, memberUserIds]
+      properties:
+        scheduledAt:
+          type: string
+          format: date-time
+        memberUserIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        remarks:
+          type: string
+    CommitteeSession:
+      type: object
+      required: [id, tenderId, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenderId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [SCHEDULED, IN_PROGRESS, COMPLETED, CANCELLED]
+        scheduledAt:
+          type: string
+          format: date-time
+        openedAt:
+          type: string
+          format: date-time
+        remarks:
+          type: string
+    CommitteeAttendanceRequest:
+      type: object
+      required: [attendance]
+      properties:
+        attendance:
+          type: array
+          items:
+            type: object
+            required: [userId, attended]
+            properties:
+              userId:
+                type: string
+                format: uuid
+              attended:
+                type: boolean
+              remarks:
+                type: string
+    CommercialOpeningRequest:
+      type: object
+      required: [remarks]
+      properties:
+        remarks:
+          type: string
+        confirmChecksumVerification:
+          type: boolean
+    CommercialOpeningResult:
+      type: object
+      required: [sessionId, openedEnvelopeCount, records]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        openedEnvelopeCount:
+          type: integer
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommercialOpeningRecord'
+    CommercialOpeningRecord:
+      type: object
+      required: [id, bidId, vendorId, envelopeStatus, checksumVerified]
+      properties:
+        id:
+          type: string
+          format: uuid
+        bidId:
+          type: string
+          format: uuid
+        vendorId:
+          type: string
+          format: uuid
+        envelopeStatus:
+          $ref: '#/components/schemas/EnvelopeStatus'
+        checksumVerified:
+          type: boolean
+        openedAt:
+          type: string
+          format: date-time
+    CommercialOpeningRecordListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommercialOpeningRecord'
+    CommercialComparison:
+      type: object
+      required: [tenderId, rows]
+      properties:
+        tenderId:
+          type: string
+          format: uuid
+        callerCommercialAccess:
+          type: object
+          properties:
+            canView:
+              type: boolean
+            canDownload:
+              type: boolean
+            canEvaluate:
+              type: boolean
+            canExport:
+              type: boolean
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommercialComparisonRow'
+    CommercialComparisonRow:
+      type: object
+      required: [bidId, vendorId, technicalResult, commercialEnvelopeStatus]
+      properties:
+        bidId:
+          type: string
+          format: uuid
+        vendorId:
+          type: string
+          format: uuid
+        technicalResult:
+          type: string
+          enum: [PASS]
+        commercialEnvelopeStatus:
+          $ref: '#/components/schemas/EnvelopeStatus'
+        commercialDetailsVisible:
+          type: boolean
+        totalAmount:
+          type: number
+          description: Present only when caller has commercial:view.
+        currency:
+          type: string
+        rank:
+          type: integer
+    CommercialEvaluationRequest:
+      type: object
+      required: [score]
+      properties:
+        score:
+          type: number
+        comments:
+          type: string
+    CommercialEvaluation:
+      type: object
+      required: [id, bidId, score]
+      properties:
+        id:
+          type: string
+          format: uuid
+        bidId:
+          type: string
+          format: uuid
+        evaluatorUserId:
+          type: string
+          format: uuid
+        score:
+          type: number
+        comments:
+          type: string
+    AwardRecommendationRequest:
+      type: object
+      required: [recommendedVendorId, reason]
+      properties:
+        recommendedVendorId:
+          type: string
+          format: uuid
+        recommendedBidId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+    AwardApprovalRequest:
+      type: object
+      required: [action, comments]
+      properties:
+        action:
+          type: string
+          enum: [APPROVE, REJECT]
+        comments:
+          type: string
+    AwardRecommendation:
+      type: object
+      required: [id, tenderId, recommendedVendorId, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenderId:
+          type: string
+          format: uuid
+        recommendedVendorId:
+          type: string
+          format: uuid
+        recommendedBidId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, AWARDED]
+        reason:
+          type: string
+    AuditLog:
+      type: object
+      required: [id, eventType, entityType, eventTime, hashChainValue]
+      properties:
+        id:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+        actorUserId:
+          type: string
+          format: uuid
+        actorVendorUserId:
+          type: string
+          format: uuid
+        actorRole:
+          type: string
+        entityType:
+          type: string
+        entityId:
+          type: string
+          format: uuid
+        tenderId:
+          type: string
+          format: uuid
+        vendorId:
+          type: string
+          format: uuid
+        bidId:
+          type: string
+          format: uuid
+        ipAddress:
+          type: string
+        userAgent:
+          type: string
+        eventTime:
+          type: string
+          format: date-time
+        beforeValue:
+          type: object
+          additionalProperties: true
+        afterValue:
+          type: object
+          additionalProperties: true
+        reason:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        riskLevel:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        hashChainValue:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+    AuditLogListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/AuditLog'
+    ReportDefinitionListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [code, name]
+            properties:
+              code:
+                type: string
+              name:
+                type: string
+              requiresCommercialExportPermission:
+                type: boolean
+    ReportExportRequest:
+      type: object
+      properties:
+        format:
+          type: string
+          enum: [XLSX, PDF]
+        filters:
+          type: object
+          additionalProperties: true
+    ReportExportJob:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, COMPLETED, FAILED]
+    PaginatedResponse:
+      type: object
+      required: [page, pageSize, total]
+      properties:
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer

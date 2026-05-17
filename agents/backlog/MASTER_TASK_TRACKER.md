@@ -69,19 +69,32 @@ When a task is completed, add a short completion note with date and key files.
 
 ## Phase 2: API Contract
 
-- [ ] Create expanded OpenAPI file at `api-contracts/openapi/ctmp.openapi.yaml`.
-- [ ] Define auth and vendor-auth endpoints.
-- [ ] Define tender lifecycle endpoints.
-- [ ] Define clarification endpoints.
-- [ ] Define bid draft, envelope upload, submit, and receipt endpoints.
-- [ ] Define late submission exception endpoints.
-- [ ] Define technical evaluation endpoints.
-- [ ] Define committee commercial opening endpoints.
-- [ ] Define commercial comparison endpoints with permission notes.
-- [ ] Define award endpoints.
-- [ ] Define audit/report endpoints.
-- [ ] Define request/response schemas.
-- [ ] Define error response model.
+- [x] Create expanded OpenAPI file at `api-contracts/openapi/ctmp.openapi.yaml`.
+  - Completed 2026-05-17. Key file: `api-contracts/openapi/ctmp.openapi.yaml`.
+- [x] Define auth and vendor-auth endpoints.
+  - Completed 2026-05-17. Includes internal auth, vendor registration, email verification, password reset, and MFA.
+- [x] Define tender lifecycle endpoints.
+  - Completed 2026-05-17. Uses explicit workflow actions for submit-for-approval, publish, cancel, and close-submissions.
+- [x] Define clarification endpoints.
+  - Completed 2026-05-17. Captures private-vendor vs general/public reply visibility.
+- [x] Define bid draft, envelope upload, submit, and receipt endpoints.
+  - Completed 2026-05-17. Documents immutability, checksum, receipt, and late-exception requirements.
+- [x] Define late submission exception endpoints.
+  - Completed 2026-05-17. Requires vendor-specific/tender-specific reason and expiry.
+- [x] Define technical evaluation endpoints.
+  - Completed 2026-05-17. Technical opening remains separate from commercial opening.
+- [x] Define committee commercial opening endpoints.
+  - Completed 2026-05-17. Committee opening is the only commercial envelope state-opening path.
+- [x] Define commercial comparison endpoints with permission notes.
+  - Completed 2026-05-17. Status-only behavior and explicit commercial permissions documented.
+- [x] Define award endpoints.
+  - Completed 2026-05-17.
+- [x] Define audit/report endpoints.
+  - Completed 2026-05-17. Includes audit search and report export permission notes.
+- [x] Define request/response schemas.
+  - Completed 2026-05-17. Core request/response schemas added under OpenAPI components.
+- [x] Define error response model.
+  - Completed 2026-05-17. Shared `ErrorResponse` and common error responses added.
 
 ## Phase 3: Backend Scaffold
 

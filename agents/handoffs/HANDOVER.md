@@ -12,13 +12,56 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 - Agent guidance, build sequence, and ownership docs created.
 - Initial production database schema authored at `database/migrations/001_initial_schema.sql`.
 - Baseline roles/permissions seed at `database/seeds/001_baseline_roles_permissions.sql`.
+- Expanded API contract authored at `api-contracts/openapi/ctmp.openapi.yaml`.
 - No application code (apps/api, apps/web-*) has been generated yet.
 
 ## Next Recommended Step
 
-Begin Phase 2 (API Contract): expand `api-contracts/openapi/ctmp.openapi.yaml` from the starter file, defining the endpoint groups listed in spec section 13. Use the role/permission codes seeded in Phase 1 when documenting authorisation requirements on each operation.
+Begin Phase 3 (Backend Scaffold): initialize the API app framework and wire the first modules against `api-contracts/openapi/ctmp.openapi.yaml`. Keep the OpenAPI contract close while scaffolding auth, vendor-auth, tender, bid/envelope, late submission, committee opening, commercial evaluation, award, audit, reports, and notification modules.
 
 ## Handover Entries
+
+### 2026-05-17 - Expanded OpenAPI Contract
+
+Agent/task:
+
+Recovered from the prior lost session, confirmed Phase 1 database work was complete, and completed Phase 2 by authoring the expanded OpenAPI contract.
+
+Files changed:
+
+```text
+api-contracts/openapi/ctmp.openapi.yaml   (new)
+agents/backlog/MASTER_TASK_TRACKER.md
+agents/handoffs/HANDOVER.md
+```
+
+What changed:
+
+- Added the versioned CTMP OpenAPI 3.0 contract at `/api/v1`.
+- Defined endpoint groups for internal auth, vendor auth, tenders, clarifications, bids, late submission exceptions, technical evaluation, committee commercial opening, commercial evaluation/comparison, award, audit, and reports.
+- Added request/response schemas, shared path/query parameters, shared `ErrorResponse`, common error responses, enums, and permission-focused operation notes.
+- Documented key guardrails directly in the contract: vendor CAPTCHA/rate limiting, immutable bid submission, technical opening after submission close, commercial opening only through committee session endpoints, status-only commercial comparison for unauthorized users, and audit logging for sensitive actions.
+
+Why:
+
+The handover and tracker identified API contract expansion as the next recommended step after the database schema and hardening migrations. This contract now gives backend and frontend agents a concrete integration target.
+
+Verification:
+
+- Static review against spec section 13 endpoint groups and project guardrails.
+- Checked that the contract has expected OpenAPI root sections and no non-empty bearer auth scope arrays.
+- No OpenAPI validator is installed in this workspace, so formal schema validation was not run.
+
+Open questions:
+
+- Backend scaffold should decide the implementation framework and contract validation tooling.
+- Future backend work should tighten schemas as exact DTO fields and validation rules are implemented.
+
+Next recommended step:
+
+Begin Phase 3: initialize the API app framework and add configuration, database connection/migration tooling, auth, vendor-auth, RBAC, vendor, tender, clarification, bid/envelope, late submission, technical evaluation, committee opening, commercial evaluation, award, audit, notification, and reports modules.
+
+---
 
 ### 2026-05-17 - Schema Hardening Migration
 
