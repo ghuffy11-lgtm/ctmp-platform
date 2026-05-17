@@ -1,0 +1,27 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "CTMP API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "summary": "User login"
+      }
+    },
+    "/tenders": {
+      "get": {
+        "summary": "Get tenders"
+      },
+      "post": {
+        "summary": "Create tender"
+      }
+    },
+    "/vendors": {
+      "get": {
+        "summary": "Get vendors"
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# Normalize line endings to LF in repo, convert to CRLF on Windows checkout
+* text=auto eol=lf
+
+# Force binary — never mangle
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.zip binary

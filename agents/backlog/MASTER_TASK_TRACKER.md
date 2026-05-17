@@ -1,0 +1,173 @@
+# CTMP Master Task Tracker
+
+Status markers:
+
+```text
+- [ ] Not started
+- [~] In progress
+- [x] Completed
+- [!] Blocked
+```
+
+When a task is completed, add a short completion note with date and key files.
+
+## Phase 0: Project Control And Foundation
+
+- [x] Create agent-ready folder structure.
+  - Completed 2026-05-16. Key folder: `ctmp-platform/`.
+- [x] Add implementation specification to workspace.
+  - Completed 2026-05-16. Key files: `docs/specs/implementation-spec.md`, `CTMP_Implementation_Spec.md`.
+- [x] Add agent ownership guide.
+  - Completed 2026-05-16. Key file: `AGENTS.md`.
+- [x] Add build sequence.
+  - Completed 2026-05-16. Key file: `agents/backlog/00-build-sequence.md`.
+- [x] Add continuous handover document.
+  - Completed 2026-05-16. Key file: `agents/handoffs/HANDOVER.md`.
+- [x] Add master task tracker.
+  - Completed 2026-05-16. Key file: `agents/backlog/MASTER_TASK_TRACKER.md`.
+- [x] Add AI build instructions.
+  - Completed 2026-05-16. Key file: `AI_BUILD_INSTRUCTIONS.md`.
+- [x] Add decision log and project skills register.
+  - Completed 2026-05-16. Key files: `docs/decisions/DECISION_LOG.md`, `agents/skills/PROJECT_SKILLS.md`.
+- [x] Add reusable agent prompt library.
+  - Completed 2026-05-16. Key folder: `agents/prompts/`.
+- [x] Add single AI agent entry point.
+  - Completed 2026-05-16. Key file: `START_HERE_FOR_AI_AGENTS.md`.
+
+## Phase 1: Database
+
+- [x] Create `database/migrations/001_initial_schema.sql`.
+  - Completed 2026-05-17. Key file: `database/migrations/001_initial_schema.sql`.
+- [x] Add enum/status definitions for tender, bid, envelope, workflow, vendor, and audit states.
+  - Completed 2026-05-17 in `001_initial_schema.sql` (section 1).
+- [x] Add RBAC tables: roles, permissions, user_roles.
+  - Completed 2026-05-17 (section 4). Also adds `role_permissions` join table.
+- [x] Add organization tables: departments, users, user_departments.
+  - Completed 2026-05-17 (section 3).
+- [x] Add vendor registration and password reset tables.
+  - Completed 2026-05-17 (section 6): `vendor_registration_requests`, `vendor_email_verification_tokens`, `vendor_password_reset_tokens`.
+- [x] Add tender lifecycle tables.
+  - Completed 2026-05-17 (section 7): `tenders`, `tender_versions`, `tender_documents`, `tender_vendors`, `tender_clarifications`, `tender_clarification_replies`.
+- [x] Add bid, envelope, document, checksum, and receipt tables.
+  - Completed 2026-05-17 (section 11): `bids`, `bid_envelopes`, `bid_documents`, `bid_submission_receipts`. Checksum stored on documents and verified in `file_integrity_checks`.
+- [x] Add late submission exception tables.
+  - Completed 2026-05-17 (section 9). Partial unique index limits one active exception per (tender, vendor).
+- [x] Add committee session and commercial opening tables.
+  - Completed 2026-05-17 (sections 10, 12).
+- [x] Add workflow template and workflow instance tables.
+  - Completed 2026-05-17 (section 8): `workflow_templates`, `workflow_steps`, `workflow_instances`, `workflow_tasks`, `approval_actions`.
+- [x] Add append-only audit log structure.
+  - Completed 2026-05-17 (section 15). UPDATE/DELETE/TRUNCATE blocked via `audit_logs_block_modifications()` triggers; hash chain columns present.
+- [x] Add notification templates and delivery log tables.
+  - Completed 2026-05-17 (section 16).
+- [x] Add indexes and constraints.
+  - Completed 2026-05-17 (section 18). Plus inline UNIQUE / CHECK constraints throughout.
+- [x] Add seed data for baseline roles and permissions.
+  - Completed 2026-05-17. Key file: `database/seeds/001_baseline_roles_permissions.sql`. System Admin intentionally has no commercial:view/download/evaluate/export.
+- [x] Add schema hardening migration (hex checks on all SHA-256/hash columns, captcha nullability documentation).
+  - Completed 2026-05-17. Key file: `database/migrations/002_schema_hardening.sql`. Covers 8 columns across 5 tables.
+
+## Phase 2: API Contract
+
+- [ ] Create expanded OpenAPI file at `api-contracts/openapi/ctmp.openapi.yaml`.
+- [ ] Define auth and vendor-auth endpoints.
+- [ ] Define tender lifecycle endpoints.
+- [ ] Define clarification endpoints.
+- [ ] Define bid draft, envelope upload, submit, and receipt endpoints.
+- [ ] Define late submission exception endpoints.
+- [ ] Define technical evaluation endpoints.
+- [ ] Define committee commercial opening endpoints.
+- [ ] Define commercial comparison endpoints with permission notes.
+- [ ] Define award endpoints.
+- [ ] Define audit/report endpoints.
+- [ ] Define request/response schemas.
+- [ ] Define error response model.
+
+## Phase 3: Backend Scaffold
+
+- [ ] Initialize API app framework.
+- [ ] Add configuration module.
+- [ ] Add database connection/migration tooling.
+- [ ] Add auth module.
+- [ ] Add vendor-auth module with CAPTCHA and password reset.
+- [ ] Add users, roles, permissions modules.
+- [ ] Add vendor management module.
+- [ ] Add tender module.
+- [ ] Add clarification module.
+- [ ] Add bid/envelope module.
+- [ ] Add late submission exception module.
+- [ ] Add technical evaluation module.
+- [ ] Add committee commercial opening module.
+- [ ] Add commercial evaluation module.
+- [ ] Add award module.
+- [ ] Add audit module.
+- [ ] Add notification module.
+- [ ] Add reports module.
+
+## Phase 4: Admin Portal
+
+- [ ] Initialize admin frontend app.
+- [ ] Add shell layout and navigation.
+- [ ] Add dashboard.
+- [ ] Add tender list/detail/create/edit.
+- [ ] Add approval queue.
+- [ ] Add clarification center.
+- [ ] Add technical evaluation workspace.
+- [ ] Add committee commercial opening screen.
+- [ ] Add commercial comparison screen with permission-controlled visibility.
+- [ ] Add vendor management.
+- [ ] Add reports.
+- [ ] Add audit log viewer.
+- [ ] Add system configuration screens.
+
+## Phase 5: Vendor Portal
+
+- [ ] Initialize vendor frontend app.
+- [ ] Add vendor login.
+- [ ] Add vendor registration with CAPTCHA.
+- [ ] Add email verification flow.
+- [ ] Add forgot/reset password flow.
+- [ ] Add vendor dashboard.
+- [ ] Add public/invited tender list.
+- [ ] Add tender detail.
+- [ ] Add clarification center.
+- [ ] Add bid submission wizard.
+- [ ] Add technical envelope upload step.
+- [ ] Add commercial envelope upload step.
+- [ ] Add submission receipt screen.
+- [ ] Add company profile and document repository.
+
+## Phase 6: Infrastructure
+
+- [ ] Create local Docker Compose.
+- [ ] Add PostgreSQL service.
+- [ ] Add Redis service.
+- [ ] Add API service.
+- [ ] Add admin portal service.
+- [ ] Add vendor portal service.
+- [ ] Add environment variable templates.
+- [ ] Add SMTP configuration documentation.
+- [ ] Add backup and restore runbook.
+- [ ] Add on-prem deployment runbook.
+
+## Phase 7: QA And Security
+
+- [ ] Create manual UAT test suite.
+- [ ] Create API test plan.
+- [ ] Create Playwright test plan.
+- [ ] Test vendor registration CAPTCHA.
+- [ ] Test vendor password reset.
+- [ ] Test immutable bid submission.
+- [ ] Test technical envelope opening after submission closure.
+- [ ] Test commercial envelope remains sealed before committee opening.
+- [ ] Test commercial visibility remains permission-controlled after opening.
+- [ ] Test late submission exception flow.
+- [ ] Test audit logging.
+- [ ] Test report exports.
+
+## Phase 8: Documentation And Handover
+
+- [ ] Keep `agents/handoffs/HANDOVER.md` updated after each task.
+- [ ] Keep `docs/decisions/DECISION_LOG.md` updated after decisions.
+- [ ] Keep `agents/skills/PROJECT_SKILLS.md` updated with reusable patterns.
+- [ ] Keep this task tracker updated.
