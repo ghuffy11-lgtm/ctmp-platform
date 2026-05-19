@@ -1,11 +1,15 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { LateExceptionStatus } from '@prisma/client';
+import { AuditRiskLevel, BidStatus, LateExceptionStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateExceptionDto } from './dto/create-exception.dto';
 
 @Injectable()
 export class LateSubmissionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async findAll(tenderId: string) {
     const items = await this.prisma.lateSubmissionException.findMany({
@@ -61,17 +65,58 @@ export class LateSubmissionsService {
       throw new ConflictException('Active exception already exists for this vendor on this tender');
     }
 
-    return this.prisma.lateSubmissionException.create({
-      data: {
-        tenderId,
-        vendorId: dto.vendorId,
-        reason: dto.reason,
-        expiresAt,
-        grantedBy: grantedByUserId,
-        grantedAt: new Date(),
-        status: LateExceptionStatus.GRANTED,
-      },
+    const result = await this.prisma.$transaction(async tx => {
+      const exception = await tx.lateSubmissionException.create({
+        data: {
+          tenderId,
+          vendorId: dto.vendorId,
+          reason: dto.reason,
+          expiresAt,
+          grantedBy: grantedByUserId,
+          grantedAt: new Date(),
+          status: LateExceptionStatus.GRANTED,
+        },
+      });
+
+      // Link the most recent DRAFT bid for this (tender, vendor) so the
+      // bid.submit() deadline check can see the exception via prisma include.
+      const draftBid = await tx.bid.findFirst({
+        where: {
+          tenderId,
+          vendorId: dto.vendorId,
+          status: BidStatus.DRAFT,
+          isAlternative: false,
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
+      if (draftBid) {
+        await tx.bid.update({
+          where: { id: draftBid.id },
+          data: { lateExceptionId: exception.id },
+        });
+      }
+
+      return { exception, linkedBidId: draftBid?.id };
     });
+
+    await this.audit.log({
+      eventType: 'LATE_SUBMISSION_EXCEPTION_GRANTED',
+      entityType: 'LateSubmissionException',
+      entityId: result.exception.id,
+      tenderId,
+      vendorId: dto.vendorId,
+      bidId: result.linkedBidId,
+      actorUserId: grantedByUserId,
+      afterValue: {
+        reason: dto.reason,
+        expiresAt: expiresAt.toISOString(),
+        linkedBidId: result.linkedBidId ?? null,
+      },
+      riskLevel: AuditRiskLevel.HIGH,
+    });
+
+    return result.exception;
   }
 
   async isExceptionActive(tenderId: string, vendorId: string): Promise<boolean> {

@@ -1,8 +1,12 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { getAccessToken, clearTokens, hasPermission } from '@/lib/auth';
+import { get } from '@/lib/api';
+
+const POLL_MS = 60_000;
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
@@ -24,6 +28,32 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const token = getAccessToken();
+  const [unackCount, setUnackCount] = useState(0);
+
+  const canViewAudit = !!token && hasPermission(token, 'audit:view');
+
+  useEffect(() => {
+    if (!canViewAudit || !token) return;
+
+    let cancelled = false;
+    async function poll() {
+      try {
+        const res = await get<{ total: number }>(
+          '/security-alerts?unacknowledgedOnly=true&pageSize=1',
+          token,
+        );
+        if (!cancelled) setUnackCount(res.total ?? 0);
+      } catch {
+        // Silent: badge is non-critical UX.
+      }
+    }
+    poll();
+    const handle = setInterval(poll, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [token, canViewAudit]);
 
   const visibleItems = navItems.filter(
     (item) => !item.permission || (token && hasPermission(token, item.permission)),
@@ -48,6 +78,7 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto py-4 px-3">
         {visibleItems.map((item) => {
           const active = pathname.startsWith(item.href);
+          const showBadge = item.href === '/security-alerts' && unackCount > 0;
           return (
             <Link
               key={item.href}
@@ -59,7 +90,15 @@ export function Sidebar() {
               }`}
             >
               <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {showBadge && (
+                <span
+                  className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-semibold flex items-center justify-center"
+                  aria-label={`${unackCount} unacknowledged security alerts`}
+                >
+                  {unackCount > 99 ? '99+' : unackCount}
+                </span>
+              )}
             </Link>
           );
         })}

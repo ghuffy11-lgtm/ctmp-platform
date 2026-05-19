@@ -6,6 +6,131 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-19 — Session cleanup: audit perm alignment, late-exception link + audit, multi-vendor seed, sidebar badge, tracker hygiene
+
+**Date/time:** 2026-05-19  
+**Agent/task:** Eight cleanup tasks queued at session start — align `audit:view` / `audit:read` permission codes; remove SQL workaround from late-submission e2e spec by linking the bid inside `late-submissions.service.create`; emit `LATE_SUBMISSION_EXCEPTION_GRANTED` audit log; seed a second admin user for the multi-vendor spec so committee membership is genuinely two-user; add unacknowledged-alert badge on the admin sidebar; flip Phase 5 tracker checkboxes; dedupe Phase 7 tracker entries.
+
+**Files changed:**
+
+Backend:
+- `apps/api/src/modules/audit/audit.controller.ts` — `audit:read` → `audit:view` on both `GET /audit-logs` and `GET /tenders/:tenderId/audit-logs`. Seed only grants `audit:view`; the previous decorator was effectively a 403 for everyone except System Admin via wildcard fallback (if any).
+- `apps/api/src/modules/late-submissions/late-submissions.service.ts` — `create()` now wraps exception insert + bid link in a single `prisma.$transaction`. After inserting the exception, looks up the most recent non-alternative DRAFT bid for the (tender, vendor) and sets `lateExceptionId`. Emits `LATE_SUBMISSION_EXCEPTION_GRANTED` HIGH-risk audit log with the linked bid id (or null) in `afterValue`.
+- `apps/api/src/modules/late-submissions/late-submissions.module.ts` — imports `AuditModule` so the service can inject `AuditService`.
+
+Frontend:
+- `apps/web-admin/src/components/layout/Sidebar.tsx` — added `useEffect` polling hook (60 s interval) that fetches `GET /security-alerts?unacknowledgedOnly=true&pageSize=1` and reads `total`. Badge component (red pill, `99+` cap, `aria-label`) renders on the Security Alerts nav item when count > 0. Hook short-circuits when the user lacks `audit:view`. Silent on fetch errors — badge is non-critical UX.
+
+QA:
+- `qa/playwright/tests/late-submission.spec.ts` — dropped the `UPDATE bids SET late_exception_id = ...` direct-SQL workaround (now handled by service). Promoted `expect.soft` audit-grant assertion to a hard `expect` since the audit log is now emitted by the service.
+- `qa/playwright/tests/multi-vendor.spec.ts` — added `ADMIN_SECOND` const + extra `ensureAdminUser` call in `beforeAll`. Committee session `memberIds` now `[adminUserId, secondAdminUserId]` instead of `[adminUserId, adminUserId]`. Removes the duplicate-member risk flagged in the earlier handover.
+
+Docs:
+- `agents/backlog/MASTER_TASK_TRACKER.md` — flipped all 14 Phase 5 checkboxes to `[x]` with completion notes (vendor portal scaffold, login, register+CAPTCHA, email verification, forgot/reset, dashboard, tender list, tender detail, clarifications, bid wizard, tech/commercial envelope upload steps, receipt screen, profile). Deduped Phase 7 — removed 6 redundant `[ ]` entries that mirrored already-completed `[x]` items earlier in the same section. Kept the three genuinely-open Phase 7 items: vendor-registration CAPTCHA e2e, vendor password-reset e2e, report-exports e2e.
+
+**What changed:**
+- Permission codes for audit endpoints unified on `audit:view`. Seed data unchanged (already only grants `audit:view`).
+- Late-submission exception grant is now an atomic operation: the exception row, the bid link, and the audit log all happen inside one service call. Spec no longer needs DB-level wiring.
+- Audit log gains a new event type (`LATE_SUBMISSION_EXCEPTION_GRANTED`, HIGH risk) hash-chained alongside every other state-change event.
+- Multi-vendor spec now provisions two distinct admin users so committee membership is realistic.
+- Admin sidebar surfaces unacknowledged `security_alerts` count as a red badge next to the Security Alerts nav item — operators see incidents without navigating away.
+- Tracker is internally consistent again; reading just MASTER_TASK_TRACKER.md gives an accurate phase-completion picture without cross-referencing handovers.
+
+**Why:**
+Tied off the five cleanup follow-ups documented as "Next recommended step" in the previous three handover entries, plus the two tracker drift items, plus the badge UX polish.
+
+**Verification:**
+- `apps/api` tsc clean (`npx tsc --noEmit`).
+- `apps/web-admin` tsc clean.
+- `qa/playwright` tsc clean.
+- `pnpm jest audit.service` — 17/17 pass (no regression from the `audit:read → audit:view` rename, which only touches decorators in the controller).
+- e2e specs not executed in this session (Docker stack not booted locally); changes are type-checked and contract-shaped to existing endpoints.
+
+**Open questions:**
+- Should `LATE_SUBMISSION_EXCEPTION_GRANTED` be added to the golden-path audit-event spot-check list in `golden-path.spec.ts`? Golden path doesn't grant an exception, so not necessary — `late-submission.spec.ts` covers it.
+- The Sidebar polling hook fires on every admin page; consider promoting it to a React context if other components want unack-count read-outs. Defer until a second consumer exists.
+
+**Next recommended step:**
+1. Trigger the first live CI run by pushing the current branch (or creating a `develop` branch and pushing) so `.github/workflows/e2e.yml` boots the full Docker stack and runs all 5 Playwright specs against the new late-submission service flow.
+2. Pick up one of the three remaining Phase 7 items (vendor-registration CAPTCHA e2e, vendor password-reset e2e, or report-exports e2e) once CI is green.
+
+---
+
+## 2026-05-19 — Audit-chain unit tests (verifyChain + log + onModuleInit)
+
+**Date/time:** 2026-05-19  
+**Agent/task:** Task 5 — Write Jest unit tests for AuditService without Postgres.  
+**Files changed:**
+- `apps/api/src/modules/audit/audit.service.spec.ts` (expanded — 17 tests added across 3 new describe blocks)
+
+**What changed:**
+- Added `verifyChain` tests (6): empty chain returns true; single row with GENESIS prev passes; valid 3-row chain passes; row whose `prevHashChainValue` differs from predecessor's `hashChainValue` returns false; row whose `hashChainValue` is tampered returns false; limit param restricts rows fetched.
+- Added `log` tests (4): advisory lock `pg_advisory_xact_lock(0x6354_4d50)` is the first `$executeRaw` call inside the transaction; genesis hash (`SHA-256('0'.repeat(64) + canonical(payload))`) is written when no prior row exists; chain continues from prior row's `hashChainValue`; exact SHA-256 output matches Node `crypto.createHash('sha256')` over the same input.
+- Added `onModuleInit` tests (3): skips verification when `AUDIT_VERIFY_ON_START=false`; success path calls `verifyChain` and does not create a security alert; integrity failure creates a CRITICAL `security_alerts` row tagged `AUDIT_CHAIN_BREAK`.
+- Fixed `clearAllMocks()` wipe issue: `jest.clearAllMocks()` zeros mock implementations as well as call counts; callback-style `$transaction` mock was wiped between tests. Fix: explicit `prismaMock.$transaction.mockImplementation((cb) => cb(mockTx))` restore in `beforeEach`.
+
+**Why:** Adds fast, no-Postgres regression coverage for the three most critical paths of the audit hash-chain feature introduced in the production-hardening task.
+
+**Verification:** `pnpm --filter @ctmp/api run test audit.service` — 17 passed, 0 failed.
+
+**Open questions:** None.
+
+**Next recommended step:** Run the full e2e suite via the wired CI workflow (push to `develop` branch will trigger `.github/workflows/e2e.yml`).
+
+---
+
+## 2026-05-19 — Security-alerts backend API (GET + PATCH acknowledge)
+
+**Date/time:** 2026-05-19  
+**Agent/task:** Tasks 2 & 3 — Write failing tests then implement `GET /security-alerts` and `PATCH /security-alerts/:id/acknowledge`.  
+**Files changed:**
+- `apps/api/src/modules/audit/audit.service.ts` (added `listSecurityAlerts`, `acknowledgeAlert`)
+- `apps/api/src/modules/audit/audit.controller.ts` (added two endpoints)
+- `apps/api/src/modules/audit/audit.service.spec.ts` (added failing tests first, then went green)
+
+**What changed:**
+- `listSecurityAlerts({ page, pageSize, unacknowledgedOnly })` — paginated Prisma query on `SecurityAlert`, page clamped to ≥1, pageSize clamped 1–200, BigInt `id` serialized as `String(a.id)` in response, `null` optionals stripped to `undefined`.
+- `acknowledgeAlert(id: bigint, acknowledgedBy: string)` — updates `acknowledgedBy` + `acknowledgedAt`; catches Prisma P2025 (`Record not found`) and converts to `NotFoundException`.
+- Controller `GET audit/security-alerts` — parses `page`/`pageSize`/`unacknowledgedOnly` from query, calls service. `PATCH audit/security-alerts/:id/acknowledge` — regex guard `^\d+$` before `BigInt(id)` conversion (prevents unhandled SyntaxError → 500); calls service with `CurrentUser('id')`.
+- Both endpoints gated by `@RequirePermissions('audit:view')`.
+
+**Why:** Surfaces `AUDIT_CHAIN_BREAK` alerts generated by the startup chain verifier; consumed by the `/security-alerts` admin page.
+
+**Verification:** TDD — tests written RED first, implementation made all green.
+
+**Open questions:** None.
+
+**Next recommended step:** Review `audit:view` vs `audit:read` inconsistency — existing audit-log endpoints use `audit:read`; new security-alert endpoints use `audit:view`. Align on one permission code in a future cleanup.
+
+---
+
+## 2026-05-19 — CI e2e pipeline (GitHub Actions)
+
+**Date/time:** 2026-05-19  
+**Agent/task:** Task 1 — Wire GitHub Actions workflow that boots the full Docker Compose stack and runs all 5 Playwright specs.  
+**Files changed:**
+- `.github/workflows/e2e.yml` (created)
+
+**What changed:**
+- Workflow triggers on push to `main`/`develop` and on all pull requests.
+- Creates `infrastructure/docker/.env` via heredoc (content at column 0 — required by shell `<< 'EOF'`; GitHub Actions YAML is parsed as a block scalar so the content is valid even though indented YAML would reject column-0 lines).
+- Builds and starts the full stack: postgres, redis, mailhog, minio, api, web-admin, web-vendor.
+- Four health-wait loops (30 × 5 s each with `exit 0` on success, `exit 1` after exhaustion): `docker exec ctmp-postgres pg_isready`, `curl -sf http://localhost:3000/api/health`, `curl -sf http://localhost:4200`, `curl -sf http://localhost:4300`.
+- Installs pnpm 9 + Node 22 + `pnpm install --frozen-lockfile` (root install for workspace symlinking) + Playwright Chromium.
+- Runs `pnpm --filter @ctmp/qa-playwright run test` with all required env vars (`QA_API_URL`, `QA_ADMIN_URL`, `QA_VENDOR_URL`, `QA_MAILHOG_URL`, `QA_JWT_SECRET`, `QA_VENDOR_JWT_SECRET`, `DATABASE_URL`).
+- Uploads `playwright-report/` (14-day retention) and `test-results/` traces (7-day retention) as artifacts, always.
+- Dumps last 100 lines of compose logs on failure.
+
+**Why:** Makes CI the gate for all 5 e2e specs (golden-path, late-submission, email-verification, multi-vendor, commercial-visibility).
+
+**Verification:** Workflow file passes YAML parse; heredoc placement and wait-loop logic reviewed for shell correctness.
+
+**Open questions:** None.
+
+**Next recommended step:** Push to `develop` branch to trigger the first live CI run; monitor the Actions tab for any timing issues with health-wait loops.
+
+---
+
 ## 2026-05-19 — Admin Portal: /security-alerts page + sidebar nav item
 
 **Date/time:** 2026-05-19  

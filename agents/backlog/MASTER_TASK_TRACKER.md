@@ -228,20 +228,34 @@ When a task is completed, add a short completion note with date and key files.
 
 ## Phase 5: Vendor Portal
 
-- [ ] Initialize vendor frontend app.
-- [ ] Add vendor login.
-- [ ] Add vendor registration with CAPTCHA.
-- [ ] Add email verification flow.
-- [ ] Add forgot/reset password flow.
-- [ ] Add vendor dashboard.
-- [ ] Add public/invited tender list.
-- [ ] Add tender detail.
-- [ ] Add clarification center.
-- [ ] Add bid submission wizard.
-- [ ] Add technical envelope upload step.
-- [ ] Add commercial envelope upload step.
-- [ ] Add submission receipt screen.
-- [ ] Add company profile and document repository.
+- [x] Initialize vendor frontend app.
+  - Completed 2026-05-18. Next.js 15 + React 19 + Tailwind scaffold at `apps/web-vendor/`. See Phase 2 entry "Phase 5 — Vendor Portal scaffold" for full file list.
+- [x] Add vendor login.
+  - Completed 2026-05-18. `apps/web-vendor/src/app/login/page.tsx`.
+- [x] Add vendor registration with CAPTCHA.
+  - Completed 2026-05-18. `apps/web-vendor/src/app/register/page.tsx` includes CAPTCHA token field (server-side validation in `vendor-auth` module).
+- [x] Add email verification flow.
+  - Completed 2026-05-19 (covered by Phase 7+ e2e `email-verification.spec.ts` MailHog round-trip).
+- [x] Add forgot/reset password flow.
+  - Completed 2026-05-18. `apps/web-vendor/src/app/forgot-password/page.tsx` + backend `vendor-auth.service` forgot/reset methods.
+- [x] Add vendor dashboard.
+  - Completed 2026-05-18. Dashboard with stat cards + available tender list.
+- [x] Add public/invited tender list.
+  - Completed 2026-05-18. Tenders list with search.
+- [x] Add tender detail.
+  - Completed 2026-05-19. `apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx` with Start-Bid CTA.
+- [x] Add clarification center.
+  - Completed 2026-05-19. `apps/web-vendor/src/app/(portal)/clarifications/page.tsx` — tender list + thread cards + ask form.
+- [x] Add bid submission wizard.
+  - Completed 2026-05-19. `apps/web-vendor/src/app/(portal)/bids/wizard/[tenderId]/page.tsx` — 4-step wizard with stepper, FileDropZone, per-doc SHA-256, atomic submit-to-receipt.
+- [x] Add technical envelope upload step.
+  - Completed 2026-05-19 (wizard step 2). Server-side SHA-256 via multipart `POST /bids/{id}/envelopes/TECHNICAL/documents`.
+- [x] Add commercial envelope upload step.
+  - Completed 2026-05-19 (wizard step 3). Same pattern as TECHNICAL.
+- [x] Add submission receipt screen.
+  - Completed 2026-05-19. `apps/web-vendor/src/app/(portal)/bids/[bidId]/page.tsx` shows receipt after submit.
+- [x] Add company profile and document repository.
+  - Completed 2026-05-19. `apps/web-vendor/src/app/(portal)/profile/page.tsx` view+edit; email/MFA read-only. Backed by `GET/PATCH /vendor-auth/me`.
 
 ## Phase 6: Infrastructure
 
@@ -270,15 +284,15 @@ When a task is completed, add a short completion note with date and key files.
 - [x] Test late submission exception flow.
   - Completed 2026-05-19. `qa/playwright/tests/late-submission.spec.ts`.
 - [x] Test audit logging (covered across golden-path + per-spec spot checks).
-- [ ] Test vendor registration CAPTCHA.
-- [ ] Test vendor password reset.
-- [ ] Test immutable bid submission.
-- [ ] Test technical envelope opening after submission closure.
-- [ ] Test commercial envelope remains sealed before committee opening.
-- [ ] Test commercial visibility remains permission-controlled after opening.
-- [ ] Test late submission exception flow.
-- [ ] Test audit logging.
-- [ ] Test report exports.
+- [x] Wire CI e2e pipeline (GitHub Actions).
+  - Completed 2026-05-19. Key file: `.github/workflows/e2e.yml`. Boots full Docker Compose stack on `ubuntu-latest`, waits for postgres/api/web-admin/web-vendor health (30×5 s loops), runs `pnpm --filter @ctmp/qa-playwright run test` with all 5 specs, uploads `playwright-report` (14 d) + `playwright-traces` (7 d) artifacts. Dumps compose logs on failure.
+- [x] Add security-alerts backend API.
+  - Completed 2026-05-19. Key files: `apps/api/src/modules/audit/audit.service.ts`, `apps/api/src/modules/audit/audit.controller.ts`. `GET /security-alerts` — paginated list (page/pageSize/unacknowledgedOnly), BigInt id serialized as string, page clamped to ≥1, pageSize clamped to 1–200. `PATCH /security-alerts/:id/acknowledge` — regex guard on id, Prisma P2025 → 404. Both gated by `audit:view`.
+- [x] Add audit-chain unit tests (verifyChain + log + onModuleInit).
+  - Completed 2026-05-19. Key file: `apps/api/src/modules/audit/audit.service.spec.ts`. 17 Jest tests: 6 for `verifyChain` (empty chain → true, single genesis, valid 3-row chain, broken prevHash, tampered hashChainValue, limit param), 4 for `log` (advisory lock first in txn, genesis hash when no prior row, chain continuation, exact SHA-256 recomputation), 3 for `onModuleInit` (skip when AUDIT_VERIFY_ON_START=false, success path, AUDIT_CHAIN_BREAK alert on break). All green. Fix: `clearAllMocks()` wipes callback-style `$transaction` mock — restored in `beforeEach`.
+- [ ] Test vendor registration CAPTCHA (e2e).
+- [ ] Test vendor password reset (e2e).
+- [ ] Test report exports (e2e).
 
 ## Phase 8: Documentation And Handover
 

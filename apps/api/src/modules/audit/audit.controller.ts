@@ -15,14 +15,14 @@ export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 
   @Get('audit-logs')
-  @RequirePermissions('audit:read')
+  @RequirePermissions('audit:view')
   @ApiOperation({ operationId: 'searchAuditLogs', summary: 'Search system-wide audit logs' })
   search(@Query() query: AuditSearchDto) {
     return this.auditService.search(query);
   }
 
   @Get('tenders/:tenderId/audit-logs')
-  @RequirePermissions('audit:read')
+  @RequirePermissions('audit:view')
   @ApiOperation({ operationId: 'getTenderAuditLogs', summary: 'Get audit logs for a specific tender' })
   getTenderLogs(@Param('tenderId') tenderId: string, @Query() query: AuditSearchDto) {
     return this.auditService.getTenderLogs(tenderId, query);

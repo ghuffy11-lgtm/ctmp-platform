@@ -15,6 +15,11 @@ const ADMIN = {
   password: 'QaMultiPass!2026',
   displayName: 'QA Multi Admin',
 };
+const ADMIN_SECOND = {
+  email: 'qa-multi-admin2@hadiclinic.com.kw',
+  password: 'QaMultiPass!2026',
+  displayName: 'QA Multi Admin Second',
+};
 
 const VENDORS = [
   {
@@ -61,12 +66,14 @@ interface SubmittedBid {
 
 test.describe.serial('Multi-vendor competitive bidding', () => {
   let adminUserId: string;
+  let secondAdminUserId: string;
   let adminToken: string;
   let tenderId: string;
   const bids: SubmittedBid[] = [];
 
   test.beforeAll(async () => {
     adminUserId = await ensureAdminUser(ADMIN);
+    secondAdminUserId = await ensureAdminUser(ADMIN_SECOND);
     tenderId = await ensurePublishedTender({
       reference: TENDER.reference,
       title: TENDER.title,
@@ -137,7 +144,9 @@ test.describe.serial('Multi-vendor competitive bidding', () => {
   });
 
   test('commercial comparison ranks passed bids by price; failed bid excluded', async () => {
-    // Open commercial envelopes via a committee session.
+    // Open commercial envelopes via a committee session. Two distinct admins so
+    // the committee service can build a real quorum (some configs reject duplicate
+    // member ids).
     const session = await authJson<{ id: string; committeeMembers: Array<{ userId: string }> }>(
       adminToken,
       `/tenders/${tenderId}/committee-sessions`,
@@ -145,7 +154,7 @@ test.describe.serial('Multi-vendor competitive bidding', () => {
         method: 'POST',
         body: JSON.stringify({
           scheduledAt: new Date().toISOString(),
-          memberIds: [adminUserId, adminUserId],
+          memberIds: [adminUserId, secondAdminUserId],
         }),
       },
     );

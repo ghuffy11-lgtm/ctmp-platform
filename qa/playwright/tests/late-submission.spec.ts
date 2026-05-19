@@ -116,15 +116,9 @@ test.describe.serial('Late submission exception flow', () => {
     const draftBid = myBids.items.find(b => b.tenderId === tenderId && b.status === 'DRAFT');
     expect(draftBid, 'draft bid still exists after first failed submit').toBeTruthy();
 
-    // Link the exception to the bid. The bids table has late_exception_id;
-    // submit() consults it via prisma include. Real flow would link this in the
-    // exception-grant service; for QA we wire it directly so submit can see it.
-    await withDb(async client => {
-      await client.query(
-        `UPDATE bids SET late_exception_id = $1 WHERE id = $2`,
-        [exception.id, draftBid!.id],
-      );
-    });
+    // late-submissions.service.create() now links the active DRAFT bid to the
+    // new exception inside the same transaction — submit() picks it up via the
+    // bid.lateException prisma include without any QA-side wiring.
 
     const receipt = await authJson<{ receiptNumber: string; submittedAt: string }>(
       vendorToken,
@@ -149,12 +143,7 @@ test.describe.serial('Late submission exception flow', () => {
       '/audit-logs?pageSize=200',
     );
     const events = audit.items.map(i => i.eventType);
-    // Either the dedicated event or a generic LATE_SUBMISSION_* — accept either.
-    const hasLateGrant = events.some(e =>
-      e === 'LATE_SUBMISSION_EXCEPTION_GRANTED' || e === 'LATE_EXCEPTION_GRANTED',
-    );
-    // Backend may not have wired this audit yet; assert soft via expect.soft so the spec
-    // still passes for now but flags the gap in the report.
-    expect.soft(hasLateGrant, 'late-exception grant produces an audit row').toBeTruthy();
+    const hasLateGrant = events.includes('LATE_SUBMISSION_EXCEPTION_GRANTED');
+    expect(hasLateGrant, 'late-exception grant produces an audit row').toBeTruthy();
   });
 });
