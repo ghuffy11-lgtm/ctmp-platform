@@ -36,7 +36,7 @@ export function FileDropZone({ bidId, envelopeType, onUploaded, disabled }: File
       const token = getAccessToken();
       const fd = new FormData();
       fd.append('file', file, file.name);
-      const res = await fetch(`${API_BASE}/api/bids/${bidId}/envelopes/${envelopeType}/documents`, {
+      const res = await fetch(`${API_BASE}/api/v1/bids/${bidId}/envelopes/${envelopeType}/documents`, {
         method: 'POST',
         body: fd,
         headers: token ? { Authorization: `Bearer ${token}` } : {},
