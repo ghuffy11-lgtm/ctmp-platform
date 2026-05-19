@@ -178,7 +178,7 @@ test.describe.serial('Report export enqueue → poll → download', () => {
       password: 'QaReport2Pass!2026',
       displayName: 'QA Report Admin 2',
     });
-    const secondAdminToken = signAdminToken(secondAdminId);
+    const secondAdminToken = await signAdminToken(secondAdminId);
 
     const downloadRes = await fetch(`${API_BASE}/api/v1/reports/jobs/${jobId}/download`, {
       headers: { 'Authorization': `Bearer ${secondAdminToken}` },
