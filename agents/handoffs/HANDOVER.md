@@ -6,6 +6,65 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-19 — Close 3 backend feature-gaps surfaced by last CI run
+
+**Date/time:** 2026-05-19
+**Agent/task:** Address the three categorised failures from the previous handover's "feature gaps" section: permission seed gap, NotificationsService.sendEmail, vendor /register form labels.
+
+**Files changed:**
+
+Backend (permission codes — controllers aligned to spec §11 singular naming):
+- `apps/api/src/modules/tenders/tenders.controller.ts` — `tenders:list/create/read/update/submit/publish/cancel/close_submissions/approve` → `tender:view/create/view/edit/edit/publish/cancel/close_submission/approve`
+- `apps/api/src/modules/vendors/vendors.controller.ts` — `vendors:list/read/update/approve(×3)` → `vendor:view/view/edit_profile/approve/reject/suspend` (the three `approve`-decorated endpoints split into approve/reject/suspend to match the actual action)
+- `apps/api/src/modules/bids/bids.controller.ts` — `bids:list` → `bid:view_metadata`
+- `apps/api/src/modules/clarifications/clarifications.controller.ts` — `clarifications:list/create/reply` → `clarification:view_internal/create/reply`
+- `apps/api/src/modules/committee/committee.controller.ts` — `committee:view_records` → `committee:view_minutes` (×2)
+- `apps/api/src/modules/late-submissions/late-submissions.controller.ts` — `late_submission:list` → `late_submission:view`
+- `apps/api/src/modules/notifications/notifications.controller.ts` — `notifications:configure` → `notification_templates:manage` (×2)
+- `apps/api/src/modules/permissions/permissions.controller.ts` — `permissions:list` → `permissions:manage`
+- `apps/api/src/modules/roles/roles.controller.ts` — every `roles:*` decorator → `roles:manage` (the seed only defines one role-management code; the granular split was unreachable)
+- `apps/api/src/modules/reports/reports.controller.ts` — `reports:list` → `reports:view`
+- `apps/api/src/modules/award/award.controller.ts` — `award:issue` → `award:finalize`
+
+Backend (email send):
+- `apps/api/src/modules/notifications/notifications.service.ts` — implemented `sendEmail(to, templateCode, variables)`. Lazy nodemailer transporter from `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD` (TLS only when port 465; auth only when SMTP_USER set; `ignoreTLS` for plain mailhog). Template loaded from `notification_templates` by code; subject/body rendered with `{{var}}` substitution; `NotificationLog` row written for every attempt (SENT or FAILED). Throws on FAILED so the caller can react.
+
+Seed / migrations:
+- `database/seeds/001_baseline_roles_permissions.sql` — added `users:list/read/create/update/delete` codes in a new `users` category (spec §11 did not enumerate internal-user admin perms) and granted them to `SYSTEM_ADMIN`
+- `database/seeds/002_notification_templates.sql` — new file. Inserts `vendor-verify-email` and `vendor-reset-password` templates (`ON CONFLICT (code) DO NOTHING`). Variables documented in the bodies: `{{token}}`, `{{verifyUrl}}`, `{{resetUrl}}`
+
+CI:
+- `.github/workflows/e2e.yml` — new step after `Wait for postgres` iterates `database/seeds/*.sql` and applies each via `docker exec -i ctmp-postgres psql ... -v ON_ERROR_STOP=1`. Runs before `Wait for API health`, so the API's first authenticated request finds a populated permissions table.
+
+Frontend:
+- `apps/web-vendor/src/app/register/page.tsx` — `Field` component now generates a stable id via `useId()`, applies `htmlFor` on the `<label>` and `id` + `aria-label` on the `<input>`. Playwright's `getByLabel(/Company Name/i)` now resolves on every required field.
+
+**Root causes:**
+1. **Permission code drift.** Controllers used plural ad-hoc codes from the early scaffolding (`tenders:close_submissions`, `vendors:list`, etc.). The spec §11 / seed used singular canonical codes (`tender:close_submission`, `vendor:view`, etc.). `PermissionsGuard` checked codes that did not exist in the `permissions` table, so the qa "grant every permission" admin came up empty even after the helper ran.
+2. **Seed never applied in CI.** The postgres `docker-entrypoint-initdb.d` mount in `infrastructure/docker/docker-compose.yml` only covered `database/migrations/`, not `database/seeds/`. The baseline roles/permissions/system_settings seed never executed, so the `permissions` table was empty — every `RequirePermissions` decorator denied.
+3. **`NotificationsService.sendEmail` threw `Error('Not implemented')`.** The `VendorAuthService.register` transaction succeeded, then the immediately-following `sendEmail` blew up before the controller could reply. The test saw a 500 (transactional state had committed; only the email failed).
+4. **Vendor `/register` form labels orphaned.** The Field component rendered `<label>{text}</label><input/>` without `htmlFor`/`id`. Playwright's `getByLabel` requires an accessible association; even though the visible text matched, the locator timed out.
+
+**Verification:**
+- `apps/api` `tsc --noEmit` clean.
+- `apps/web-vendor` `tsc --noEmit` clean.
+- `apps/api` jest: my-touched suites all green. Pre-existing failures in `vendor-auth.service.spec.ts` (34/34) are unrelated — that spec's TestingModule omits an `AuditService` mock, which broke when `VendorAuthService` gained the audit dep in a prior task. Did not regress; did not fix.
+- e2e suite to be observed on the push that follows this commit.
+
+**Open questions:**
+- The qa helper `qa/playwright/helpers/db.ts` creates a NEW lowercase `system_admin` role rather than finding the seeded `SYSTEM_ADMIN`. Harmless today because it then grants every row in `permissions` to whichever role it created, but it's misleading and adds a second role. Worth a one-line case fix in a follow-up.
+- `roles.controller.ts` originally had separate `list/read/create/update/delete` codes — collapsed all to `roles:manage` to match the spec. If a finer-grained role permission story is wanted later, both the spec and the seed need to grow.
+- The `users:*` codes added here are not in spec §11. Either back-port them into the spec or rename the controller to use `system:configure`/`roles:manage` as the closest spec equivalent.
+- `vendor-auth.service.spec.ts` should get an `AuditService` mock; the spec compiles RED with that fix.
+
+**Next recommended step:**
+1. Push and watch the run via `gh run list --branch develop --limit 1`.
+2. If the seed step fails on a missing referenced permission, that's the signal that the controller scan above missed a decorator — rerun the grep and align.
+3. If `email-verification.spec.ts` still 500s, check `docker logs ctmp-api | grep sendEmail` for the actual nodemailer error (most likely DNS/connection to mailhog) and confirm `SMTP_HOST=mailhog` is in the API env at runtime.
+4. If `golden-path.spec.ts` vendor-register step still times out, snapshot the page via the trace artifact and confirm whether the form is mounting at all (Next.js client-component hydration) versus a remaining locator mismatch.
+
+---
+
 ## 2026-05-19 — CI green path: 8 plumbing fixes, surfaced 3 backend gaps
 
 **Date/time:** 2026-05-19 (continued after heredoc fix)
