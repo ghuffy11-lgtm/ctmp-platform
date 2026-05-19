@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Commercial Comparison - CTMP</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-fixed-dim": "#edbf7f",
+                        "on-surface-variant": "#43474e",
+                        "on-tertiary-fixed-variant": "#60410c",
+                        "on-secondary-fixed": "#00174b",
+                        "inverse-on-surface": "#f1f0f4",
+                        "surface-container-lowest": "#ffffff",
+                        "outline-variant": "#c4c6cf",
+                        "on-error": "#ffffff",
+                        "on-secondary-fixed-variant": "#003ea8",
+                        "tertiary": "#341f00",
+                        "on-primary": "#ffffff",
+                        "surface-container-highest": "#e3e2e6",
+                        "outline": "#74777f",
+                        "inverse-surface": "#2f3033",
+                        "error-container": "#ffdad6",
+                        "surface-container-low": "#f4f3f7",
+                        "secondary-fixed": "#dbe1ff",
+                        "on-primary-container": "#8aa4cf",
+                        "surface-dim": "#dad9dd",
+                        "surface-variant": "#e3e2e6",
+                        "on-surface": "#1a1c1e",
+                        "background": "#faf9fc",
+                        "tertiary-container": "#503300",
+                        "on-tertiary-fixed": "#291800",
+                        "on-tertiary-container": "#c69b5f",
+                        "inverse-primary": "#adc8f5",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-fixed-variant": "#2d486d",
+                        "secondary-fixed-dim": "#b4c5ff",
+                        "primary-fixed": "#d5e3ff",
+                        "on-primary-fixed": "#001c3b",
+                        "on-background": "#1a1c1e",
+                        "surface-container-high": "#e9e7eb",
+                        "on-error-container": "#93000a",
+                        "error": "#ba1a1a",
+                        "tertiary-fixed": "#ffddb2",
+                        "surface": "#faf9fc",
+                        "secondary": "#0051d5",
+                        "primary": "#022448",
+                        "on-secondary-container": "#fefcff",
+                        "on-secondary": "#ffffff",
+                        "surface-bright": "#faf9fc",
+                        "primary-fixed-dim": "#adc8f5",
+                        "surface-container": "#eeedf1",
+                        "surface-tint": "#455f87",
+                        "primary-container": "#1e3a5f"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "stack-sm": "0.5rem",
+                        "gutter": "1.5rem",
+                        "container-padding": "2rem",
+                        "stack-md": "1rem",
+                        "sidebar-width": "260px",
+                        "stack-lg": "1.5rem"
+                    },
+                    "fontFamily": {
+                        "title-sm": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "title-lg": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "label-md": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "body-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "title-sm": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                        "label-sm": ["11px", {"lineHeight": "14px", "fontWeight": "500"}],
+                        "title-lg": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "display-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .table-fixed-header thead th { position: sticky; top: 0; z-index: 10; }
+    </style>
+</head>
+<body class="text-on-background">
+<!-- SideNavBar (Authority: JSON & Style Guidance) -->
+<aside class="w-[260px] h-screen fixed left-0 top-0 bg-primary dark:bg-primary-container flex flex-col py-stack-lg z-50">
+<div class="px-6 mb-8">
+<h1 class="font-title-lg text-title-lg font-bold text-on-primary">CTMP Admin</h1>
+<p class="text-on-primary/60 font-label-md text-label-md">Enterprise Procurement</p>
+</div>
+<nav class="flex-1 overflow-y-auto">
+<ul class="space-y-1">
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined" data-icon="dashboard">dashboard</span> <span class="font-label-md text-label-md">Dashboard</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined" data-icon="gavel">gavel</span> <span class="font-label-md text-label-md">Tenders</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined" data-icon="fact_check">fact_check</span> <span class="font-label-md text-label-md">Approvals</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined" data-icon="question_answer">question_answer</span> <span class="font-label-md text-label-md">Clarifications</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined" data-icon="analytics">analytics</span> <span class="font-label-md text-label-md">Technical Evaluation</span></a></li>
+<!-- Active Tab: Committee & Commercial -->
+<li><a class="flex items-center gap-stack-md px-4 py-3 bg-white/10 border-l-4 border-secondary text-on-primary opacity-90 transition-all duration-150" href="#"><span class="material-symbols-outlined" data-icon="groups">groups</span> <span class="font-label-md text-label-md">Committee &amp; Commercial</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined" data-icon="account_balance">account_balance</span> <span class="font-label-md text-label-md">Vendor Management</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined" data-icon="description">description</span> <span class="font-label-md text-label-md">Reports</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined" data-icon="history">history</span> <span class="font-label-md text-label-md">Audit Log</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined" data-icon="settings">settings</span> <span class="font-label-md text-label-md">System Configuration</span></a></li>
+</ul>
+</nav>
+</aside>
+<!-- TopNavBar -->
+<header class="fixed top-0 left-0 right-0 h-16 bg-surface dark:bg-surface-dim border-b border-outline-variant shadow-sm z-40 pl-[260px] flex justify-between items-center px-gutter">
+<div class="flex items-center gap-stack-md">
+<h2 class="font-headline-md text-headline-md font-bold text-primary">Tender Management Portal</h2>
+<div class="relative ml-8">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">search</span>
+<input class="pl-10 pr-4 py-2 bg-surface-container border border-outline rounded-lg text-body-sm w-64 focus:ring-2 focus:ring-secondary outline-none" placeholder="Search Tenders..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-gutter">
+<div class="text-right">
+<p class="font-label-md text-label-md text-on-surface">Admin User</p>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-wider">Procurement Dept</p>
+</div>
+<div class="flex items-center gap-stack-md">
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-container-high transition-colors text-primary relative">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full"></span>
+</button>
+<div class="w-10 h-10 rounded-full bg-primary-fixed-dim flex items-center justify-center overflow-hidden border border-outline-variant">
+<img alt="User Profile" class="w-full h-full object-cover" data-alt="A professional headshot of a corporate procurement officer in a modern workspace, soft natural lighting, high-end digital aesthetic, professional suit, neutral grey background, clean and professional look." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDdaw_zqqYomZ-NhsSgIXax9h-WD8u-UkuhAdsTAwOTpY_XnVYf_Pwmv5-b-3alnc-aUMuVb3TkDpElJzYVVrdStSTatMAHTn2EwxkXzRcS9tQMdGc2VtCrC6eVb2tFIAMjmkezBKytRemxfWmF3mHiE7tsoxBKf3Y6YTq3BOIqRGw4-nUJWgagxNldtFBm5Lbs20oCE5oEosn8frlLZush6BLFfNNHX2pWyIjdJW7_JViObu50tVBzRGAeyFhHDKsokgPPiIwaTBE-"/>
+</div>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-container-high transition-colors text-error">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+</button>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="ml-[260px] pt-16 min-h-screen">
+<div class="p-container-padding">
+<!-- Page Header Section -->
+<div class="flex justify-between items-end mb-8">
+<div>
+<nav class="flex items-center gap-2 mb-2 text-on-surface-variant">
+<span class="font-label-md text-label-md">Tenders</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+<span class="font-label-md text-label-md">#TDR-2024-0082</span>
+</nav>
+<div class="flex items-center gap-4">
+<h3 class="font-display-lg text-display-lg text-primary">Commercial Comparison - Tender #TDR-2024-0082</h3>
+<span class="px-3 py-1 bg-secondary/10 text-secondary text-label-md font-bold rounded-full border border-secondary/20 flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">verified_user</span>
+                            Authorized
+                        </span>
+</div>
+</div>
+<div class="flex items-center gap-stack-md">
+<span class="text-on-surface-variant flex items-center gap-1 font-label-md text-label-md opacity-60">
+<span class="material-symbols-outlined text-[18px]">history</span>
+                        Audit Logged
+                    </span>
+<button class="flex items-center gap-2 px-4 py-2 border border-primary text-primary hover:bg-primary-fixed transition-colors rounded-lg font-label-md text-label-md">
+<span class="material-symbols-outlined" data-icon="picture_as_pdf">picture_as_pdf</span>
+                        Export to PDF
+                    </button>
+</div>
+</div>
+<!-- Bento Stats / Summary Row (Custom UI Enhancement) -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-gutter mb-8">
+<div class="bg-white p-6 rounded-xl border border-outline-variant shadow-sm flex flex-col gap-1">
+<span class="text-on-surface-variant font-label-md text-label-md">Total Bids Received</span>
+<span class="font-headline-md text-headline-md text-primary">4 Vendors</span>
+</div>
+<div class="bg-white p-6 rounded-xl border border-outline-variant shadow-sm flex flex-col gap-1">
+<span class="text-on-surface-variant font-label-md text-label-md">Lowest Commercial Bid</span>
+<span class="font-headline-md text-headline-md text-success">$145,000.00</span>
+</div>
+<div class="bg-white p-6 rounded-xl border border-outline-variant shadow-sm flex flex-col gap-1 border-l-4 border-l-secondary">
+<span class="text-on-surface-variant font-label-md text-label-md">Budget Allocation</span>
+<span class="font-headline-md text-headline-md text-primary">$175,000.00</span>
+</div>
+<div class="bg-white p-6 rounded-xl border border-outline-variant shadow-sm flex flex-col gap-1">
+<span class="text-on-surface-variant font-label-md text-label-md">Evaluation Phase</span>
+<span class="font-headline-md text-headline-md text-primary">Final Comparison</span>
+</div>
+</div>
+<!-- Main Comparison Table Card -->
+<div class="bg-white rounded-xl border border-outline-variant shadow-sm overflow-hidden">
+<div class="px-gutter py-4 border-b border-outline-variant bg-surface-container-low flex justify-between items-center">
+<h4 class="font-title-sm text-title-sm text-primary">Bid Comparison Matrix</h4>
+<div class="flex gap-2">
+<button class="p-2 hover:bg-surface-container-highest rounded transition-colors text-on-surface-variant"><span class="material-symbols-outlined">filter_list</span></button>
+<button class="p-2 hover:bg-surface-container-highest rounded transition-colors text-on-surface-variant"><span class="material-symbols-outlined">fullscreen</span></button>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse table-fixed-header">
+<thead>
+<tr class="bg-surface-container-high text-on-surface-variant border-b border-outline-variant">
+<th class="px-6 py-4 font-label-md text-label-md uppercase tracking-wider w-64">Vendor Name</th>
+<th class="px-6 py-4 font-label-md text-label-md uppercase tracking-wider">Unit Price</th>
+<th class="px-6 py-4 font-label-md text-label-md uppercase tracking-wider">Total Price</th>
+<th class="px-6 py-4 font-label-md text-label-md uppercase tracking-wider">Delivery Terms</th>
+<th class="px-6 py-4 font-label-md text-label-md uppercase tracking-wider">Payment Terms</th>
+<th class="px-6 py-4 font-label-md text-label-md uppercase tracking-wider">Validity</th>
+<th class="px-6 py-4 font-label-md text-label-md uppercase tracking-wider">Notes</th>
+<th class="px-6 py-4 font-label-md text-label-md uppercase tracking-wider text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<!-- Row 1: TechSystems (Highlighted) -->
+<tr class="bg-green-50/40 hover:bg-green-50 transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-green-100 flex items-center justify-center text-green-700 font-bold text-[10px]">TS</div>
+<div>
+<p class="font-title-sm text-title-sm text-on-surface">TechSystems Solutions</p>
+<span class="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded uppercase">Lowest Price</span>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 font-body-md text-body-md">$145.00</td>
+<td class="px-6 py-4 font-title-sm text-title-sm text-primary">$145,000.00</td>
+<td class="px-6 py-4 font-body-md text-body-md">30 days delivery</td>
+<td class="px-6 py-4 font-body-md text-body-md">Net 30</td>
+<td class="px-6 py-4 font-body-md text-body-md">90 days</td>
+<td class="px-6 py-4 font-body-sm text-body-sm text-on-surface-variant italic">Bulk discount applied.</td>
+<td class="px-6 py-4 text-right">
+<button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-secondary hover:bg-secondary/10 rounded transition-colors font-label-md text-label-md">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                                        Download Bid
+                                    </button>
+</td>
+</tr>
+<!-- Row 2: Global Infra Corp -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-primary-fixed-dim flex items-center justify-center text-primary font-bold text-[10px]">GI</div>
+<p class="font-title-sm text-title-sm text-on-surface">Global Infra Corp</p>
+</div>
+</td>
+<td class="px-6 py-4 font-body-md text-body-md">$152.00</td>
+<td class="px-6 py-4 font-title-sm text-title-sm text-on-surface">$152,000.00</td>
+<td class="px-6 py-4 font-body-md text-body-md">45 days delivery</td>
+<td class="px-6 py-4 font-body-md text-body-md">Net 45</td>
+<td class="px-6 py-4 font-body-md text-body-md">120 days</td>
+<td class="px-6 py-4 font-body-sm text-body-sm text-on-surface-variant">-</td>
+<td class="px-6 py-4 text-right">
+<button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-secondary hover:bg-secondary/10 rounded transition-colors font-label-md text-label-md">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                                        Download Bid
+                                    </button>
+</td>
+</tr>
+<!-- Row 3: Pinnacle Consulting -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-primary-fixed-dim flex items-center justify-center text-primary font-bold text-[10px]">PC</div>
+<p class="font-title-sm text-title-sm text-on-surface">Pinnacle Consulting Group</p>
+</div>
+</td>
+<td class="px-6 py-4 font-body-md text-body-md">$148.50</td>
+<td class="px-6 py-4 font-title-sm text-title-sm text-on-surface">$148,500.00</td>
+<td class="px-6 py-4 font-body-md text-body-md">30 days delivery</td>
+<td class="px-6 py-4 font-body-md text-body-md">50% Upfront</td>
+<td class="px-6 py-4 font-body-md text-body-md">90 days</td>
+<td class="px-6 py-4 font-body-sm text-body-sm text-on-surface-variant italic">Negotiable terms.</td>
+<td class="px-6 py-4 text-right">
+<button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-secondary hover:bg-secondary/10 rounded transition-colors font-label-md text-label-md">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                                        Download Bid
+                                    </button>
+</td>
+</tr>
+<!-- Row 4: Apex Networks -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-primary-fixed-dim flex items-center justify-center text-primary font-bold text-[10px]">AN</div>
+<p class="font-title-sm text-title-sm text-on-surface">Apex Networks Ltd.</p>
+</div>
+</td>
+<td class="px-6 py-4 font-body-md text-body-md">$160.00</td>
+<td class="px-6 py-4 font-title-sm text-title-sm text-on-surface">$160,000.00</td>
+<td class="px-6 py-4 font-body-md text-body-md">15 days delivery</td>
+<td class="px-6 py-4 font-body-md text-body-md">Net 15</td>
+<td class="px-6 py-4 font-body-md text-body-md">60 days</td>
+<td class="px-6 py-4 font-body-sm text-body-sm text-on-surface-variant">Expedited delivery.</td>
+<td class="px-6 py-4 text-right">
+<button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-secondary hover:bg-secondary/10 rounded transition-colors font-label-md text-label-md">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                                        Download Bid
+                                    </button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="px-gutter py-4 bg-surface-container-low border-t border-outline-variant flex justify-between items-center">
+<p class="text-body-sm text-on-surface-variant">Showing comparison for 4 vendors out of 4 submissions.</p>
+<div class="flex items-center gap-2">
+<button class="p-1 hover:bg-surface-container-highest rounded border border-outline-variant transition-colors disabled:opacity-30" disabled="">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<span class="font-label-md text-label-md text-on-surface px-2">Page 1 of 1</span>
+<button class="p-1 hover:bg-surface-container-highest rounded border border-outline-variant transition-colors disabled:opacity-30" disabled="">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Recommendation Section (Custom UI Enhancement) -->
+<div class="mt-8 p-6 bg-primary-container/10 border border-primary-container/20 rounded-xl flex items-start gap-gutter">
+<div class="w-12 h-12 rounded-full bg-secondary text-on-secondary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined">lightbulb</span>
+</div>
+<div>
+<h5 class="font-title-sm text-title-sm text-primary mb-1">Commercial Evaluation Summary</h5>
+<p class="text-body-md text-on-surface-variant mb-4">TechSystems Solutions currently provides the most competitive offer with a 2.3% price advantage over the second-lowest bidder. However, Apex Networks Ltd. offers significantly shorter lead times (15 days vs 30 days) which may be critical depending on project deadlines.</p>
+<div class="flex gap-stack-md">
+<button class="px-6 py-2 bg-secondary text-on-secondary rounded-lg font-label-md text-label-md hover:bg-opacity-90 transition-all">
+                            Proceed to Award
+                        </button>
+<button class="px-6 py-2 border border-outline text-on-surface rounded-lg font-label-md text-label-md hover:bg-surface-container transition-all">
+                            Request Clarification
+                        </button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

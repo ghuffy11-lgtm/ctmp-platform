@@ -299,6 +299,7 @@ model User {
   createdTenderVersions   TenderVersion[]
   changedVendorStatuses   VendorStatusHistory[]
   updatedSystemSettings   SystemSetting[]
+  requestedReportExportJobs ReportExportJob[] @relation("ReportExportJobRequestedBy")
 
   @@map("users")
 }
@@ -339,6 +340,7 @@ model Role {
 model Permission {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   code        String   @unique @db.VarChar(128)
+  name        String   @db.VarChar(255)
   category    String   @db.VarChar(64)
   description String?  @db.Text
   createdAt   DateTime @default(now()) @map("created_at")
@@ -573,6 +575,7 @@ model Tender {
   awardedAt             DateTime?        @map("awarded_at")
   awardedVendorId       String?          @map("awarded_vendor_id") @db.Uuid
   awardedAmount         Decimal?         @map("awarded_amount") @db.Decimal(15, 2)
+  technicalPassThreshold Decimal?        @map("technical_pass_threshold") @db.Decimal(8, 2)
   currentVersion        Int              @default(1) @map("current_version")
   createdBy             String           @map("created_by") @db.Uuid
   owningUserId          String?          @map("owning_user_id") @db.Uuid
@@ -593,6 +596,7 @@ model Tender {
   commercialComparisons CommercialComparison[]
   auditLogs             AuditLog[]              @relation("AuditLogTender")
   notificationLogs      NotificationLog[]       @relation("NotificationLogTender")
+  technicalCriteria     TenderTechnicalCriterion[]
 
   @@map("tenders")
 }
@@ -1142,6 +1146,7 @@ model SecurityAlert {
 model NotificationTemplate {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   code            String   @unique @db.VarChar(64)
+  name            String   @db.VarChar(255)
   subjectTemplate String   @map("subject_template") @db.Text
   bodyTemplate    String   @map("body_template") @db.Text
   channel         String   @default("EMAIL") @db.VarChar(32)
@@ -1181,6 +1186,8 @@ model SystemSetting {
   key         String   @id @db.VarChar(128)
   value       String?  @db.Text
   valueType   String   @default("string") @map("value_type") @db.VarChar(32)
+  category    String?  @db.VarChar(64)
+  readOnly    Boolean  @default(false) @map("read_only")
   description String?  @db.Text
   updatedBy   String?  @map("updated_by") @db.Uuid
   updatedAt   DateTime @default(now()) @map("updated_at")
@@ -1188,4 +1195,68 @@ model SystemSetting {
   updatedByUser User? @relation(fields: [updatedBy], references: [id])
 
   @@map("system_settings")
+}
+
+// =============================================================================
+// TENDER TECHNICAL EVALUATION CRITERIA (added in migration 005)
+// =============================================================================
+
+model TenderTechnicalCriterion {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenderId    String   @map("tender_id") @db.Uuid
+  code        String   @db.VarChar(64)
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  maxScore    Decimal  @map("max_score") @db.Decimal(8, 2)
+  weight      Decimal? @db.Decimal(5, 2)
+  mandatory   Boolean  @default(false)
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@unique([tenderId, code])
+  @@index([tenderId])
+  @@map("tender_technical_criteria")
+}
+
+// =============================================================================
+// REPORT EXPORT JOBS (added in migration 005)
+// =============================================================================
+
+enum ReportExportJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+
+  @@map("report_export_job_status")
+}
+
+enum ReportExportJobFormat {
+  XLSX
+  PDF
+
+  @@map("report_export_job_format")
+}
+
+model ReportExportJob {
+  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reportCode    String                @map("report_code") @db.VarChar(128)
+  reportName    String?               @map("report_name") @db.VarChar(255)
+  requestedBy   String                @map("requested_by") @db.Uuid
+  status        ReportExportJobStatus @default(QUEUED)
+  format        ReportExportJobFormat @default(XLSX)
+  filters       Json?
+  enqueuedAt    DateTime              @default(now()) @map("enqueued_at")
+  startedAt     DateTime?             @map("started_at")
+  completedAt   DateTime?             @map("completed_at")
+  storageKey    String?               @map("storage_key") @db.Text
+  fileSize      BigInt?               @map("file_size")
+  errorMessage  String?               @map("error_message") @db.Text
+
+  requestedByUser User @relation("ReportExportJobRequestedBy", fields: [requestedBy], references: [id])
+
+  @@index([requestedBy, enqueuedAt])
+  @@map("report_export_jobs")
 }

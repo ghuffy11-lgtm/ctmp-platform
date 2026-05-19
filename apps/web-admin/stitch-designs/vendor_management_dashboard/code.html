@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vendor Management - ProcureLink Admin</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-dim": "#d8dadc",
+                        "tertiary": "#000000",
+                        "on-secondary-container": "#57657b",
+                        "on-primary-fixed": "#131b2e",
+                        "primary-fixed-dim": "#bec6e0",
+                        "on-tertiary-fixed-variant": "#574425",
+                        "inverse-primary": "#bec6e0",
+                        "surface": "#f7f9fb",
+                        "on-primary-fixed-variant": "#3f465c",
+                        "on-tertiary-container": "#98805d",
+                        "on-surface": "#191c1e",
+                        "on-secondary": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "error": "#ba1a1a",
+                        "primary-fixed": "#dae2fd",
+                        "secondary-container": "#d5e3fd",
+                        "on-error": "#ffffff",
+                        "on-tertiary-fixed": "#271901",
+                        "inverse-on-surface": "#eff1f3",
+                        "on-surface-variant": "#45464d",
+                        "tertiary-container": "#271901",
+                        "on-secondary-fixed": "#0d1c2f",
+                        "surface-container": "#eceef0",
+                        "secondary-fixed-dim": "#b9c7e0",
+                        "tertiary-fixed-dim": "#dec29a",
+                        "outline-variant": "#c6c6cd",
+                        "tertiary-fixed": "#fcdeb5",
+                        "surface-container-low": "#f2f4f6",
+                        "surface-variant": "#e0e3e5",
+                        "primary": "#000000",
+                        "secondary": "#515f74",
+                        "on-primary": "#ffffff",
+                        "surface-container-highest": "#e0e3e5",
+                        "surface-container-high": "#e6e8ea",
+                        "primary-container": "#131b2e",
+                        "on-error-container": "#93000a",
+                        "background": "#f7f9fb",
+                        "surface-bright": "#f7f9fb",
+                        "on-primary-container": "#7c839b",
+                        "on-secondary-fixed-variant": "#3a485c",
+                        "on-background": "#191c1e",
+                        "outline": "#76777d",
+                        "error-container": "#ffdad6",
+                        "on-tertiary": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "sidebar-width": "260px",
+                        "gutter": "1rem",
+                        "container-padding": "2rem",
+                        "table-row-height": "48px",
+                        "split-pane-min": "400px"
+                    },
+                    "fontFamily": {
+                        "headline-md": ["Work Sans"],
+                        "label-caps": ["Work Sans"],
+                        "body-sm": ["Work Sans"],
+                        "body-md": ["Work Sans"],
+                        "headline-lg": ["Work Sans"]
+                    },
+                    "fontSize": {
+                        "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                        "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "headline-lg": ["24px", {"lineHeight": "32px", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Work Sans', sans-serif; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; vertical-align: middle; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .status-approved { background-color: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+        .status-pending { background-color: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+        .status-suspended { background-color: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .status-blacklisted { background-color: #1e293b; color: #ffffff; }
+    </style>
+</head>
+<body class="bg-background text-on-background">
+<!-- SideNavBar -->
+<aside class="flex flex-col h-full w-[260px] fixed left-0 top-0 z-40 overflow-y-auto bg-primary-container text-on-primary-container">
+<div class="p-6">
+<h1 class="font-headline-md text-headline-md font-bold text-on-primary">ProcureLink</h1>
+<p class="text-body-sm text-on-primary-container/60">Admin Portal</p>
+</div>
+<nav class="flex-1 px-4 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-on-primary-container/70 font-body-md hover:bg-primary-fixed-dim/10 hover:text-white transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span>Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-primary-container/70 font-body-md hover:bg-primary-fixed-dim/10 hover:text-white transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="gavel">gavel</span>
+<span>Tenders</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-primary-container/70 font-body-md hover:bg-primary-fixed-dim/10 hover:text-white transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="fact_check">fact_check</span>
+<span>Approvals</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-primary-container/70 font-body-md hover:bg-primary-fixed-dim/10 hover:text-white transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="forum">forum</span>
+<span>Clarifications</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-primary-container/70 font-body-md hover:bg-primary-fixed-dim/10 hover:text-white transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span>Technical Evaluation</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-primary-container/70 font-body-md hover:bg-primary-fixed-dim/10 hover:text-white transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="groups">groups</span>
+<span>Committee &amp; Commercial</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-white font-bold bg-primary-fixed-dim/20 transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="account_box">account_box</span>
+<span>Vendor Management</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-primary-container/70 font-body-md hover:bg-primary-fixed-dim/10 hover:text-white transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="assessment">assessment</span>
+<span>Reports</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-primary-container/70 font-body-md hover:bg-primary-fixed-dim/10 hover:text-white transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+<span>Audit Log</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-primary-container/70 font-body-md hover:bg-primary-fixed-dim/10 hover:text-white transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span>System Configuration</span>
+</a>
+</nav>
+<div class="p-4 border-t border-white/10 mt-auto">
+<div class="flex items-center gap-3">
+<img alt="Procurement Admin Avatar" class="w-10 h-10 rounded-full border border-white/20" data-alt="A professional headshot of a middle-aged male procurement administrator in a crisp white shirt and navy blazer. He is smiling slightly, set against a blurred corporate office background with cool tones. The lighting is soft and professional, reflecting an authoritative and trustworthy persona within a modern enterprise environment." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBnWs0RVYI9REFOe0B4V8Kh0BMv9L7bBVma7Du3UOop9I-iIvK2zovv-FUy3w9GnT-NjmYGpWeRQDm5i0xwoRAI61BxVNNUf9QNev8HC5P40TKxh7CeCo_xx--gnPfMBZcuHWDfPAAuVIj1zx-_SK_rBNrBXarhnRGjceTmSH6DfE2_C9mLqOMTq4vPEJu3HSRs5hqP30RY7jmEY6eTzJ8Yw1iUUQyy2FoI6hXUH2P_p06V4gl2Y_0gt65FqR5JW9LyNZE3ijb7VgUX"/>
+<div>
+<p class="text-white font-semibold text-body-md">Robert Sterling</p>
+<p class="text-on-primary-container/60 text-body-sm">Lead Registrar</p>
+</div>
+</div>
+</div>
+</aside>
+<!-- TopNavBar -->
+<header class="flex justify-between items-center h-16 w-[calc(100%-260px)] ml-[260px] px-gutter sticky top-0 z-30 bg-surface border-b border-outline-variant">
+<div class="flex items-center gap-4 flex-1">
+<div class="relative w-full max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline" data-icon="search">search</span>
+<input class="w-full pl-10 pr-4 py-2 bg-surface-container-low border-b border-outline focus:border-primary-container outline-none text-body-md transition-all" placeholder="Search vendors, TIN, or contact name..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4 text-on-surface-variant">
+<span class="material-symbols-outlined cursor-pointer hover:text-primary" data-icon="notifications">notifications</span>
+<span class="material-symbols-outlined cursor-pointer hover:text-primary" data-icon="help">help</span>
+</div>
+<div class="h-8 w-px bg-outline-variant"></div>
+<div class="flex items-center gap-2 cursor-pointer group">
+<span class="text-body-md font-medium text-on-surface">Settings</span>
+<span class="material-symbols-outlined text-outline group-hover:text-primary" data-icon="settings">settings</span>
+</div>
+</div>
+</header>
+<!-- Main Content Layout -->
+<main class="ml-[260px] min-h-[calc(100vh-64px)] flex">
+<!-- Left Content: Vendor List (Master) -->
+<section class="flex-1 p-gutter overflow-y-auto">
+<div class="flex justify-between items-end mb-8">
+<div>
+<h2 class="font-headline-lg text-headline-lg text-primary">Vendor Management</h2>
+<p class="text-on-surface-variant text-body-md mt-1">Total Registered Entities: <span class="font-bold text-primary">1,248</span></p>
+</div>
+<button class="bg-primary-container text-white px-6 py-2.5 rounded-lg font-medium hover:bg-black transition-colors flex items-center gap-2 shadow-sm">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+                    Register New Vendor
+                </button>
+</div>
+<!-- Filter Bar -->
+<div class="bg-surface-container-lowest p-4 rounded-xl border border-outline-variant mb-6 flex flex-wrap items-center justify-between gap-4">
+<div class="flex gap-2">
+<button class="px-4 py-1.5 text-body-md font-medium bg-primary text-white rounded-full">All</button>
+<button class="px-4 py-1.5 text-body-md font-medium text-on-surface-variant hover:bg-surface-container-high rounded-full transition-all">Pending</button>
+<button class="px-4 py-1.5 text-body-md font-medium text-on-surface-variant hover:bg-surface-container-high rounded-full transition-all">Approved</button>
+<button class="px-4 py-1.5 text-body-md font-medium text-on-surface-variant hover:bg-surface-container-high rounded-full transition-all">Suspended</button>
+<button class="px-4 py-1.5 text-body-md font-medium text-on-surface-variant hover:bg-surface-container-high rounded-full transition-all">Blacklisted</button>
+</div>
+<div class="flex items-center gap-4">
+<button class="flex items-center gap-2 text-body-sm font-medium text-on-surface-variant hover:text-primary">
+<span class="material-symbols-outlined text-[18px]" data-icon="filter_list">filter_list</span>
+                        Advanced Filters
+                    </button>
+<button class="flex items-center gap-2 text-body-sm font-medium text-on-surface-variant hover:text-primary">
+<span class="material-symbols-outlined text-[18px]" data-icon="download">download</span>
+                        Export CSV
+                    </button>
+</div>
+</div>
+<!-- Data Table -->
+<div class="bg-white rounded-xl border border-outline-variant overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead class="bg-surface-container-low border-b border-outline-variant sticky top-0">
+<tr>
+<th class="px-6 h-12 text-label-caps uppercase tracking-wider text-on-surface-variant">Company Name</th>
+<th class="px-6 h-12 text-label-caps uppercase tracking-wider text-on-surface-variant">Registration Date</th>
+<th class="px-6 h-12 text-label-caps uppercase tracking-wider text-on-surface-variant">Status</th>
+<th class="px-6 h-12 text-label-caps uppercase tracking-wider text-on-surface-variant">Primary Contact</th>
+<th class="px-6 h-12 text-label-caps uppercase tracking-wider text-on-surface-variant">Country</th>
+<th class="px-6 h-12 text-label-caps uppercase tracking-wider text-on-surface-variant text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<!-- Active Row Example -->
+<tr class="hover:bg-slate-50 cursor-pointer bg-blue-50/30">
+<td class="px-6 h-table-row-height">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 bg-surface-container-highest rounded flex items-center justify-center font-bold text-primary">G</div>
+<span class="font-bold text-primary">Global Infra Corp</span>
+</div>
+</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">Oct 12, 2023</td>
+<td class="px-6 h-table-row-height">
+<span class="px-3 py-1 text-label-caps rounded-full status-blacklisted uppercase">Blacklisted</span>
+</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">Marcus Thorne</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">United Kingdom</td>
+<td class="px-6 h-table-row-height text-right">
+<button class="text-on-surface-variant hover:text-primary px-2">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Standard Row -->
+<tr class="hover:bg-slate-50 cursor-pointer transition-colors">
+<td class="px-6 h-table-row-height">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 bg-surface-container-highest rounded flex items-center justify-center font-bold text-primary">N</div>
+<span class="font-medium text-on-surface">Nexus Logistics Ltd</span>
+</div>
+</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">Nov 04, 2023</td>
+<td class="px-6 h-table-row-height">
+<span class="px-3 py-1 text-label-caps rounded-full status-approved uppercase">Approved</span>
+</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">Sarah Chen</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">Singapore</td>
+<td class="px-6 h-table-row-height text-right">
+<button class="text-on-surface-variant hover:text-primary px-2">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Suspended Row -->
+<tr class="hover:bg-slate-50 cursor-pointer transition-colors">
+<td class="px-6 h-table-row-height">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 bg-surface-container-highest rounded flex items-center justify-center font-bold text-primary">S</div>
+<span class="font-medium text-on-surface">Summit Steel Works</span>
+</div>
+</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">Jan 18, 2024</td>
+<td class="px-6 h-table-row-height">
+<span class="px-3 py-1 text-label-caps rounded-full status-suspended uppercase">Suspended</span>
+</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">Omar Al-Fayed</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">UAE</td>
+<td class="px-6 h-table-row-height text-right">
+<button class="text-on-surface-variant hover:text-primary px-2">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Pending Row -->
+<tr class="hover:bg-slate-50 cursor-pointer transition-colors">
+<td class="px-6 h-table-row-height">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 bg-surface-container-highest rounded flex items-center justify-center font-bold text-primary">T</div>
+<span class="font-medium text-on-surface">Titan Energy Solutions</span>
+</div>
+</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">Feb 02, 2024</td>
+<td class="px-6 h-table-row-height">
+<span class="px-3 py-1 text-label-caps rounded-full status-pending uppercase">Pending</span>
+</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">Elena Rodriguez</td>
+<td class="px-6 h-table-row-height text-body-md text-on-surface">USA</td>
+<td class="px-6 h-table-row-height text-right">
+<button class="text-on-surface-variant hover:text-primary px-2">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- Right Pane: Vendor Details (Detail View) -->
+<aside class="w-[480px] bg-white border-l border-outline-variant shadow-lg flex flex-col h-[calc(100vh-64px)] sticky top-16">
+<!-- Warning Banner -->
+<div class="bg-error text-white p-4 flex gap-3 items-start">
+<span class="material-symbols-outlined mt-0.5" data-icon="warning" data-weight="fill" style="font-variation-settings: 'FILL' 1;">warning</span>
+<div class="text-body-sm leading-relaxed">
+<p class="font-bold">Security &amp; Compliance Alert</p>
+<p>Warning: This vendor is currently Blacklisted due to severe compliance violations and failed ethical audit reports. Do not initiate new tenders.</p>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto">
+<!-- Company Profile Section -->
+<div class="p-6 border-b border-outline-variant">
+<div class="flex justify-between items-start mb-4">
+<div>
+<h3 class="font-headline-md text-headline-md text-primary">Global Infra Corp</h3>
+<p class="text-body-sm text-on-surface-variant">Corporate Member since 2023</p>
+</div>
+<span class="px-3 py-1 text-label-caps rounded-full status-blacklisted uppercase">Blacklisted</span>
+</div>
+<div class="grid grid-cols-2 gap-y-4 gap-x-6 mt-6">
+<div>
+<p class="text-label-caps text-outline uppercase mb-1">Trade License #</p>
+<p class="text-body-md font-medium text-on-surface">TL-992031-UK</p>
+</div>
+<div>
+<p class="text-label-caps text-outline uppercase mb-1">Primary Contact</p>
+<p class="text-body-md font-medium text-on-surface">Marcus Thorne</p>
+</div>
+<div class="col-span-2">
+<p class="text-label-caps text-outline uppercase mb-1">Registered Address</p>
+<p class="text-body-md font-medium text-on-surface">42 Canary Wharf, South Dock, London E14 5AB, United Kingdom</p>
+</div>
+<div>
+<p class="text-label-caps text-outline uppercase mb-1">Contact Email</p>
+<p class="text-body-md font-medium text-on-surface">m.thorne@globalinfra.uk</p>
+</div>
+<div>
+<p class="text-label-caps text-outline uppercase mb-1">Phone Number</p>
+<p class="text-body-md font-medium text-on-surface">+44 20 7946 0123</p>
+</div>
+</div>
+</div>
+<!-- Registration Documents -->
+<div class="p-6 border-b border-outline-variant">
+<h4 class="text-label-caps text-outline uppercase mb-4">Registration Documents</h4>
+<ul class="space-y-3">
+<li class="flex items-center justify-between p-3 bg-surface rounded border border-outline-variant">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-error" data-icon="picture_as_pdf">picture_as_pdf</span>
+<span class="text-body-md font-medium">Trade License.pdf</span>
+</div>
+<button class="material-symbols-outlined text-outline hover:text-primary" data-icon="download">download</button>
+</li>
+<li class="flex items-center justify-between p-3 bg-surface rounded border border-outline-variant">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-error" data-icon="picture_as_pdf">picture_as_pdf</span>
+<span class="text-body-md font-medium">Tax Certificate.pdf</span>
+</div>
+<button class="material-symbols-outlined text-outline hover:text-primary" data-icon="download">download</button>
+</li>
+<li class="flex items-center justify-between p-3 bg-surface rounded border border-outline-variant">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-error" data-icon="picture_as_pdf">picture_as_pdf</span>
+<span class="text-body-md font-medium">ISO Certification.pdf</span>
+</div>
+<button class="material-symbols-outlined text-outline hover:text-primary" data-icon="download">download</button>
+</li>
+</ul>
+</div>
+<!-- Timeline -->
+<div class="p-6">
+<h4 class="text-label-caps text-outline uppercase mb-6">Status History Timeline</h4>
+<div class="relative pl-8 space-y-8 before:content-[''] before:absolute before:left-3 before:top-2 before:bottom-2 before:w-px before:bg-outline-variant">
+<div class="relative">
+<div class="absolute -left-8 w-6 h-6 rounded-full bg-primary-container flex items-center justify-center border-4 border-white shadow-sm">
+<span class="material-symbols-outlined text-white text-[12px]" data-icon="check">check</span>
+</div>
+<p class="text-body-md font-bold text-primary">Registered</p>
+<p class="text-body-sm text-on-surface-variant">Oct 12, 2023 - 09:45 AM</p>
+</div>
+<div class="relative">
+<div class="absolute -left-8 w-6 h-6 rounded-full bg-primary-container flex items-center justify-center border-4 border-white shadow-sm">
+<span class="material-symbols-outlined text-white text-[12px]" data-icon="check">check</span>
+</div>
+<p class="text-body-md font-bold text-primary">Technical Verification</p>
+<p class="text-body-sm text-on-surface-variant">Oct 15, 2023 - 02:20 PM</p>
+</div>
+<div class="relative">
+<div class="absolute -left-8 w-6 h-6 rounded-full bg-error flex items-center justify-center border-4 border-white shadow-sm">
+<span class="material-symbols-outlined text-white text-[12px]" data-icon="close">close</span>
+</div>
+<p class="text-body-md font-bold text-error">Blacklisted</p>
+<p class="text-body-sm text-on-surface-variant">Jan 05, 2024 - 11:15 AM</p>
+<p class="mt-2 text-body-sm italic bg-surface p-2 rounded border border-outline-variant text-on-surface-variant">"Failed to provide legitimate proof of origin for heavy machinery materials during audit."</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Admin Actions Panel -->
+<div class="p-6 bg-surface-container-low border-t border-outline-variant">
+<div class="mb-4">
+<label class="text-label-caps text-outline uppercase mb-2 block">Action Reason (Required)</label>
+<textarea class="w-full bg-white border-b-2 border-outline-variant focus:border-primary-container outline-none p-3 text-body-sm transition-all" placeholder="Enter justification for status change..." rows="3"></textarea>
+</div>
+<div class="grid grid-cols-2 gap-3">
+<button class="bg-white text-on-surface border border-outline-variant py-2.5 rounded font-bold text-body-sm hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all">Approve</button>
+<button class="bg-white text-on-surface border border-outline-variant py-2.5 rounded font-bold text-body-sm hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 transition-all">Reject</button>
+<button class="bg-white text-on-surface border border-outline-variant py-2.5 rounded font-bold text-body-sm hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 transition-all">Suspend</button>
+<button class="bg-primary-container text-white py-2.5 rounded font-bold text-body-sm hover:bg-black transition-all">Blacklist Vendor</button>
+</div>
+</div>
+</aside>
+</main>
+</body></html>

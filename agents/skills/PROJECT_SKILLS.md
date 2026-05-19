@@ -415,3 +415,119 @@ Related files:
 docs/specs/implementation-spec.md
 ```
 
+---
+
+### Admin Portal: StatusBadge
+
+Use when:
+
+Displaying tender lifecycle status anywhere in `apps/web-admin/` (list tables, detail pages, approval queue, etc.).
+
+Pattern:
+
+```tsx
+import { StatusBadge } from '@/components/ui/StatusBadge';
+
+<StatusBadge status={tender.status} />
+```
+
+Component lives at `apps/web-admin/src/components/ui/StatusBadge.tsx`. Handles all 17 lifecycle states: Draft, Internal Review, Approved, Published, Clarification Period, Submission Closed, Technical Opening, Technical Evaluation, Commercial Sealed, Committee Commercial Opening, Commercial Evaluation / Comparison, Award Recommendation, Awarded, Tender Closed, Cancelled, Suspended, Archived. Unknown states fall back to a gray badge.
+
+Colors are defined in `STATUS_MAP` as inline styles (see `docs/decisions/DECISION_LOG.md` — StatusBadge inline styles decision). Do not reproduce these color triples inline at call sites.
+
+Do not:
+
+- Do not hardcode status colors at call sites — always use `<StatusBadge />`.
+- Do not add status badge colors to `tailwind.config.ts`.
+- Do not import the badge in server components without adding `'use client'` if needed.
+
+Related files:
+
+`apps/web-admin/src/components/ui/StatusBadge.tsx`
+
+---
+
+### Admin Portal: Status-Gated Action Buttons
+
+Use when:
+
+Rendering action buttons (Submit, Publish, Cancel, Close Submissions, etc.) on tender detail or list pages.
+
+Pattern:
+
+Map each action to the set of statuses where it is valid:
+
+```tsx
+const EDITABLE_STATUSES = ['Draft', 'Internal Review', 'Approved'];
+const CANCELLABLE_STATUSES = ['Draft', 'Internal Review', 'Approved', 'Published', 'Clarification Period'];
+
+{tender.status === 'Draft' && <button onClick={() => handleAction('submit-for-approval')}>Submit for Approval</button>}
+{tender.status === 'Approved' && <button onClick={() => handleAction('publish')}>Publish</button>}
+{EDITABLE_STATUSES.includes(tender.status) && <Link href={`/tenders/${id}/edit`}>Edit</Link>}
+{CANCELLABLE_STATUSES.includes(tender.status) && <button>Cancel Tender</button>}
+```
+
+Actions POST to explicit workflow endpoints (`/tenders/{id}/submit-for-approval`, `/tenders/{id}/publish`, etc.) not to generic PATCH. After action, refetch the tender so status badge and available buttons update.
+
+Do not:
+
+- Do not show all buttons regardless of status — users should only see actions valid for the current state.
+- Do not use PATCH for regulated state transitions — use the explicit action endpoints defined in the OpenAPI contract.
+- Do not optimistically update status in the UI before the API confirms the transition.
+
+Related files:
+
+`apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx`, `api-contracts/openapi/ctmp.openapi.yaml`
+
+---
+
+### Admin Portal: Frontend Data Fetch Pattern
+
+Use when:
+
+Fetching paginated or filtered data in any admin portal list page.
+
+Pattern:
+
+```tsx
+const [debouncedSearch, setDebouncedSearch] = useState('');
+
+// Debounce search input — avoids firing on every keystroke
+useEffect(() => {
+  const t = setTimeout(() => setDebouncedSearch(search), 300);
+  return () => clearTimeout(t);
+}, [search]);
+
+// Reset to page 1 when filters change
+useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter]);
+
+const fetchData = useCallback(async () => {
+  setLoading(true);
+  try {
+    const token = getAccessToken();
+    const params = new URLSearchParams({ page: String(page), pageSize: '10' });
+    if (debouncedSearch) params.set('q', debouncedSearch);
+    const result = await get<PaginatedResponse>(`/endpoint?${params}`, token);
+    setData(result);
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Load failed');
+  } finally {
+    setLoading(false);
+  }
+}, [debouncedSearch, statusFilter, page]);
+
+useEffect(() => { fetchData(); }, [fetchData]);
+```
+
+Show fixed-width skeleton rows during load (not a spinner) to avoid layout shift. Show error state with a Retry button. Show empty state with icon + clear-filters link if filters are active.
+
+Do not:
+
+- Do not skip debounce on search inputs — API will receive a request per keystroke.
+- Do not share a single `useEffect` for fetch + debounce logic — separate concerns.
+- Do not forget to reset `page` to 1 when filters change.
+
+Related files:
+
+`apps/web-admin/src/app/(admin)/tenders/page.tsx`, `apps/web-admin/src/lib/api.ts`, `apps/web-admin/src/lib/auth.ts`
+

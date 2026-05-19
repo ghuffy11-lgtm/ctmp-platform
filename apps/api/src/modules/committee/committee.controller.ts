@@ -26,6 +26,13 @@ export class CommitteeController {
     return this.committeeService.createSession(tenderId, dto, userId);
   }
 
+  @Get('tenders/:tenderId/committee-sessions')
+  @RequirePermissions('committee:view_records')
+  @ApiOperation({ operationId: 'listCommitteeSessions', summary: 'List committee sessions for tender (newest first)' })
+  listForTender(@Param('tenderId') tenderId: string) {
+    return this.committeeService.listForTender(tenderId);
+  }
+
   @Post('committee-sessions/:sessionId/attendance')
   @RequirePermissions('committee:record_attendance')
   @ApiOperation({ operationId: 'recordSessionAttendance', summary: 'Record committee member attendance' })

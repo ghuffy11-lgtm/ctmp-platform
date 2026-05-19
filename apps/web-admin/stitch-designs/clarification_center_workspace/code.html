@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Clarification Center | CTMP</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-container-highest": "#e3e2e6",
+                    "surface": "#faf9fc",
+                    "on-surface-variant": "#43474e",
+                    "on-tertiary-fixed-variant": "#60410c",
+                    "on-tertiary-container": "#c69b5f",
+                    "surface-container-lowest": "#ffffff",
+                    "on-error-container": "#93000a",
+                    "secondary-fixed-dim": "#b4c5ff",
+                    "surface-tint": "#455f87",
+                    "surface-container-low": "#f4f3f7",
+                    "outline": "#74777f",
+                    "on-primary": "#ffffff",
+                    "primary-fixed": "#d5e3ff",
+                    "background": "#faf9fc",
+                    "primary-container": "#1e3a5f",
+                    "error-container": "#ffdad6",
+                    "secondary-fixed": "#dbe1ff",
+                    "error": "#ba1a1a",
+                    "secondary": "#0051d5",
+                    "primary": "#022448",
+                    "tertiary-fixed-dim": "#edbf7f",
+                    "tertiary": "#341f00",
+                    "surface-container-high": "#e9e7eb",
+                    "on-surface": "#1a1c1e",
+                    "on-secondary-fixed-variant": "#003ea8",
+                    "on-secondary-container": "#fefcff",
+                    "on-primary-fixed-variant": "#2d486d",
+                    "on-tertiary-fixed": "#291800",
+                    "on-primary-fixed": "#001c3b",
+                    "outline-variant": "#c4c6cf",
+                    "on-secondary": "#ffffff",
+                    "on-tertiary": "#ffffff",
+                    "surface-container": "#eeedf1",
+                    "tertiary-container": "#503300",
+                    "secondary-container": "#316bf3",
+                    "primary-fixed-dim": "#adc8f5",
+                    "on-background": "#1a1c1e",
+                    "surface-dim": "#dad9dd",
+                    "inverse-on-surface": "#f1f0f4",
+                    "surface-variant": "#e3e2e6",
+                    "on-secondary-fixed": "#00174b",
+                    "on-primary-container": "#8aa4cf",
+                    "inverse-primary": "#adc8f5",
+                    "surface-bright": "#faf9fc",
+                    "inverse-surface": "#2f3033",
+                    "tertiary-fixed": "#ffddb2",
+                    "on-error": "#ffffff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "stack-md": "1rem",
+                    "stack-sm": "0.5rem",
+                    "gutter": "1.5rem",
+                    "sidebar-width": "260px",
+                    "container-padding": "2rem",
+                    "stack-lg": "1.5rem"
+            },
+            "fontFamily": {
+                    "title-lg": ["Inter"],
+                    "headline-md": ["Inter"],
+                    "label-sm": ["Inter"],
+                    "title-sm": ["Inter"],
+                    "body-sm": ["Inter"],
+                    "display-lg": ["Inter"],
+                    "body-md": ["Inter"],
+                    "label-md": ["Inter"]
+            },
+            "fontSize": {
+                    "title-lg": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "label-sm": ["11px", {"lineHeight": "14px", "fontWeight": "500"}],
+                    "title-sm": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                    "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                    "display-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+        }
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen">
+<!-- SideNavBar Shell -->
+<aside class="fixed left-0 top-0 h-screen w-[260px] bg-primary-container dark:bg-primary shadow-sm flex flex-col py-stack-lg z-50">
+<div class="px-gutter mb-8">
+<h1 class="font-display-lg text-display-lg font-bold text-on-primary-container">CTMP</h1>
+<p class="font-label-md text-label-md text-on-primary-container/60">Procurement Management</p>
+</div>
+<nav class="flex-1 space-y-1">
+<!-- Dashboard -->
+<a class="flex items-center gap-stack-md text-on-primary-container/70 px-gutter py-3 hover:bg-white/5 hover:text-on-primary-container transition-colors opacity-70" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-label-md text-label-md">Dashboard</span>
+</a>
+<!-- Tenders -->
+<a class="flex items-center gap-stack-md text-on-primary-container/70 px-gutter py-3 hover:bg-white/5 hover:text-on-primary-container transition-colors opacity-70" href="#">
+<span class="material-symbols-outlined" data-icon="gavel">gavel</span>
+<span class="font-label-md text-label-md">Tenders</span>
+</a>
+<!-- Clarifications (ACTIVE) -->
+<a class="flex items-center gap-stack-md bg-white/10 text-on-secondary-container border-l-4 border-secondary px-gutter py-3 opacity-100 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="forum">forum</span>
+<span class="font-label-md text-label-md">Clarifications</span>
+</a>
+<!-- Evaluation -->
+<a class="flex items-center gap-stack-md text-on-primary-container/70 px-gutter py-3 hover:bg-white/5 hover:text-on-primary-container transition-colors opacity-70" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span class="font-label-md text-label-md">Evaluation</span>
+</a>
+<!-- Awards -->
+<a class="flex items-center gap-stack-md text-on-primary-container/70 px-gutter py-3 hover:bg-white/5 hover:text-on-primary-container transition-colors opacity-70" href="#">
+<span class="material-symbols-outlined" data-icon="assignment_turned_in">assignment_turned_in</span>
+<span class="font-label-md text-label-md">Awards</span>
+</a>
+<!-- Settings -->
+<a class="flex items-center gap-stack-md text-on-primary-container/70 px-gutter py-3 hover:bg-white/5 hover:text-on-primary-container transition-colors opacity-70" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+</nav>
+<div class="px-gutter mt-auto pt-6">
+<button class="w-full bg-secondary text-on-secondary py-2.5 rounded-lg font-title-sm text-title-sm flex items-center justify-center gap-2 hover:bg-secondary/90 transition-all shadow-md">
+<span class="material-symbols-outlined text-[18px]" data-icon="add">add</span>
+                New Tender
+            </button>
+</div>
+</aside>
+<!-- TopNavBar Shell -->
+<header class="fixed top-0 right-0 left-[260px] h-16 bg-surface border-b border-outline-variant flex justify-between items-center px-gutter z-40">
+<div class="flex items-center gap-4">
+<h2 class="font-title-lg text-title-lg font-semibold text-on-surface">Clarification Center</h2>
+<div class="h-6 w-[1px] bg-outline-variant mx-2"></div>
+<div class="relative group">
+<span class="absolute inset-y-0 left-3 flex items-center text-on-surface-variant">
+<span class="material-symbols-outlined text-[20px]" data-icon="search">search</span>
+</span>
+<input class="bg-surface-container-low border-none rounded-full pl-10 pr-4 py-1.5 text-sm w-64 focus:ring-2 focus:ring-secondary/50 focus:bg-white transition-all" placeholder="Search threads..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 hover:bg-surface-container-high transition-colors rounded-full text-on-surface-variant relative">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border-2 border-surface"></span>
+</button>
+<button class="p-2 hover:bg-surface-container-high transition-colors rounded-full text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+</button>
+<button class="p-2 hover:bg-surface-container-high transition-colors rounded-full text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="apps">apps</span>
+</button>
+<div class="ml-4 flex items-center gap-3 pl-4 border-l border-outline-variant">
+<div class="text-right">
+<p class="font-label-md text-label-md text-on-surface font-semibold">Robert Chen</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Lead Procurement Officer</p>
+</div>
+<img alt="Procurement Officer Profile" class="w-10 h-10 rounded-full border border-outline-variant object-cover" data-alt="A professional headshot of a middle-aged man with short dark hair and a warm smile, wearing a clean charcoal grey suit and a crisp white shirt. The background is a blurred corporate office with soft natural light coming through a window. The style is professional, high-resolution photography with a clean, light-mode aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAPL_iQdLLVGpfaJhEd0LozMbz-AISjR9oQJG49GoFHqotzQpX-Ydt_gydwHl0XZaukB73jCqqkqJjnAicSdnTjWI8tLAIvCYYNtwrvqECUtgm4QxLlcXiz8JZFTwICZb1fIUKhNcQAG5O1asX10aqr8W2-K4UtWvYKeXzug13gAXl7zaCL4m3sTipKZv-fpVjX8REJNnfNdTn7PyCTXVUxKIhOmr2LtMz1sydzHQXtBjEZJ5K0_gSP2DAEsld5PWdmPz2eJC9CDrlz"/>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="ml-[260px] pt-16 min-h-screen flex">
+<!-- Left Panel: Tender List -->
+<section class="w-80 border-r border-outline-variant bg-surface-container-low flex flex-col h-[calc(100vh-64px)] overflow-y-auto">
+<div class="p-4 border-b border-outline-variant bg-white">
+<h3 class="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant font-bold mb-3">Active Tenders</h3>
+<div class="flex gap-2">
+<button class="flex-1 bg-secondary-container text-on-secondary-container text-xs font-semibold py-1.5 rounded-full px-3">Open (4)</button>
+<button class="flex-1 bg-surface-container-highest text-on-surface-variant text-xs font-semibold py-1.5 rounded-full px-3">Recent</button>
+</div>
+</div>
+<div class="flex-1">
+<!-- Selected Tender -->
+<div class="p-4 bg-white border-l-4 border-secondary shadow-sm relative group cursor-pointer transition-all">
+<div class="flex justify-between items-start mb-1">
+<span class="font-label-sm text-label-sm font-bold text-secondary">TDR-2024-0012</span>
+<span class="bg-error/10 text-error px-2 py-0.5 rounded text-[10px] font-bold">3 PENDING</span>
+</div>
+<p class="font-title-sm text-title-sm text-on-surface leading-tight">Infrastructure Upgrade - Phase II</p>
+<div class="mt-2 flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[14px]" data-icon="schedule">schedule</span>
+<span class="font-label-sm text-label-sm">Due in 5 days</span>
+</div>
+</div>
+<!-- Other Tenders -->
+<div class="p-4 border-b border-outline-variant/50 hover:bg-surface-container-high cursor-pointer transition-all">
+<div class="flex justify-between items-start mb-1">
+<span class="font-label-sm text-label-sm font-bold text-on-surface-variant">TDR-2024-0015</span>
+<span class="bg-secondary/10 text-secondary px-2 py-0.5 rounded text-[10px] font-bold">1 PENDING</span>
+</div>
+<p class="font-title-sm text-title-sm text-on-surface-variant leading-tight">Annual Office Supplies Contract</p>
+</div>
+<div class="p-4 border-b border-outline-variant/50 hover:bg-surface-container-high cursor-pointer transition-all">
+<div class="flex justify-between items-start mb-1">
+<span class="font-label-sm text-label-sm font-bold text-on-surface-variant">TDR-2024-0018</span>
+<span class="bg-on-surface-variant/10 text-on-surface-variant px-2 py-0.5 rounded text-[10px] font-bold">0 PENDING</span>
+</div>
+<p class="font-title-sm text-title-sm text-on-surface-variant leading-tight">Cloud Migration Services</p>
+</div>
+</div>
+</section>
+<!-- Main Panel: Threads -->
+<section class="flex-1 bg-background overflow-y-auto flex flex-col">
+<!-- Header & Filters -->
+<div class="p-gutter bg-white shadow-sm z-10 sticky top-0">
+<div class="flex justify-between items-end mb-6">
+<div>
+<nav class="flex items-center gap-2 text-on-surface-variant mb-2">
+<span class="font-label-sm text-label-sm">Tenders</span>
+<span class="material-symbols-outlined text-[14px]" data-icon="chevron_right">chevron_right</span>
+<span class="font-label-sm text-label-sm">Infrastructure Upgrade</span>
+</nav>
+<h2 class="font-headline-md text-headline-md text-on-surface">Clarification Threads: TDR-2024-0012</h2>
+</div>
+<div class="flex items-center gap-2">
+<button class="bg-surface-container-high hover:bg-surface-container-highest p-2 rounded-lg transition-colors">
+<span class="material-symbols-outlined" data-icon="print">print</span>
+</button>
+<button class="bg-surface-container-high hover:bg-surface-container-highest p-2 rounded-lg transition-colors">
+<span class="material-symbols-outlined" data-icon="download">download</span>
+</button>
+</div>
+</div>
+<div class="flex items-center justify-between border-t border-outline-variant pt-4">
+<div class="flex items-center gap-4">
+<button class="font-label-md text-label-md text-secondary border-b-2 border-secondary pb-4 px-1">All Threads (12)</button>
+<button class="font-label-md text-label-md text-on-surface-variant pb-4 px-1 hover:text-on-surface transition-colors">Pending (3)</button>
+<button class="font-label-md text-label-md text-on-surface-variant pb-4 px-1 hover:text-on-surface transition-colors">Answered (9)</button>
+</div>
+<div class="flex items-center gap-2 mb-4">
+<span class="font-label-sm text-label-sm text-on-surface-variant">Sort by:</span>
+<select class="bg-transparent border-none text-on-surface font-label-md text-label-md focus:ring-0 cursor-pointer">
+<option>Newest First</option>
+<option>Oldest First</option>
+<option>Urgency</option>
+</select>
+</div>
+</div>
+</div>
+<!-- Thread List -->
+<div class="p-gutter space-y-6">
+<!-- Thread 1: Expanded -->
+<div class="bg-white border border-outline-variant rounded-xl overflow-hidden shadow-sm">
+<div class="p-stack-lg border-b border-outline-variant bg-surface-container-lowest">
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 bg-primary-container rounded-lg flex items-center justify-center text-on-primary-container">
+<span class="material-symbols-outlined" data-icon="corporate_fare">corporate_fare</span>
+</div>
+<div>
+<h4 class="font-title-sm text-title-sm text-on-surface">Global Infra Corp</h4>
+<p class="font-label-sm text-label-sm text-on-surface-variant">ID: VEND-9921 • Submitted Oct 24, 2023</p>
+</div>
+</div>
+<span class="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
+<span class="w-1.5 h-1.5 bg-amber-600 rounded-full"></span>
+                                PENDING
+                            </span>
+</div>
+<div class="pl-14">
+<h5 class="font-title-sm text-title-sm text-on-surface mb-2">Can the delivery timeline be extended by 2 weeks?</h5>
+<p class="font-body-md text-body-md text-on-surface-variant leading-relaxed">
+                                Given the current global logistics constraints for heavy machinery, we foresee a potential bottleneck in the foundation phase. Would the procurement committee consider an extension of 14 calendar days to the final delivery date?
+                            </p>
+</div>
+</div>
+<!-- Thread History (Internal Note Example) -->
+<div class="bg-surface-container-low p-4 pl-20 space-y-4">
+<div class="flex gap-4">
+<div class="flex-1 bg-white p-3 rounded-lg border border-outline-variant shadow-sm italic text-on-surface-variant text-sm">
+<span class="font-bold block not-italic mb-1 text-on-surface">Internal Note (Technical Team):</span>
+                                "Extending by 2 weeks is feasible for foundation, but may overlap with winter weather protocols. Need to confirm if site prep can be expedited."
+                            </div>
+</div>
+</div>
+<!-- Reply Form -->
+<div class="p-stack-lg border-t border-outline-variant bg-white">
+<div class="flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-secondary" data-icon="reply">reply</span>
+<span class="font-title-sm text-title-sm">Submit Clarification Response</span>
+</div>
+<textarea class="w-full min-h-[120px] rounded-lg border-outline-variant focus:border-secondary focus:ring-1 focus:ring-secondary text-body-md p-4 mb-4" placeholder="Type your official response here..."></textarea>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-3">
+<span class="font-label-md text-label-md text-on-surface-variant">Visibility:</span>
+<div class="flex bg-surface-container-high rounded-lg p-1">
+<button class="px-3 py-1 text-xs font-bold text-on-surface-variant">PRIVATE</button>
+<button class="px-3 py-1 text-xs font-bold bg-white shadow-sm rounded-md text-secondary flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]" data-icon="public">public</span>
+                                            PUBLIC
+                                        </button>
+</div>
+</div>
+<label class="flex items-center cursor-pointer gap-2">
+<input class="rounded border-outline-variant text-secondary" type="checkbox"/>
+<span class="font-label-md text-label-md text-on-surface-variant">Mark as Critical</span>
+</label>
+</div>
+<div class="flex gap-3">
+<button class="px-6 py-2 border border-outline-variant rounded-lg font-title-sm text-title-sm hover:bg-surface-container-low transition-colors">Save Draft</button>
+<button class="px-8 py-2 bg-secondary text-on-secondary rounded-lg font-title-sm text-title-sm hover:bg-secondary/90 transition-all">Submit Reply</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Thread 2: Collapsed (Answered) -->
+<div class="bg-white border border-outline-variant rounded-xl hover:shadow-md transition-all cursor-pointer overflow-hidden group">
+<div class="p-stack-lg flex items-center justify-between">
+<div class="flex items-center gap-4 flex-1">
+<div class="w-10 h-10 bg-surface-container-high rounded-full flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+</div>
+<div>
+<div class="flex items-center gap-2 mb-0.5">
+<h4 class="font-title-sm text-title-sm text-on-surface">Anonymous Vendor</h4>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="public" title="Publicly Answered">public</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant truncate max-w-xl">Is there a specific format for the financial proposal?</p>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="text-right">
+<p class="font-label-sm text-label-sm text-on-surface font-semibold">Oct 23, 2023</p>
+<p class="font-label-sm text-label-sm text-green-600 font-bold">ANSWERED</p>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant transition-transform group-hover:translate-x-1" data-icon="chevron_right">chevron_right</span>
+</div>
+</div>
+</div>
+<!-- Thread 3: Collapsed (Closed) -->
+<div class="bg-surface-container-low border border-outline-variant rounded-xl opacity-80 overflow-hidden">
+<div class="p-stack-lg flex items-center justify-between">
+<div class="flex items-center gap-4 flex-1">
+<div class="w-10 h-10 bg-surface-container-highest rounded-lg flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="local_shipping">local_shipping</span>
+</div>
+<div>
+<div class="flex items-center gap-2 mb-0.5">
+<h4 class="font-title-sm text-title-sm text-on-surface">Nexus Logistics</h4>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="lock" title="Private Thread">lock</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant truncate max-w-xl">Request for site visit extension.</p>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="text-right">
+<p class="font-label-sm text-label-sm text-on-surface-variant font-semibold">Oct 22, 2023</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant font-bold">CLOSED</p>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="lock">lock</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Toolbelt (Optional Enhancement) -->
+<aside class="w-16 border-l border-outline-variant bg-white flex flex-col items-center py-6 gap-6">
+<button class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-surface-container-high text-on-surface-variant" title="Tender Details">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-surface-container-high text-on-surface-variant" title="Timeline">
+<span class="material-symbols-outlined" data-icon="event">event</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-surface-container-high text-on-surface-variant" title="Team Chat">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+</button>
+<div class="h-[1px] w-8 bg-outline-variant"></div>
+<button class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-surface-container-high text-secondary" title="System Logs">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+</button>
+</aside>
+</main>
+</body></html>

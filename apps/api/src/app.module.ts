@@ -7,6 +7,10 @@ import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 import jwtConfig from './config/jwt.config';
 import adConfig from './config/ad.config';
+import reportsConfig from './config/reports.config';
+import storageConfig from './config/storage.config';
+import auditConfig from './config/audit.config';
+import { StorageModule } from './common/storage/storage.module';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { VendorAuthModule } from './modules/vendor-auth/vendor-auth.module';
@@ -25,12 +29,13 @@ import { AwardModule } from './modules/award/award.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { SystemSettingsModule } from './modules/system-settings/system-settings.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, jwtConfig, adConfig],
+      load: [appConfig, databaseConfig, jwtConfig, adConfig, reportsConfig, storageConfig, auditConfig],
       envFilePath: ['.env.local', '.env'],
     }),
     ThrottlerModule.forRoot([
@@ -38,6 +43,7 @@ import { ReportsModule } from './modules/reports/reports.module';
       { name: 'long', ttl: 60000, limit: 100 },
     ]),
     DatabaseModule,
+    StorageModule,
     AuthModule,
     VendorAuthModule,
     UsersModule,
@@ -55,6 +61,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     AuditModule,
     NotificationsModule,
     ReportsModule,
+    SystemSettingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

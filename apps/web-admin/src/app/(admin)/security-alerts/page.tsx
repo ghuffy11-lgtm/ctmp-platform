@@ -83,7 +83,7 @@ export default function SecurityAlertsPage() {
     if (!token) return;
     setAckLoading(id);
     try {
-      await patch(`/security-alerts/${id}/acknowledge`, {}, token);
+      await patch<void>(`/security-alerts/${id}/acknowledge`, {}, token);
       setAlerts(prev => prev.map(a => a.id === id ? { ...a, acknowledged: true, acknowledgedAt: new Date().toISOString() } : a));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Acknowledge failed');
@@ -120,7 +120,7 @@ export default function SecurityAlertsPage() {
         <div className="flex items-center gap-3">
           {unacked > 0 && (
             <span className="px-2.5 py-1 rounded-full bg-danger/15 text-danger text-xs font-bold">
-              {unacked} unacknowledged
+              {unacked} unacknowledged on this page
             </span>
           )}
           <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
@@ -211,7 +211,7 @@ export default function SecurityAlertsPage() {
                     </td>
                   </tr>
                   {expanded === alert.id && (
-                    <tr key={`${alert.id}-detail`} className="bg-bg">
+                    <tr className="bg-bg">
                       <td colSpan={6} className="px-6 py-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                           {alert.sourceIp && <DetailGroup label="Source IP" value={alert.sourceIp} mono />}

@@ -18,6 +18,267 @@ Related files:
 
 ## Decisions
 
+### 2026-05-19 — Audit chain race closed by `pg_advisory_xact_lock`, not row lock
+
+Date: 2026-05-19
+Decision: `AuditService.log()` acquires `pg_advisory_xact_lock(0x6354_4d50)` as the first statement inside its Prisma transaction. Concurrent writers across any number of api replicas serialize through this single lock; whichever replica enters the txn first holds the lock until commit.
+Context: The 2026-05-18 decision log noted that "transaction-only" was correct for single-replica deployments but had a chain-fork race under multi-replica load. The original 3 options were A (txn-only), B (`SELECT FOR UPDATE` on the latest audit row), C (serializable isolation). Production-readiness now requires closing the gap.
+Options considered:
+- D: `pg_advisory_xact_lock` (chosen). Locks a logical resource, not a row. Held only for the audit txn's lifetime. All replicas use the same 32-bit key.
+- B: `SELECT FOR UPDATE` on `audit_logs WHERE id = (SELECT max(id) FROM audit_logs)`. Two queries to acquire one lock; race window between the SELECT and the FOR UPDATE.
+- C: `SET TRANSACTION ISOLATION LEVEL SERIALIZABLE`. Overkill; retry-on-conflict overhead per audit write.
+Outcome: D. Lock key `0x6354_4d50` (ASCII "cTMP") so operators see a memorable marker in `pg_locks`. Released automatically at commit/rollback.
+Impact: Multi-replica deployments now chain-safe. Lock is process-wide — a single hung audit write blocks every other audit write. Production should add `SET LOCAL lock_timeout = '5s'` before acquisition; tracked as a future improvement.
+Related files: `apps/api/src/modules/audit/audit.service.ts`.
+
+### 2026-05-19 — Storage backend abstraction (local + S3); `STORAGE_DRIVER` toggles
+
+Date: 2026-05-19
+Decision: All file persistence (reports, bid documents) goes through a `StorageBackend` interface. Two implementations: `LocalStorageBackend` (disk-backed) and `S3StorageBackend` (`@aws-sdk/client-s3`, `forcePathStyle: true`). `STORAGE_DRIVER` env var picks the backend at boot; bid + report storage services delegate via the `STORAGE_BACKEND` DI symbol.
+Context: Local-disk storage works on single-host on-prem deploys but blocks multi-node deployments and external backup pipelines. Most enterprise customers will run MinIO on-prem; some will use AWS S3 directly.
+Options considered:
+- A: Single interface + factory-provider DI (chosen). One symbol injected into both storage services; backend can be replaced at deploy time without code change.
+- B: Separate code paths for local vs S3 in each storage service. Duplicate code, easy to drift.
+- C: Always use S3 + run MinIO even for single-host dev. Adds a container + cold-start delay; complicates the dev setup.
+Outcome: A. `STORAGE_DRIVER=local` (default) on dev; `STORAGE_DRIVER=s3` for prod / multi-node. Bucket auto-create flagged separately (`STORAGE_S3_AUTO_CREATE_BUCKETS`) — on for dev, off for prod (Terraform creates with stricter ACLs).
+Impact: One env var swap moves the storage layer. Existing local-disk volumes still work; production migration is a doc step (copy local files into MinIO + flip the flag).
+Related files: `apps/api/src/common/storage/*`, `apps/api/src/modules/bids/bid-storage.service.ts`, `apps/api/src/modules/reports/report-storage.service.ts`, `infrastructure/docker/docker-compose.yml` (MinIO sidecar).
+
+### 2026-05-19 — Audit chain verified on api boot; break → CRITICAL security_alerts row
+
+Date: 2026-05-19
+Decision: `AuditService.onModuleInit` runs `verifyChain(AUDIT_VERIFY_LIMIT)` on api boot. The check recomputes `SHA-256(prev || canonical(payload))` for the latest N rows and confirms each row's `prev_hash_chain_value` matches the predecessor's `hash_chain_value`. On break, the verifier logs the broken row id + expected vs actual hashes and inserts a CRITICAL `security_alerts` row tagged `AUDIT_CHAIN_BREAK`.
+Context: A broken chain is forensically critical but historically silent — only a manual SQL probe would detect it. Production-readiness needs an automatic detection on every cold start.
+Options considered:
+- A: Verify on boot, limit to last N rows (chosen). Cheap (default 1000 rows). Misses old breaks but catches anything recent.
+- B: Full-table verify on boot. Bootstraps slow on large databases. Reserve for an admin tool / scheduled task.
+- C: Background scheduled verify with cron. Requires a worker — more moving parts. Defer to a future hardening pass.
+Outcome: A by default, with `AUDIT_VERIFY_LIMIT` configurable. Admin tool can call `verifyChain(Number.MAX_SAFE_INTEGER)` for full history when needed.
+Impact: Operators see chain breaks in logs immediately + can build a `/security-alerts` admin page that surfaces them. No UI page exists yet — alerts are queryable via SQL until that page lands.
+Related files: `apps/api/src/modules/audit/audit.service.ts`, `apps/api/src/config/audit.config.ts`.
+
+### 2026-05-19 — Vendor self-service namespaced under `/vendor-auth/me/*`
+
+Date: 2026-05-19
+Decision: Vendor-self read/write endpoints live under `/vendor-auth/me/*` rather than `/vendors/{id}/*` (admin scope) or top-level `/me`.
+Context: Three new endpoints needed: get own profile, update own profile, list own bids. Existing `/vendors/{id}/*` requires `vendors:read|update|approve` permissions (admin). A vendor session has no such permission. A new namespace was needed.
+Options considered:
+- A: `/vendor-auth/me/*` (chosen). Co-located with the rest of the vendor-auth surface; matches the vendor JWT guard's natural scope.
+- B: Top-level `/me`. Conflicts with future internal-user-self namespace ambiguity.
+- C: Allow `/vendors/{id}/*` when caller is the vendor. Mixes admin and self-service in one route, hard to reason about authorization.
+Outcome: A. `GET /vendor-auth/me`, `PATCH /vendor-auth/me`, `GET /vendor-auth/me/bids`. All vendor-JWT scoped.
+Impact: Internal-user-self could later sit at `/auth/me/*` for symmetry. Vendor email change is rejected at this layer (would bypass email-verify flow) and explicitly deferred.
+Related files: `apps/api/src/modules/vendor-auth/vendor-auth.controller.ts`, `vendor-auth.service.ts`, `api-contracts/openapi/ctmp.openapi.yaml`.
+
+### 2026-05-19 — Vendor email change requires re-verification flow (deferred)
+
+Date: 2026-05-19
+Decision: `PATCH /vendor-auth/me` rejects changes to the primary contact's email. UI shows email read-only with "Contact admin to change". A full email-change flow with re-verification is out of scope for Phase 5 Part 2.
+Context: Allowing arbitrary email edits via the profile endpoint would let a vendor escape the email-verification gate enforced at registration (which is a precondition for admin approval). A proper change-of-email flow needs: new email → verification token → confirm with both old and new addresses → flip the row.
+Options considered:
+- A: Reject silently and show read-only (chosen).
+- B: Allow change but force email_verified_at = NULL until re-verified. Adds complexity and creates a window where an unverified vendor is still APPROVED.
+- C: Build the full re-verification flow now. Out of scope for Part 2.
+Outcome: A. Documented in profile UI + DTO comments. Tracker entry references this decision.
+Impact: Vendors must contact admin to change email. Admin → DB direct edit. Future Phase 5 Part 3 can ship the re-verification flow.
+Related files: `apps/api/src/modules/vendor-auth/dto/update-profile.dto.ts`, `apps/web-vendor/src/app/(portal)/profile/page.tsx`.
+
+### 2026-05-18 — Failing bids' commercial envelopes go to LOCKED, not SEALED
+
+Date: 2026-05-18
+Decision: When `technical-evaluation.finalize` runs, commercial envelopes for bids with technicalResult=FAIL transition to `LOCKED` (with `lockedAt` set), while passing bids' commercials transition to `SEALED`.
+Context: After technical evaluation completes, the committee will eventually open commercial envelopes for the passed vendors. Failed vendors' commercial envelopes must NEVER be opened — even by the committee opening flow. The schema has both SEALED and LOCKED envelope statuses, and the committee opening service filters on `bid.technicalResult = PASS`, so an envelope that escapes filtering still cannot be opened from LOCKED.
+Options considered:
+- A: LOCKED for failed, SEALED for passed (chosen). Defense in depth: filter + state.
+- B: All SEALED, rely solely on the `WHERE technicalResult=PASS` filter. Single layer; a future bug could bypass.
+- C: Delete failed commercial envelopes. Loses the audit trail of what was originally submitted.
+Outcome: A. Committee opening service queries `status=SEALED AND bid.technicalResult=PASS`. Failed bids' envelopes are visible in the schema for audit but cannot transition out of LOCKED.
+Impact: QA must verify that no admin flow attempts to open a LOCKED envelope (would error rather than silently allow). Audit log can still produce an immutable record of original sealed checksums for failed bids.
+Related files: `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts`, `apps/api/src/modules/committee/committee.service.ts`.
+
+### 2026-05-18 — Audit log hash chain uses Prisma transaction, not row lock
+
+Date: 2026-05-18
+Decision: `AuditService.log()` wraps the prev-hash read + new-row insert in a single Prisma `$transaction`. No explicit row-level lock on the latest `audit_logs` row.
+Context: Hash chain requires `new.hash = SHA256(prev.hash || canonical(payload))`. Two concurrent calls could read the same `prev.hash`, both insert, and chain integrity breaks (two rows with the same `prev_hash_chain_value`).
+Options considered:
+- A: Transaction-only (chosen). Cheap; works correctly for single-process Node.js where Prisma queries serialize per connection.
+- B: `SELECT ... FOR UPDATE` on the latest audit row. Stronger guarantee under multi-process load. Adds lock contention.
+- C: Serializable isolation level on the audit txn. Most rigorous; highest cost.
+Outcome: A for now. Documented as a known limit. Multi-process deployment (multiple API replicas) MUST upgrade to B or C before production.
+Impact: Single-replica deployments are correct. Multi-replica + high audit-write volume risks a chain-break race window. Security review must call this out. Recovery: hash chain break is detectable (next verifier sees mismatched `prev_hash_chain_value` vs the actual prior row's `hash_chain_value`) — broken span can be quarantined for review without losing the rest of the chain.
+Related files: `apps/api/src/modules/audit/audit.service.ts`, all 5 write-flow services that call `audit.log()`.
+
+### 2026-05-18 — Vendor admin routes flattened from `/vendors/registrations/{id}/*` to `/vendors/{id}/*`
+
+Date: 2026-05-18
+Decision: Renamed vendor lifecycle endpoints to live directly on the vendor ID. Old paths `PATCH /vendors/registrations/{id}/approve`, `/reject` removed. New paths `POST /vendors/{id}/approve`, `/reject`, `/suspend` adopted.
+Context: Phase 4 admin portal UI was built against the flat `/vendors/{id}/*` shape (matches REST conventions used elsewhere in the contract — e.g. `/tenders/{id}/approve`). The earlier scaffold used a nested `/registrations` subresource which split the registration from the resulting vendor record. Once approved, that distinction is purely historical; the vendor and registration share a row in `vendors` table.
+Options considered:
+- A: Flatten to `/vendors/{id}/*` (chosen). Matches UI, matches tender pattern, removes split between registration and vendor.
+- B: Change UI to nested form. Adds 3 paths the user thinks of as one resource. Doesn't match `/tenders/{id}/approve` convention.
+- C: Keep both. Two ways to do the same thing → confusion and conflict.
+Outcome: A. POST verb (not PATCH) because these are workflow transitions, not field edits — consistent with tender approve/reject and committee envelope-open.
+Impact: External callers of `/vendors/registrations/{id}/*` (if any) break. Internal: web-admin UI was already on flat form; no client change. Phase 5 vendor portal will not be affected (those routes are vendor-self-service via vendor-auth, separate scope).
+Related files: `apps/api/src/modules/vendors/vendors.controller.ts`, `api-contracts/openapi/ctmp.openapi.yaml` (vendor section).
+
+### 2026-05-18 — Admin portal pages speculate on uncontracted endpoints with graceful fallback
+
+Date: 2026-05-18
+Decision: Phase 4 admin portal pages (committee opening, commercial comparison, vendor management, reports job history, settings tabs, dashboard) call endpoints that exist conceptually (backend modules scaffolded in Phase 3) but are not present in the OpenAPI contract. Pages catch errors and render empty-state guidance instead of crashing.
+Context: Backend scaffolding in Phase 3 created NestJS modules for vendors, roles, permissions, notification, audit, etc., but Phase 2 OpenAPI contract only defined a subset of the routes (mostly tender + bid + auth lifecycle). To deliver Phase 4 UI in this session, UI ships ahead of contract completion.
+Options considered:
+- A: Speculative calls + empty-state fallback (chosen). UI ships; gaps documented.
+- B: Block Phase 4 until OpenAPI contract is extended. Stalls UI for unknown duration.
+- C: Implement local mock data in UI. UI ships but creates a parallel reality that conflicts when backend lands.
+Outcome: A. Gaps inventoried in `agents/handoffs/HANDOVER.md` (Phase 4 complete entry) and in `MEMORY.md`/`project_state.md`. Backend follow-up will close them in the order most-used by users: `/vendors/*` first, then `/roles` + `/permissions`, then `/system-settings`, then `/notification-templates`, then `/reports/jobs` history list.
+Impact: 8 endpoint gaps documented. UI degrades to empty state rather than crashing. No mock data, no parallel reality.
+Related files: All 7 Phase 4 admin pages in `apps/web-admin/src/app/(admin)/`; `api-contracts/openapi/ctmp.openapi.yaml` (to be extended).
+
+### 2026-05-18 — Commercial Comparison enforces commercial:view at page level, not just nav
+
+Date: 2026-05-18
+Decision: The Commercial Comparison page renders a hard-block NoAccessScreen for users without `commercial:view`, in addition to the sidebar nav being permission-gated.
+Context: CLAUDE.md non-negotiable: "System Admin does NOT automatically receive commercial bid visibility." Page must enforce this even if a user reaches it by URL.
+Options considered:
+- A: Page-level hard gate + sidebar nav gate (chosen). Defense in depth.
+- B: Sidebar gate only. URL access bypasses.
+- C: Backend-only enforcement. UI still leaks layout/data structure.
+Outcome: A. Permission check on mount, full-page block if missing.
+Impact: System Admins (or any role lacking `commercial:view`) cannot view commercial comparison even via direct URL. Backend must still enforce — UI gate is for UX, not security.
+Related files: `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx`, `apps/web-admin/src/app/(admin)/audit-log/page.tsx` (same pattern for `audit:view`).
+
+### 2026-05-18 — Technical evaluation criteria hardcoded in UI
+
+Date: 2026-05-18
+Decision: Hardcode 4 default technical-evaluation criteria and a 70-pt pass threshold in the Technical Evaluation Workspace UI for Phase 4 delivery.
+Context: Stitch reference shows a 4-row scorecard (Compliance / Team / Methodology / Support, max 30/25/25/20). OpenAPI `TechnicalEvaluationRequest` accepts an open-ended `scores[]` array with `{ criterion, score, comments }` but does not define a criteria-source endpoint. Spec §5 mentions per-tender evaluation templates but the data model and endpoint for tender-specific criteria are not yet contracted.
+Options considered:
+- A: Hardcode default criteria in UI (chosen). Ships the screen; documented gap for backend follow-up.
+- B: Block screen until `GET /tenders/{id}/technical-criteria` is contracted. Stalls Phase 4 on a contract change.
+- C: Free-text criteria input per evaluator. Drift across evaluators; defeats the audit purpose of consistent criteria.
+Outcome: A. Default 4-row criteria block lives in `DEFAULT_CRITERIA` in the page file. Replace with API-sourced criteria when endpoint lands.
+Impact: Evaluators see a uniform 4-criterion scorecard. Per-tender custom criteria not yet supported. `passed`/"Met" toggle is UI-local — not persisted via current schema.
+Related files: `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx`, `api-contracts/openapi/ctmp.openapi.yaml` (TechnicalEvaluationRequest).
+
+### 2026-05-18 — `GET /tenders/{tenderId}/bids` called speculatively from UI
+
+Date: 2026-05-18
+Decision: Technical Evaluation Workspace calls `GET /tenders/{tenderId}/bids` even though the endpoint is not in the OpenAPI contract. Page degrades to an empty bid list when the endpoint returns 404.
+Context: To present a per-tender bid list for scoring, the UI needs a way to enumerate bids on a tender. Existing contract has `/bids/{bidId}/*` endpoints but no tender-scoped bid list. Same gap previously noted for `/tenders/{id}/approve` and `/reject` in the approval queue.
+Options considered:
+- A: Speculative call with graceful empty fallback (chosen). Lets UI ship now and uncovers the gap to backend.
+- B: Stub data in UI. Mismatched data once backend lands.
+- C: Block screen on contract update. Stalls Phase 4.
+Outcome: A. UI tagged with inline note `GET /tenders/{id}/bids endpoint pending API contract update.`
+Impact: Until backend ships this endpoint, the bid panel stays empty in non-dev environments. Two missing endpoints now accumulated (`/tenders/{id}/approve`, `/tenders/{id}/reject`, `/tenders/{id}/bids`).
+Related files: `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx`, `apps/web-admin/src/app/(admin)/approvals/page.tsx`, `api-contracts/openapi/ctmp.openapi.yaml`.
+
+
+### 2026-05-18 - StatusBadge Uses Inline Styles for 17-State Color Mapping
+
+Date: 2026-05-18
+
+Decision:
+
+`StatusBadge` component uses inline `style` props for background/text/dot colors rather than Tailwind utility classes.
+
+Context:
+
+The tender lifecycle has 17 states (Draft → Archived), each requiring a distinct color triple (bg, text, dot). Adding 17×3 = 51 tokens to `tailwind.config.ts` would pollute the design system. Tailwind's JIT cannot dynamically generate arbitrary colors from a runtime map; the only alternative would be hardcoding class strings per state, which is verbose and hard to maintain.
+
+Options considered:
+
+(1) Add all 51 tokens to Tailwind config. (2) Hardcode class strings per state in a lookup. (3) Use inline styles from a typed lookup object. Option 3 chosen.
+
+Outcome:
+
+`STATUS_MAP` in `StatusBadge.tsx` contains all 17 states as `{ bg, text, dot }` hex triples. The badge renders with `style={{ backgroundColor, color }}`. This is the **only** legitimate use of hardcoded hex values in `apps/web-admin/` — it is status-data, not design decisions.
+
+Impact:
+
+When adding a new tender lifecycle state, add it to both the domain vocabulary in `CLAUDE.md` and the `STATUS_MAP` in `StatusBadge.tsx`. Do not add status badge colors to `tailwind.config.ts`.
+
+Related files:
+
+`apps/web-admin/src/components/ui/StatusBadge.tsx`
+
+---
+
+### 2026-05-18 - Admin Portal Color Scheme
+
+Date: 2026-05-18
+
+Decision:
+
+Admin portal uses the following color palette (owner-specified):
+
+| Token | Hex | Role |
+|---|---|---|
+| Sidebar | `#0F172A` | Navigation background |
+| Sidebar hover | `#1E293B` | Active/hover nav items |
+| Accent | `#3B82F6` | Buttons, links, focus rings |
+| Accent hover | `#2563EB` | Button hover |
+| Background | `#F1F5F9` | Page background |
+| Card | `#FFFFFF` | Cards, panels, modals |
+| Primary Text | `#0F172A` | Headings, body text |
+| Secondary Text | `#475569` | Labels, captions, help text |
+| Success | `#22C55E` | Status badges, confirmations |
+| Danger | `#EF4444` | Errors, destructive actions |
+| Border | `#E2E8F0` | Dividers, input borders |
+
+Context:
+
+Initial Stitch-generated designs used navy `#1E3A5F` sidebar and `#2563EB` accent. Owner reviewed and specified a different palette before screens were built.
+
+Options considered:
+
+Navy/blue (original Stitch design), dark slate/amber, deep teal/green, custom owner-specified palette (chosen).
+
+Outcome:
+
+Custom palette applied. Tokens defined in `tailwind.config.ts` (semantic names: `bg-sidebar`, `text-accent`, etc.) and `globals.css` CSS variables. All existing scaffold files updated. New screens must use the semantic tokens, not raw hex.
+
+Impact:
+
+All future admin portal components must reference these tokens. Do NOT use the old navy `#1E3A5F` or `#2563EB` anywhere in `apps/web-admin/`. The Stitch HTML mockups in `stitch-designs/` use the old navy palette — treat them as layout reference only, not color reference.
+
+Related files:
+
+`apps/web-admin/tailwind.config.ts`, `apps/web-admin/src/app/globals.css`
+
+---
+
+### 2026-05-18 - Google Stitch Used for Admin Portal UI Generation
+
+Date: 2026-05-18
+
+Decision:
+
+Admin portal UI (Phase 4) outsourced to Google Stitch (stitch.withgoogle.com) via Playwright MCP automation rather than hand-coded from scratch.
+
+Context:
+
+Phase 4 requires 13+ screens. Writing them from scratch would be slow. Google Stitch generates production-quality HTML UI from natural-language prompts. Playwright MCP can drive Stitch headlessly.
+
+Options considered:
+
+Hand-coded from scratch, v0.dev, Google Stitch. Stitch chosen: free, Gemini 2.5 Pro, exports clean HTML with Tailwind + Material Symbols.
+
+Outcome:
+
+15 screens generated (including Login and MFA), 14 exported as HTML to `apps/web-admin/stitch-designs/`. These serve as visual + structural reference when building Next.js pages.
+
+Impact:
+
+Stitch HTML is layout/component reference. Color tokens must be overridden (see color scheme decision above). Security gates (commercial:view permission, audit logging) must be applied manually — Stitch cannot enforce these.
+
+Related files:
+
+`apps/web-admin/stitch-designs/` (14 HTML files + PNGs)
+
+---
+
 ### 2026-05-17 - Vendor Registration Creates Vendor+VendorUser Before Admin Approval
 
 Date: 2026-05-17

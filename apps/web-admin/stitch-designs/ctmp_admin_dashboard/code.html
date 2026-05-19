@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CTMP Admin - Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "tertiary-container": "#503300",
+                    "inverse-primary": "#adc8f5",
+                    "surface-tint": "#455f87",
+                    "on-primary-fixed": "#001c3b",
+                    "secondary-fixed-dim": "#b4c5ff",
+                    "on-tertiary": "#ffffff",
+                    "surface-container-highest": "#e3e2e6",
+                    "surface-variant": "#e3e2e6",
+                    "on-error": "#ffffff",
+                    "error-container": "#ffdad6",
+                    "outline-variant": "#c4c6cf",
+                    "secondary-fixed": "#dbe1ff",
+                    "primary-fixed-dim": "#adc8f5",
+                    "on-error-container": "#93000a",
+                    "secondary-container": "#316bf3",
+                    "on-primary": "#ffffff",
+                    "on-secondary-fixed": "#00174b",
+                    "surface-container-lowest": "#ffffff",
+                    "surface-container-high": "#e9e7eb",
+                    "primary-container": "#1e3a5f",
+                    "primary": "#022448",
+                    "on-secondary-container": "#fefcff",
+                    "secondary": "#0051d5",
+                    "inverse-on-surface": "#f1f0f4",
+                    "surface-bright": "#faf9fc",
+                    "on-tertiary-container": "#c69b5f",
+                    "tertiary-fixed-dim": "#edbf7f",
+                    "surface-dim": "#dad9dd",
+                    "on-tertiary-fixed": "#291800",
+                    "background": "#faf9fc",
+                    "on-primary-container": "#8aa4cf",
+                    "error": "#ba1a1a",
+                    "on-surface": "#1a1c1e",
+                    "on-surface-variant": "#43474e",
+                    "on-primary-fixed-variant": "#2d486d",
+                    "outline": "#74777f",
+                    "tertiary": "#341f00",
+                    "primary-fixed": "#d5e3ff",
+                    "on-background": "#1a1c1e",
+                    "surface-container": "#eeedf1",
+                    "on-secondary-fixed-variant": "#003ea8",
+                    "tertiary-fixed": "#ffddb2",
+                    "on-tertiary-fixed-variant": "#60410c",
+                    "surface": "#faf9fc",
+                    "surface-container-low": "#f4f3f7",
+                    "on-secondary": "#ffffff",
+                    "inverse-surface": "#2f3033"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "stack-sm": "0.5rem",
+                    "stack-lg": "1.5rem",
+                    "stack-md": "1rem",
+                    "container-padding": "2rem",
+                    "sidebar-width": "260px",
+                    "gutter": "1.5rem"
+            },
+            "fontFamily": {
+                    "label-md": ["Inter"],
+                    "label-sm": ["Inter"],
+                    "display-lg": ["Inter"],
+                    "title-lg": ["Inter"],
+                    "title-sm": ["Inter"],
+                    "headline-md": ["Inter"],
+                    "body-md": ["Inter"],
+                    "body-sm": ["Inter"]
+            },
+            "fontSize": {
+                    "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "label-sm": ["11px", {"lineHeight": "14px", "fontWeight": "500"}],
+                    "display-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "title-lg": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                    "title-sm": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-background text-on-background flex min-h-screen">
+<!-- SideNavBar Component -->
+<aside class="w-[260px] h-screen fixed left-0 top-0 bg-primary dark:bg-primary-container flex flex-col py-stack-lg z-50">
+<div class="px-6 mb-8">
+<h1 class="font-title-lg text-title-lg font-bold text-on-primary">CTMP Admin</h1>
+<p class="font-label-md text-label-md text-on-primary-container">Enterprise Procurement</p>
+</div>
+<nav class="flex-1 overflow-y-auto">
+<ul class="space-y-1">
+<!-- Dashboard Active -->
+<li>
+<a class="flex items-center gap-stack-md px-4 py-3 bg-white/10 border-l-4 border-secondary text-on-primary opacity-90 transition-all duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-label-md text-label-md">Dashboard</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="gavel">gavel</span>
+<span class="font-label-md text-label-md">Tenders</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="fact_check">fact_check</span>
+<span class="font-label-md text-label-md">Approvals</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="question_answer">question_answer</span>
+<span class="font-label-md text-label-md">Clarifications</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span class="font-label-md text-label-md">Technical Evaluation</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="groups">groups</span>
+<span class="font-label-md text-label-md">Committee &amp; Commercial</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="account_balance">account_balance</span>
+<span class="font-label-md text-label-md">Vendor Management</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+<span class="font-label-md text-label-md">Reports</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+<span class="font-label-md text-label-md">Audit Log</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-label-md text-label-md">System Configuration</span>
+</a>
+</li>
+</ul>
+</nav>
+</aside>
+<!-- Main Wrapper -->
+<div class="flex-1 ml-[260px] flex flex-col">
+<!-- TopNavBar Component -->
+<header class="h-16 w-full flex justify-between items-center px-gutter bg-surface dark:bg-surface-dim border-b border-outline-variant shadow-sm sticky top-0 z-40">
+<div class="flex items-center gap-gutter">
+<h2 class="font-headline-md text-headline-md font-bold text-primary">Dashboard</h2>
+<div class="relative w-64">
+<span class="absolute inset-y-0 left-3 flex items-center text-on-surface-variant">
+<span class="material-symbols-outlined text-sm" data-icon="search">search</span>
+</span>
+<input class="w-full bg-surface-container-low border border-outline-variant rounded-lg pl-10 pr-4 py-2 font-body-md text-body-md focus:ring-2 focus:ring-secondary transition-all" placeholder="Search tenders..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="text-right hidden md:block">
+<p class="font-label-md text-label-md text-on-surface">Alex Thompson</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Procurement Dept</p>
+</div>
+<div class="flex items-center gap-4">
+<button class="relative p-2 text-on-surface-variant hover:bg-surface-container-high rounded-full transition-colors">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+<span class="absolute top-1 right-1 w-2 h-2 bg-error rounded-full"></span>
+</button>
+<button class="p-2 text-on-surface-variant hover:bg-surface-container-high rounded-full transition-colors">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+</button>
+<img alt="User Profile" class="w-10 h-10 rounded-full border border-outline-variant object-cover" data-alt="A professional headshot of a middle-aged male procurement executive in a crisp white shirt, photographed against a clean, out-of-focus modern office background. The lighting is soft and corporate, emphasizing trust and competence. The overall image has a bright, high-key light-mode aesthetic that fits perfectly within an enterprise dashboard interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDpVH2ElQyNOeCiClabU1kaANGD7QL8JmYWgOPnLLAkqnuaYmMdhrMCTcT3AVtk3r7i-68k6PBSxuautrrfCxMuEDlzMeOdKq0rYWMV7eB6poGN8rHWWsiUXQk3StJUzd307wGm9fSnsPm18wdOvJSsleJH4SvUZti_nWC_Ztp4YjWLtWiragciQzxRDs4IqToAr9oMCxZAiQec-3xy0rcRCRRJI5Znqw-z_2scVCc_Yisqu8VibWmyJu-0-nKAu971wiPOZSrLaXgs"/>
+</div>
+</div>
+</header>
+<!-- Content Canvas -->
+<main class="p-8 space-y-8 max-w-7xl mx-auto w-full">
+<!-- Stat Cards Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+<div class="bg-white p-6 rounded-lg border border-outline-variant shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-secondary/10 text-secondary rounded-lg">
+<span class="material-symbols-outlined" data-icon="gavel">gavel</span>
+</div>
+<span class="text-green-600 bg-green-50 px-2 py-1 rounded text-xs font-bold">+5%</span>
+</div>
+<p class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Active Tenders</p>
+<h3 class="font-display-lg text-display-lg text-on-surface">42</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-2">vs. last month</p>
+</div>
+<div class="bg-white p-6 rounded-lg border border-outline-variant shadow-sm border-l-4 border-l-error">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-error/10 text-error rounded-lg">
+<span class="material-symbols-outlined" data-icon="fact_check">fact_check</span>
+</div>
+<span class="text-error bg-error/10 px-2 py-1 rounded text-xs font-bold">Critical</span>
+</div>
+<p class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Pending Approvals</p>
+<h3 class="font-display-lg text-display-lg text-on-surface">12</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-2">Requiring immediate action</p>
+</div>
+<div class="bg-white p-6 rounded-lg border border-outline-variant shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-primary/10 text-primary rounded-lg">
+<span class="material-symbols-outlined" data-icon="account_balance">account_balance</span>
+</div>
+<span class="text-secondary bg-secondary/10 px-2 py-1 rounded text-xs font-bold">+12</span>
+</div>
+<p class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Registered Vendors</p>
+<h3 class="font-display-lg text-display-lg text-on-surface">158</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-2">Verified enterprise partners</p>
+</div>
+<div class="bg-white p-6 rounded-lg border border-outline-variant shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-tertiary-fixed-dim/20 text-tertiary-fixed-variant rounded-lg">
+<span class="material-symbols-outlined" data-icon="question_answer">question_answer</span>
+</div>
+<span class="text-tertiary-fixed-variant bg-tertiary-fixed-dim/20 px-2 py-1 rounded text-xs font-bold">3 New</span>
+</div>
+<p class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Open Clarifications</p>
+<h3 class="font-display-lg text-display-lg text-on-surface">8</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-2">Pending vendor response</p>
+</div>
+</div>
+<!-- Tender Lifecycle Pipeline -->
+<section class="bg-white p-8 rounded-lg border border-outline-variant shadow-sm">
+<h4 class="font-title-sm text-title-sm text-on-surface mb-8">Tender Lifecycle Pipeline</h4>
+<div class="relative flex items-center justify-between">
+<div class="absolute top-1/2 left-0 w-full h-1 bg-surface-container -translate-y-1/2 z-0"></div>
+<!-- Stage 1 -->
+<div class="relative z-10 flex flex-col items-center gap-2 group">
+<div class="w-10 h-10 rounded-full bg-secondary text-on-secondary flex items-center justify-center font-bold text-sm shadow-md">15</div>
+<span class="font-label-md text-label-md text-on-surface">Draft</span>
+</div>
+<!-- Stage 2 -->
+<div class="relative z-10 flex flex-col items-center gap-2 group">
+<div class="w-10 h-10 rounded-full bg-secondary/80 text-on-secondary flex items-center justify-center font-bold text-sm">8</div>
+<span class="font-label-md text-label-md text-on-surface-variant">Review</span>
+</div>
+<!-- Stage 3 -->
+<div class="relative z-10 flex flex-col items-center gap-2 group">
+<div class="w-10 h-10 rounded-full bg-secondary/60 text-on-secondary flex items-center justify-center font-bold text-sm">5</div>
+<span class="font-label-md text-label-md text-on-surface-variant">Approved</span>
+</div>
+<!-- Stage 4 -->
+<div class="relative z-10 flex flex-col items-center gap-2 group">
+<div class="w-10 h-10 rounded-full bg-secondary/40 text-on-secondary flex items-center justify-center font-bold text-sm">6</div>
+<span class="font-label-md text-label-md text-on-surface-variant">Published</span>
+</div>
+<!-- Stage 5 -->
+<div class="relative z-10 flex flex-col items-center gap-2 group">
+<div class="w-10 h-10 rounded-full bg-secondary/20 text-secondary flex items-center justify-center font-bold text-sm">4</div>
+<span class="font-label-md text-label-md text-on-surface-variant">Evaluation</span>
+</div>
+<!-- Stage 6 -->
+<div class="relative z-10 flex flex-col items-center gap-2 group">
+<div class="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-bold text-sm">4</div>
+<span class="font-label-md text-label-md text-on-surface-variant">Award</span>
+</div>
+</div>
+</section>
+<!-- Main Split Content -->
+<div class="grid grid-cols-1 lg:grid-cols-10 gap-8">
+<!-- Left Column: Activity -->
+<div class="lg:col-span-7 bg-white rounded-lg border border-outline-variant shadow-sm overflow-hidden flex flex-col">
+<div class="px-6 py-4 border-b border-outline-variant flex justify-between items-center">
+<h4 class="font-title-sm text-title-sm text-on-surface">Recent Tender Activity</h4>
+<button class="font-label-md text-label-md text-secondary hover:underline">View All</button>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left">
+<thead class="bg-surface-container-low text-on-surface-variant font-label-md text-label-md uppercase tracking-wider">
+<tr>
+<th class="px-6 py-4">Tender ID</th>
+<th class="px-6 py-4">Stage</th>
+<th class="px-6 py-4">Last Update</th>
+<th class="px-6 py-4">Status</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant font-body-md text-body-md">
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="px-6 py-4 font-medium">TDR-2024-0082</td>
+<td class="px-6 py-4">Technical Evaluation</td>
+<td class="px-6 py-4 text-on-surface-variant">2h ago</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 font-label-sm text-label-sm">In Progress</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="px-6 py-4 font-medium">TDR-2024-0079</td>
+<td class="px-6 py-4">Award</td>
+<td class="px-6 py-4 text-on-surface-variant">5h ago</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-green-100 text-green-700 font-label-sm text-label-sm">Awarded</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="px-6 py-4 font-medium">TDR-2024-0102</td>
+<td class="px-6 py-4">Draft</td>
+<td class="px-6 py-4 text-on-surface-variant">1d ago</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm">Pending</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="px-6 py-4 font-medium">TDR-2024-0065</td>
+<td class="px-6 py-4">Published</td>
+<td class="px-6 py-4 text-on-surface-variant">2d ago</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 font-label-sm text-label-sm">Open</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="px-6 py-4 font-medium">TDR-2023-0994</td>
+<td class="px-6 py-4">Review</td>
+<td class="px-6 py-4 text-on-surface-variant">3d ago</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-error-container text-on-error-container font-label-sm text-label-sm">Flagged</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Right Column: Quick Actions -->
+<div class="lg:col-span-3 space-y-6">
+<div class="bg-white p-6 rounded-lg border border-outline-variant shadow-sm">
+<h4 class="font-title-sm text-title-sm text-on-surface mb-6">Quick Actions</h4>
+<div class="space-y-4">
+<button class="w-full flex items-center gap-4 p-4 bg-secondary text-on-secondary rounded-lg hover:brightness-110 active:scale-[0.98] transition-all shadow-md group">
+<span class="material-symbols-outlined p-2 bg-white/20 rounded-md" data-icon="add_circle">add_circle</span>
+<span class="font-label-md text-label-md text-left">Create New Tender</span>
+</button>
+<button class="w-full flex items-center gap-4 p-4 bg-surface-container-low text-primary border border-outline-variant rounded-lg hover:bg-surface-container-high active:scale-[0.98] transition-all group">
+<span class="material-symbols-outlined p-2 bg-primary/10 rounded-md" data-icon="playlist_add_check">playlist_add_check</span>
+<span class="font-label-md text-label-md text-left">Review Pending Approvals</span>
+</button>
+<button class="w-full flex items-center gap-4 p-4 bg-surface-container-low text-primary border border-outline-variant rounded-lg hover:bg-surface-container-high active:scale-[0.98] transition-all group">
+<span class="material-symbols-outlined p-2 bg-primary/10 rounded-md" data-icon="badge">badge</span>
+<span class="font-label-md text-label-md text-left">Manage Vendor Database</span>
+</button>
+</div>
+</div>
+<!-- System Status Card -->
+<div class="bg-primary p-6 rounded-lg shadow-lg relative overflow-hidden">
+<div class="relative z-10">
+<div class="flex items-center gap-2 mb-4">
+<span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+<span class="font-label-sm text-label-sm text-on-primary/80 uppercase">System Status</span>
+</div>
+<h5 class="text-on-primary font-title-sm text-title-sm mb-2">Platform Secure</h5>
+<p class="text-on-primary-container text-body-sm font-body-sm">All security protocols active. Last audit: 12 minutes ago.</p>
+</div>
+<!-- Background Pattern Deco -->
+<div class="absolute -right-4 -bottom-4 opacity-10">
+<span class="material-symbols-outlined text-8xl" data-icon="verified_user" style="font-variation-settings: 'FILL' 1;">verified_user</span>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

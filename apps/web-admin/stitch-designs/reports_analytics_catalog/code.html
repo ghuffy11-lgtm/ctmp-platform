@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container": "#eeedf1",
+                        "inverse-on-surface": "#f1f0f4",
+                        "on-error-container": "#93000a",
+                        "on-error": "#ffffff",
+                        "secondary-fixed": "#dbe1ff",
+                        "secondary": "#0051d5",
+                        "surface": "#faf9fc",
+                        "on-secondary": "#ffffff",
+                        "surface-container-low": "#f4f3f7",
+                        "inverse-surface": "#2f3033",
+                        "on-tertiary-container": "#c69b5f",
+                        "tertiary-fixed-dim": "#edbf7f",
+                        "primary-fixed-dim": "#adc8f5",
+                        "outline-variant": "#c4c6cf",
+                        "surface-variant": "#e3e2e6",
+                        "on-background": "#1a1c1e",
+                        "background": "#faf9fc",
+                        "on-secondary-container": "#fefcff",
+                        "primary-fixed": "#d5e3ff",
+                        "on-secondary-fixed-variant": "#003ea8",
+                        "on-primary-fixed": "#001c3b",
+                        "on-tertiary-fixed": "#291800",
+                        "on-primary-fixed-variant": "#2d486d",
+                        "secondary-container": "#316bf3",
+                        "surface-dim": "#dad9dd",
+                        "error-container": "#ffdad6",
+                        "outline": "#74777f",
+                        "on-primary": "#ffffff",
+                        "inverse-primary": "#adc8f5",
+                        "surface-container-lowest": "#ffffff",
+                        "primary": "#022448",
+                        "tertiary": "#341f00",
+                        "on-surface": "#1a1c1e",
+                        "surface-tint": "#455f87",
+                        "tertiary-fixed": "#ffddb2",
+                        "on-primary-container": "#8aa4cf",
+                        "on-surface-variant": "#43474e",
+                        "on-secondary-fixed": "#00174b",
+                        "tertiary-container": "#503300",
+                        "on-tertiary": "#ffffff",
+                        "surface-bright": "#faf9fc",
+                        "surface-container-highest": "#e3e2e6",
+                        "on-tertiary-fixed-variant": "#60410c",
+                        "surface-container-high": "#e9e7eb",
+                        "secondary-fixed-dim": "#b4c5ff",
+                        "error": "#ba1a1a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "stack-sm": "0.5rem",
+                        "stack-lg": "1.5rem",
+                        "gutter": "1.5rem",
+                        "sidebar-width": "260px",
+                        "container-padding": "2rem",
+                        "stack-md": "1rem"
+                    },
+                    "fontFamily": {
+                        "title-lg": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "label-md": ["Inter"],
+                        "body-md": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "title-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "title-lg": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "display-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "label-sm": ["11px", {"lineHeight": "14px", "fontWeight": "500"}],
+                        "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "title-sm": ["16px", {"lineHeight": "24px", "fontWeight": "600"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .nav-item-active { background-color: rgba(255, 255, 255, 0.1); border-left: 4px solid #316bf3; color: #ffffff; }
+        .card-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.01); }
+    </style>
+</head>
+<body class="text-on-surface">
+<!-- Sidebar Navigation -->
+<aside class="w-[260px] h-screen fixed left-0 top-0 bg-primary flex flex-col py-stack-lg z-50">
+<div class="px-6 mb-8">
+<h1 class="font-title-lg text-title-lg font-bold text-on-primary">CTMP Admin</h1>
+<p class="text-on-primary-container text-label-sm uppercase tracking-wider">Enterprise Procurement</p>
+</div>
+<nav class="flex-1 flex flex-col">
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label-md text-label-md">Dashboard</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined">gavel</span>
+<span class="font-label-md text-label-md">Tenders</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined">fact_check</span>
+<span class="font-label-md text-label-md">Approvals</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined">question_answer</span>
+<span class="font-label-md text-label-md">Clarifications</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="font-label-md text-label-md">Technical Evaluation</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined">groups</span>
+<span class="font-label-md text-label-md">Committee &amp; Commercial</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined">account_balance</span>
+<span class="font-label-md text-label-md">Vendor Management</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 bg-white/10 border-l-4 border-secondary text-on-primary transition-all duration-150" href="#">
+<span class="material-symbols-outlined">description</span>
+<span class="font-label-md text-label-md">Reports</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined">history</span>
+<span class="font-label-md text-label-md">Audit Log</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">System Configuration</span>
+</a>
+</nav>
+</aside>
+<!-- Main Content Wrapper -->
+<div class="pl-[260px] min-h-screen">
+<!-- Top Navigation Bar -->
+<header class="flex justify-between items-center h-16 w-full px-gutter bg-surface border-b border-outline-variant shadow-sm sticky top-0 z-40">
+<div class="flex items-center gap-4">
+<span class="font-headline-md text-headline-md font-bold text-primary">Tender Management Portal</span>
+<div class="h-6 w-px bg-outline-variant mx-2"></div>
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-on-surface-variant text-sm">search</span>
+<input class="bg-surface-container-low border border-outline-variant rounded-lg pl-10 pr-4 py-1.5 text-body-sm focus:ring-2 focus:ring-secondary focus:border-transparent outline-none w-64" placeholder="Search reports..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="text-right">
+<p class="font-label-md text-label-md text-primary">Admin User</p>
+<p class="text-[10px] text-on-surface-variant uppercase font-bold">Procurement Dept</p>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 hover:bg-surface-container-high rounded-full transition-colors relative">
+<span class="material-symbols-outlined text-on-surface-variant">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border border-white"></span>
+</button>
+<button class="p-2 hover:bg-surface-container-high rounded-full transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant">logout</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-secondary-fixed flex items-center justify-center border border-outline-variant overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A professional headshot of a corporate procurement manager in a clean, brightly lit office environment. The lighting is soft and natural, emphasizing a trustworthy and experienced professional look. The background is a blurred minimalist office with blue and white tones that match the enterprise software aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB8A3ADYsh9oUkdJOy1Y1GfnRa19f8EcMMJymijV5xRcZ16-vJ2DHVfyVv_eubqw9qqJ3R8ob5JYkcvzmn3eZD8NUq0yT72TR3AMVzvDICLcZBde68DOnv68Y5M6UmAHci0AnFdopyf9vsZXxilsyEu11G-P3sKyVK4EdTFrlYJ1Bdm4sheiIpRYlVXvtixgGkCGr8CxLk4PZylBRr7fNMbtl6WNA9ZHwqp85t5w-ZQSZfiSQhqpGBpz41OQ9szZhWmg0VFTRZghPQW"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="p-8 max-w-7xl mx-auto">
+<!-- Page Header -->
+<div class="mb-8 flex justify-between items-end">
+<div>
+<h2 class="font-display-lg text-display-lg text-primary">Reports &amp; Analytics</h2>
+<p class="text-on-surface-variant font-body-md mt-1">Generate and export strategic procurement data insights.</p>
+</div>
+<div class="flex gap-3">
+<button class="flex items-center gap-2 px-4 py-2 border border-outline text-on-surface font-label-md rounded-lg hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-sm">schedule</span>
+                        Scheduled Tasks
+                    </button>
+<button class="flex items-center gap-2 px-4 py-2 bg-secondary text-on-secondary font-label-md rounded-lg hover:opacity-90 active:scale-95 transition-all">
+<span class="material-symbols-outlined text-sm">add</span>
+                        Custom Report
+                    </button>
+</div>
+</div>
+<!-- Report Catalog Section -->
+<section class="mb-12">
+<div class="flex items-center gap-2 mb-6">
+<span class="material-symbols-outlined text-secondary">grid_view</span>
+<h3 class="font-title-lg text-title-lg text-primary">Report Catalog</h3>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<!-- Card 1 -->
+<div class="bg-white border border-outline-variant rounded-xl p-6 card-shadow flex flex-col">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-secondary/5 rounded-lg">
+<span class="material-symbols-outlined text-secondary">summarize</span>
+</div>
+<span class="text-label-sm text-on-surface-variant">Procurement</span>
+</div>
+<h4 class="font-title-sm text-title-sm text-primary mb-2">Tender Summary</h4>
+<p class="text-body-sm text-on-surface-variant mb-6 flex-1">Comprehensive overview of all active, closed, and pending tenders with key milestone tracking.</p>
+<div class="flex items-center justify-between mt-auto pt-4 border-t border-outline-variant">
+<span class="text-[11px] text-on-surface-variant font-medium uppercase">Last Generated: Oct 24, 2023</span>
+<button class="text-secondary font-label-md flex items-center gap-1 hover:underline">
+                                Generate
+                                <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Card 2 (With Modal Context Visualization) -->
+<div class="relative">
+<div class="bg-white border border-outline-variant rounded-xl p-6 card-shadow flex flex-col">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-secondary/5 rounded-lg">
+<span class="material-symbols-outlined text-secondary">person_search</span>
+</div>
+<span class="text-label-sm text-on-surface-variant">Vendors</span>
+</div>
+<h4 class="font-title-sm text-title-sm text-primary mb-2">Vendor Performance</h4>
+<p class="text-body-sm text-on-surface-variant mb-6 flex-1">Aggregated scoring data from technical evaluations and historical project delivery metrics.</p>
+<div class="flex items-center justify-between mt-auto pt-4 border-t border-outline-variant">
+<span class="text-[11px] text-on-surface-variant font-medium uppercase">Last Generated: Oct 20, 2023</span>
+<button class="text-secondary font-label-md flex items-center gap-1 hover:underline">
+                                    Generate
+                                    <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Parameter Modal Overlay Simulation -->
+<div class="absolute inset-0 z-10 bg-white/95 backdrop-blur-sm rounded-xl p-6 border-2 border-secondary shadow-xl ring-4 ring-secondary/5 flex flex-col">
+<div class="flex justify-between items-center mb-4">
+<h5 class="font-title-sm text-title-sm text-primary">Report Parameters</h5>
+<button class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined">close</span></button>
+</div>
+<div class="space-y-4 flex-1">
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1.5">Date Range</label>
+<div class="grid grid-cols-2 gap-2">
+<input class="w-full text-body-sm border border-outline-variant rounded px-2 py-1.5 focus:ring-1 focus:ring-secondary outline-none" type="date"/>
+<input class="w-full text-body-sm border border-outline-variant rounded px-2 py-1.5 focus:ring-1 focus:ring-secondary outline-none" type="date"/>
+</div>
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1.5">Tender Reference</label>
+<select class="w-full text-body-sm border border-outline-variant rounded px-2 py-1.5 focus:ring-1 focus:ring-secondary outline-none bg-surface">
+<option>All Active Tenders</option>
+<option>TR-2023-001</option>
+<option>TR-2023-045</option>
+</select>
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1.5">Export Format</label>
+<div class="flex gap-4">
+<label class="flex items-center gap-2 cursor-pointer">
+<input checked="" class="text-secondary focus:ring-secondary" name="format" type="radio"/>
+<span class="text-body-sm">PDF Document</span>
+</label>
+<label class="flex items-center gap-2 cursor-pointer">
+<input class="text-secondary focus:ring-secondary" name="format" type="radio"/>
+<span class="text-body-sm">Excel Sheet</span>
+</label>
+</div>
+</div>
+</div>
+<button class="w-full mt-4 bg-secondary text-on-secondary font-label-md py-2 rounded-lg hover:opacity-90">Start Generation</button>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="bg-white border border-outline-variant rounded-xl p-6 card-shadow flex flex-col">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-secondary/5 rounded-lg">
+<span class="material-symbols-outlined text-secondary">analytics</span>
+</div>
+<span class="text-label-sm text-on-surface-variant">Financial</span>
+</div>
+<h4 class="font-title-sm text-title-sm text-primary mb-2">Bid Analysis</h4>
+<p class="text-body-sm text-on-surface-variant mb-6 flex-1">Statistical analysis of bid variances, competitive landscape, and pricing trends across sectors.</p>
+<div class="flex items-center justify-between mt-auto pt-4 border-t border-outline-variant">
+<span class="text-[11px] text-on-surface-variant font-medium uppercase">Last Generated: Oct 22, 2023</span>
+<button class="text-secondary font-label-md flex items-center gap-1 hover:underline">
+                                Generate
+                                <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="bg-white border border-outline-variant rounded-xl p-6 card-shadow flex flex-col">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-secondary/5 rounded-lg">
+<span class="material-symbols-outlined text-secondary">compare_arrows</span>
+</div>
+<span class="text-label-sm text-on-surface-variant">Evaluation</span>
+</div>
+<h4 class="font-title-sm text-title-sm text-primary mb-2">Commercial Comparison Export</h4>
+<p class="text-body-sm text-on-surface-variant mb-6 flex-1">Side-by-side commercial bid breakdowns formatted for executive committee review boards.</p>
+<div class="flex items-center justify-between mt-auto pt-4 border-t border-outline-variant">
+<span class="text-[11px] text-on-surface-variant font-medium uppercase">Last Generated: Yesterday</span>
+<button class="text-secondary font-label-md flex items-center gap-1 hover:underline">
+                                Generate
+                                <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Card 5 -->
+<div class="bg-white border border-outline-variant rounded-xl p-6 card-shadow flex flex-col">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-secondary/5 rounded-lg">
+<span class="material-symbols-outlined text-secondary">history_edu</span>
+</div>
+<span class="text-label-sm text-on-surface-variant">Compliance</span>
+</div>
+<h4 class="font-title-sm text-title-sm text-primary mb-2">Audit Trail Export</h4>
+<p class="text-body-sm text-on-surface-variant mb-6 flex-1">Complete immutable log of all actions, approvals, and changes for a specific tender lifecycle.</p>
+<div class="flex items-center justify-between mt-auto pt-4 border-t border-outline-variant">
+<span class="text-[11px] text-on-surface-variant font-medium uppercase">Last Generated: Oct 15, 2023</span>
+<button class="text-secondary font-label-md flex items-center gap-1 hover:underline">
+                                Generate
+                                <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Card 6 -->
+<div class="bg-white border border-outline-variant rounded-xl p-6 card-shadow flex flex-col">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-secondary/5 rounded-lg">
+<span class="material-symbols-outlined text-secondary">timer_off</span>
+</div>
+<span class="text-label-sm text-on-surface-variant">Exceptions</span>
+</div>
+<h4 class="font-title-sm text-title-sm text-primary mb-2">Late Submission Report</h4>
+<p class="text-body-sm text-on-surface-variant mb-6 flex-1">Tracking and logging of all late bid attempts, technical failures, and extension requests.</p>
+<div class="flex items-center justify-between mt-auto pt-4 border-t border-outline-variant">
+<span class="text-[11px] text-on-surface-variant font-medium uppercase">Last Generated: Never</span>
+<button class="text-secondary font-label-md flex items-center gap-1 hover:underline">
+                                Generate
+                                <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+</section>
+<!-- My Report Jobs Section -->
+<section class="bg-white border border-outline-variant rounded-xl overflow-hidden card-shadow">
+<div class="px-6 py-5 border-b border-outline-variant flex justify-between items-center">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary">pending_actions</span>
+<h3 class="font-title-lg text-title-lg text-primary">My Report Jobs</h3>
+</div>
+<button class="text-secondary font-label-md flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">refresh</span>
+                        Refresh Status
+                    </button>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low border-b border-outline-variant">
+<th class="px-6 py-3 font-label-md text-label-md text-on-surface-variant">Report Name</th>
+<th class="px-6 py-3 font-label-md text-label-md text-on-surface-variant">Requested On</th>
+<th class="px-6 py-3 font-label-md text-label-md text-on-surface-variant">Format</th>
+<th class="px-6 py-3 font-label-md text-label-md text-on-surface-variant">Status</th>
+<th class="px-6 py-3 font-label-md text-label-md text-on-surface-variant text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<!-- Row 1 -->
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="px-6 py-4">
+<p class="font-title-sm text-body-md text-primary">Tender Summary Q3 2023</p>
+<p class="text-label-sm text-on-surface-variant">Ref: All Active</p>
+</td>
+<td class="px-6 py-4 font-body-sm text-on-surface-variant">Oct 26, 2023 14:30</td>
+<td class="px-6 py-4">
+<span class="px-2 py-1 bg-surface-variant rounded text-[10px] font-bold text-on-surface-variant uppercase">Excel</span>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-label-sm font-medium bg-secondary/10 text-secondary border border-secondary/20">
+<span class="w-1.5 h-1.5 bg-secondary rounded-full mr-2"></span>
+                                        Processing
+                                    </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="px-3 py-1 bg-surface-container-high text-on-surface-variant font-label-md rounded border border-outline-variant opacity-50 cursor-not-allowed flex items-center gap-1 ml-auto">
+<span class="material-symbols-outlined text-sm">download</span>
+                                        Download
+                                    </button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="px-6 py-4">
+<p class="font-title-sm text-body-md text-primary">Vendor Scorecard Matrix</p>
+<p class="text-label-sm text-on-surface-variant">Ref: Tech Sourcing 004</p>
+</td>
+<td class="px-6 py-4 font-body-sm text-on-surface-variant">Oct 26, 2023 12:15</td>
+<td class="px-6 py-4">
+<span class="px-2 py-1 bg-surface-variant rounded text-[10px] font-bold text-on-surface-variant uppercase">PDF</span>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-label-sm font-medium bg-tertiary-fixed/30 text-tertiary border border-tertiary/20">
+<span class="w-1.5 h-1.5 bg-tertiary-fixed-dim rounded-full mr-2"></span>
+                                        Queued
+                                    </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="px-3 py-1 bg-surface-container-high text-on-surface-variant font-label-md rounded border border-outline-variant opacity-50 cursor-not-allowed flex items-center gap-1 ml-auto">
+<span class="material-symbols-outlined text-sm">download</span>
+                                        Download
+                                    </button>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="px-6 py-4">
+<p class="font-title-sm text-body-md text-primary">Audit Log: TR-2023-012</p>
+<p class="text-label-sm text-on-surface-variant">Ref: TR-2023-012</p>
+</td>
+<td class="px-6 py-4 font-body-sm text-on-surface-variant">Oct 25, 2023 09:45</td>
+<td class="px-6 py-4">
+<span class="px-2 py-1 bg-surface-variant rounded text-[10px] font-bold text-on-surface-variant uppercase">PDF</span>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-label-sm font-medium bg-green-100 text-green-700 border border-green-200">
+<span class="w-1.5 h-1.5 bg-green-600 rounded-full mr-2"></span>
+                                        Ready
+                                    </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="px-3 py-1 bg-white text-secondary font-label-md rounded border border-secondary hover:bg-secondary/5 transition-colors flex items-center gap-1 ml-auto">
+<span class="material-symbols-outlined text-sm">download</span>
+                                        Download
+                                    </button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="px-6 py-4 bg-surface-container-low flex justify-between items-center border-t border-outline-variant">
+<span class="text-body-sm text-on-surface-variant">Showing 3 of 12 recent requests</span>
+<div class="flex gap-2">
+<button class="p-1 hover:bg-surface-container-high rounded"><span class="material-symbols-outlined text-lg">chevron_left</span></button>
+<button class="p-1 hover:bg-surface-container-high rounded font-label-md px-3 bg-secondary text-on-secondary">1</button>
+<button class="p-1 hover:bg-surface-container-high rounded font-label-md px-3">2</button>
+<button class="p-1 hover:bg-surface-container-high rounded"><span class="material-symbols-outlined text-lg">chevron_right</span></button>
+</div>
+</div>
+</section>
+</main>
+</div>
+</body></html>

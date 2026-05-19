@@ -1,9 +1,12 @@
 import {
   Controller,
   Post,
+  Patch,
+  Get,
   Body,
   HttpCode,
   HttpStatus,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -19,6 +22,7 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MfaVerifyVendorDto } from './dto/mfa-verify-vendor.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @ApiTags('vendor-auth')
 @Controller('vendor-auth')
@@ -94,5 +98,33 @@ export class VendorAuthController {
   @ApiOperation({ operationId: 'refreshVendorToken', summary: 'Exchange refresh token for new access token' })
   refresh(@Body() body: { refreshToken: string }) {
     return this.vendorAuthService.refresh(body.refreshToken);
+  }
+
+  @UseGuards(VendorJwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('me')
+  @ApiOperation({ operationId: 'getVendorProfile', summary: "Get the calling vendor's profile" })
+  getMe(@CurrentUser() vendor: any) {
+    return this.vendorAuthService.getProfile(vendor.vendorId);
+  }
+
+  @UseGuards(VendorJwtAuthGuard)
+  @ApiBearerAuth()
+  @Patch('me')
+  @ApiOperation({ operationId: 'updateVendorProfile', summary: "Update non-sensitive fields on the calling vendor's profile" })
+  updateMe(@CurrentUser() vendor: any, @Body() dto: UpdateProfileDto) {
+    return this.vendorAuthService.updateProfile(vendor.vendorId, vendor.id, dto);
+  }
+
+  @UseGuards(VendorJwtAuthGuard)
+  @ApiBearerAuth()
+  @Get('me/bids')
+  @ApiOperation({ operationId: 'listMyBids', summary: 'List bids submitted by the calling vendor across all tenders' })
+  myBids(
+    @CurrentUser() vendor: any,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.vendorAuthService.listMyBids(vendor.vendorId, Number(page ?? 1), Number(pageSize ?? 50));
   }
 }

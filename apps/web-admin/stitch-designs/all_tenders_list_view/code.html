@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>All Tenders | CTMP Admin</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "inverse-on-surface": "#f1f0f4",
+                        "on-primary-container": "#8aa4cf",
+                        "outline-variant": "#c4c6cf",
+                        "secondary-fixed-dim": "#b4c5ff",
+                        "on-error": "#ffffff",
+                        "on-secondary-container": "#fefcff",
+                        "surface-container-highest": "#e3e2e6",
+                        "surface-container": "#eeedf1",
+                        "primary-fixed": "#d5e3ff",
+                        "on-tertiary-fixed": "#291800",
+                        "on-primary-fixed": "#001c3b",
+                        "primary-fixed-dim": "#adc8f5",
+                        "surface-variant": "#e3e2e6",
+                        "background": "#faf9fc",
+                        "on-tertiary-container": "#c69b5f",
+                        "on-secondary": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "on-primary-fixed-variant": "#2d486d",
+                        "on-background": "#1a1c1e",
+                        "surface-tint": "#455f87",
+                        "error": "#ba1a1a",
+                        "primary": "#022448",
+                        "on-tertiary": "#ffffff",
+                        "surface-dim": "#dad9dd",
+                        "secondary": "#0051d5",
+                        "on-secondary-fixed-variant": "#003ea8",
+                        "tertiary-fixed": "#ffddb2",
+                        "on-error-container": "#93000a",
+                        "tertiary": "#341f00",
+                        "secondary-fixed": "#dbe1ff",
+                        "primary-container": "#1e3a5f",
+                        "surface": "#faf9fc",
+                        "inverse-primary": "#adc8f5",
+                        "surface-bright": "#faf9fc",
+                        "on-surface-variant": "#43474e",
+                        "inverse-surface": "#2f3033",
+                        "tertiary-container": "#503300",
+                        "on-surface": "#1a1c1e",
+                        "surface-container-lowest": "#ffffff",
+                        "on-secondary-fixed": "#00174b",
+                        "error-container": "#ffdad6",
+                        "surface-container-low": "#f4f3f7",
+                        "on-tertiary-fixed-variant": "#60410c",
+                        "secondary-container": "#316bf3",
+                        "tertiary-fixed-dim": "#edbf7f",
+                        "surface-container-high": "#e9e7eb",
+                        "outline": "#74777f"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "sidebar-width": "260px",
+                        "container-padding": "2rem",
+                        "stack-sm": "0.5rem",
+                        "stack-lg": "1.5rem",
+                        "stack-md": "1rem",
+                        "gutter": "1.5rem"
+                    },
+                    "fontFamily": {
+                        "body-md": ["Inter"],
+                        "label-md": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "title-lg": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "title-sm": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "body-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "display-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "title-lg": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "label-sm": ["11px", {"lineHeight": "14px", "fontWeight": "500"}],
+                        "title-sm": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .table-container { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02); }
+    </style>
+</head>
+<body class="bg-background text-on-surface">
+<!-- SideNavBar -->
+<aside class="w-[260px] h-screen fixed left-0 top-0 bg-primary flex flex-col py-stack-lg z-50">
+<div class="px-6 mb-8 flex items-center gap-3">
+<div class="w-8 h-8 bg-secondary rounded flex items-center justify-center">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">gavel</span>
+</div>
+<div>
+<h1 class="font-title-lg text-title-lg font-bold text-on-primary">CTMP Admin</h1>
+<p class="font-label-sm text-label-sm text-on-primary-container opacity-80">Enterprise Procurement</p>
+</div>
+</div>
+<nav class="flex-1 overflow-y-auto px-2">
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors rounded-lg mb-1" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label-md text-label-md">Dashboard</span>
+</a>
+<!-- Active State: Tenders -->
+<a class="flex items-center gap-stack-md px-4 py-3 bg-white/10 border-l-4 border-secondary text-on-primary transition-all duration-150 rounded-r-lg mb-1" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">gavel</span>
+<span class="font-label-md text-label-md">Tenders</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors rounded-lg mb-1" href="#">
+<span class="material-symbols-outlined">fact_check</span>
+<span class="font-label-md text-label-md">Approvals</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors rounded-lg mb-1" href="#">
+<span class="material-symbols-outlined">question_answer</span>
+<span class="font-label-md text-label-md">Clarifications</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors rounded-lg mb-1" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="font-label-md text-label-md">Technical Evaluation</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors rounded-lg mb-1" href="#">
+<span class="material-symbols-outlined">groups</span>
+<span class="font-label-md text-label-md">Committee &amp; Commercial</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors rounded-lg mb-1" href="#">
+<span class="material-symbols-outlined">account_balance</span>
+<span class="font-label-md text-label-md">Vendor Management</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors rounded-lg mb-1" href="#">
+<span class="material-symbols-outlined">description</span>
+<span class="font-label-md text-label-md">Reports</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors rounded-lg mb-1" href="#">
+<span class="material-symbols-outlined">history</span>
+<span class="font-label-md text-label-md">Audit Log</span>
+</a>
+<a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors rounded-lg mb-1" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">System Configuration</span>
+</a>
+</nav>
+<div class="px-6 pt-4 border-t border-white/10">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center text-white text-[10px] font-bold">JD</div>
+<div class="overflow-hidden">
+<p class="text-on-primary font-label-md truncate">John Doe</p>
+<p class="text-on-primary/50 text-[10px]">Head of Procurement</p>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content Shell -->
+<main class="pl-[260px] min-h-screen">
+<!-- TopNavBar -->
+<header class="flex justify-between items-center h-16 w-full px-gutter bg-surface shadow-sm sticky top-0 z-40 border-b border-outline-variant">
+<div class="flex items-center gap-4">
+<nav class="flex items-center text-on-surface-variant font-body-md gap-2">
+<span class="hover:text-primary cursor-pointer transition-colors">Tenders</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+<span class="text-primary font-bold">All Tenders</span>
+</nav>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative hidden lg:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px]">search</span>
+<input class="bg-surface-container-low border border-outline-variant rounded-full py-1.5 pl-10 pr-4 text-body-sm w-64 focus:ring-2 focus:ring-secondary focus:border-transparent outline-none" placeholder="Global Search..." type="text"/>
+</div>
+<div class="flex items-center gap-4">
+<button class="relative p-2 hover:bg-surface-container-high rounded-full transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border-2 border-surface"></span>
+</button>
+<div class="h-6 w-[1px] bg-outline-variant"></div>
+<div class="flex items-center gap-2">
+<span class="text-label-md font-label-md text-on-surface">John Doe | Procurement Dept</span>
+<button class="p-2 hover:bg-surface-container-high rounded-full transition-colors text-error">
+<span class="material-symbols-outlined">logout</span>
+</button>
+</div>
+</div>
+</div>
+</header>
+<!-- Canvas Area -->
+<div class="p-8 max-w-[1440px] mx-auto">
+<!-- Page Header -->
+<div class="flex justify-between items-end mb-8">
+<div>
+<h2 class="font-headline-md text-headline-md text-primary mb-1">All Tenders</h2>
+<p class="font-body-md text-on-surface-variant">Manage and monitor institutional procurement workflows.</p>
+</div>
+<button class="bg-secondary text-white px-6 py-2.5 rounded-lg font-title-sm text-title-sm flex items-center gap-2 shadow-sm hover:opacity-90 transition-all active:scale-95 duration-75">
+<span class="material-symbols-outlined text-[20px]">add</span>
+                    Create New Tender
+                </button>
+</div>
+<!-- Filter Bar -->
+<div class="bg-surface-container-lowest p-4 rounded-xl border border-outline-variant mb-6 flex flex-wrap items-center gap-4">
+<div class="flex-1 min-w-[280px]">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1.5 ml-1">Search Tender</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">search</span>
+<input class="w-full bg-white border border-outline-variant rounded-lg py-2 pl-10 pr-4 text-body-md focus:ring-2 focus:ring-secondary focus:border-transparent outline-none" placeholder="ID, Name or Category..." type="text"/>
+</div>
+</div>
+<div class="w-48">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1.5 ml-1">Status</label>
+<select class="w-full bg-white border border-outline-variant rounded-lg py-2 px-3 text-body-md focus:ring-2 focus:ring-secondary focus:border-transparent outline-none appearance-none cursor-pointer">
+<option>All Statuses</option>
+<option>Draft</option>
+<option>Published</option>
+<option>Evaluation</option>
+<option>Awarded</option>
+<option>Cancelled</option>
+</select>
+</div>
+<div class="w-64">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1.5 ml-1">Date Range</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">calendar_today</span>
+<input class="w-full bg-white border border-outline-variant rounded-lg py-2 pl-3 pr-10 text-body-md focus:ring-2 focus:ring-secondary focus:border-transparent outline-none" placeholder="Oct 01 - Dec 31, 2024" type="text"/>
+</div>
+</div>
+<div class="pt-6">
+<button class="bg-surface-container-high text-on-surface-variant px-4 py-2 rounded-lg font-label-md text-label-md hover:bg-surface-variant transition-colors border border-outline-variant">
+                        Clear Filters
+                    </button>
+</div>
+</div>
+<!-- Data Table -->
+<div class="bg-white rounded-xl border border-outline-variant overflow-hidden table-container">
+<table class="w-full text-left border-collapse">
+<thead class="bg-surface-container-low border-b border-outline-variant">
+<tr>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Tender ID</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Tender Name</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Category</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Stage</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Closing Date</th>
+<th class="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container">
+<!-- Row 1 -->
+<tr class="hover:bg-surface-container-lowest transition-colors group">
+<td class="px-6 py-4">
+<span class="font-label-md text-label-md text-primary font-bold">TDR-2024-0082</span>
+</td>
+<td class="px-6 py-4">
+<p class="font-body-md text-on-surface group-hover:text-secondary transition-colors font-medium">National Infrastructure Project Phase 1</p>
+</td>
+<td class="px-6 py-4">
+<span class="font-body-sm text-on-surface-variant">Construction</span>
+</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-secondary-container/10 text-secondary text-[11px] font-bold">Published</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-outline">event</span>
+<span class="font-body-sm text-on-surface-variant">Nov 15, 2024</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">visibility</span></button>
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">edit</span></button>
+</div>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface-container-lowest transition-colors group">
+<td class="px-6 py-4">
+<span class="font-label-md text-label-md text-primary font-bold">TDR-2024-0091</span>
+</td>
+<td class="px-6 py-4">
+<p class="font-body-md text-on-surface group-hover:text-secondary transition-colors font-medium">Enterprise ERP Cloud Migration</p>
+</td>
+<td class="px-6 py-4">
+<span class="font-body-sm text-on-surface-variant">IT Services</span>
+</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-tertiary-fixed-dim/20 text-on-tertiary-fixed-variant text-[11px] font-bold">Evaluation</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-outline">event</span>
+<span class="font-body-sm text-on-surface-variant">Oct 28, 2024</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">visibility</span></button>
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">edit</span></button>
+</div>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-surface-container-lowest transition-colors group">
+<td class="px-6 py-4">
+<span class="font-label-md text-label-md text-primary font-bold">TDR-2024-0085</span>
+</td>
+<td class="px-6 py-4">
+<p class="font-body-md text-on-surface group-hover:text-secondary transition-colors font-medium">Supply of Medical Laboratory Equipment</p>
+</td>
+<td class="px-6 py-4">
+<span class="font-body-sm text-on-surface-variant">Healthcare</span>
+</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-primary-container/10 text-primary-container text-[11px] font-bold">Draft</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-outline">event</span>
+<span class="font-body-sm text-on-surface-variant">Dec 05, 2024</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">visibility</span></button>
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">edit</span></button>
+</div>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-surface-container-lowest transition-colors group">
+<td class="px-6 py-4">
+<span class="font-label-md text-label-md text-primary font-bold">TDR-2024-0077</span>
+</td>
+<td class="px-6 py-4">
+<p class="font-body-md text-on-surface group-hover:text-secondary transition-colors font-medium">Maintenance of City Solar Power Grid</p>
+</td>
+<td class="px-6 py-4">
+<span class="font-body-sm text-on-surface-variant">Services</span>
+</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-secondary-fixed/50 text-secondary-container text-[11px] font-bold">Awarded</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-outline">event</span>
+<span class="font-body-sm text-on-surface-variant">Oct 12, 2024</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">visibility</span></button>
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">edit</span></button>
+</div>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="hover:bg-surface-container-lowest transition-colors group">
+<td class="px-6 py-4">
+<span class="font-label-md text-label-md text-primary font-bold">TDR-2024-0104</span>
+</td>
+<td class="px-6 py-4">
+<p class="font-body-md text-on-surface group-hover:text-secondary transition-colors font-medium">Urban Green Belt Landscaping</p>
+</td>
+<td class="px-6 py-4">
+<span class="font-body-sm text-on-surface-variant">Construction</span>
+</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-secondary-container/10 text-secondary text-[11px] font-bold">Published</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-outline">event</span>
+<span class="font-body-sm text-on-surface-variant">Nov 22, 2024</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">visibility</span></button>
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">edit</span></button>
+</div>
+</td>
+</tr>
+<!-- Row 6 -->
+<tr class="hover:bg-surface-container-lowest transition-colors group">
+<td class="px-6 py-4">
+<span class="font-label-md text-label-md text-primary font-bold">TDR-2024-0112</span>
+</td>
+<td class="px-6 py-4">
+<p class="font-body-md text-on-surface group-hover:text-secondary transition-colors font-medium">Security Guard Services for HQ</p>
+</td>
+<td class="px-6 py-4">
+<span class="font-body-sm text-on-surface-variant">Services</span>
+</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-error-container/20 text-error text-[11px] font-bold">Cancelled</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-outline">event</span>
+<span class="font-body-sm text-on-surface-variant">Dec 10, 2024</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">visibility</span></button>
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">edit</span></button>
+</div>
+</td>
+</tr>
+<!-- Row 7 -->
+<tr class="hover:bg-surface-container-lowest transition-colors group">
+<td class="px-6 py-4">
+<span class="font-label-md text-label-md text-primary font-bold">TDR-2024-0089</span>
+</td>
+<td class="px-6 py-4">
+<p class="font-body-md text-on-surface group-hover:text-secondary transition-colors font-medium">HVAC System Upgrade - Terminal 2</p>
+</td>
+<td class="px-6 py-4">
+<span class="font-body-sm text-on-surface-variant">Engineering</span>
+</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-secondary-container/10 text-secondary text-[11px] font-bold">Published</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-outline">event</span>
+<span class="font-body-sm text-on-surface-variant">Nov 18, 2024</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">visibility</span></button>
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">edit</span></button>
+</div>
+</td>
+</tr>
+<!-- Row 8 -->
+<tr class="hover:bg-surface-container-lowest transition-colors group">
+<td class="px-6 py-4">
+<span class="font-label-md text-label-md text-primary font-bold">TDR-2024-0120</span>
+</td>
+<td class="px-6 py-4">
+<p class="font-body-md text-on-surface group-hover:text-secondary transition-colors font-medium">Vehicle Fleet Insurance Renewal</p>
+</td>
+<td class="px-6 py-4">
+<span class="font-body-sm text-on-surface-variant">Insurance</span>
+</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 rounded-full bg-tertiary-fixed-dim/20 text-on-tertiary-fixed-variant text-[11px] font-bold">Evaluation</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-outline">event</span>
+<span class="font-body-sm text-on-surface-variant">Oct 30, 2024</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">visibility</span></button>
+<button class="p-2 hover:bg-surface-container text-primary rounded transition-colors"><span class="material-symbols-outlined text-[20px]">edit</span></button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+<!-- Pagination -->
+<div class="px-6 py-4 bg-surface-container-low border-t border-outline-variant flex items-center justify-between">
+<p class="font-body-sm text-on-surface-variant">Showing <span class="font-bold text-on-surface">1 - 8</span> of <span class="font-bold text-on-surface">42</span> tenders</p>
+<div class="flex items-center gap-1">
+<button class="p-2 rounded hover:bg-surface-container transition-colors disabled:opacity-30" disabled="">
+<span class="material-symbols-outlined text-[20px]">chevron_left</span>
+</button>
+<button class="w-8 h-8 rounded bg-secondary text-white font-label-md text-label-md flex items-center justify-center">1</button>
+<button class="w-8 h-8 rounded hover:bg-surface-container text-on-surface font-label-md text-label-md flex items-center justify-center transition-colors">2</button>
+<button class="w-8 h-8 rounded hover:bg-surface-container text-on-surface font-label-md text-label-md flex items-center justify-center transition-colors">3</button>
+<span class="px-1 text-outline font-label-md">...</span>
+<button class="w-8 h-8 rounded hover:bg-surface-container text-on-surface font-label-md text-label-md flex items-center justify-center transition-colors">6</button>
+<button class="p-2 rounded hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[20px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Footer Meta -->
+<div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+<div class="bg-primary-container p-6 rounded-xl text-on-primary">
+<div class="flex items-center gap-4">
+<div class="p-3 bg-white/10 rounded-lg">
+<span class="material-symbols-outlined text-[24px]">pending_actions</span>
+</div>
+<div>
+<p class="text-[11px] uppercase tracking-wider opacity-60">Pending Evaluation</p>
+<h4 class="text-2xl font-bold">12</h4>
+</div>
+</div>
+</div>
+<div class="bg-secondary p-6 rounded-xl text-white">
+<div class="flex items-center gap-4">
+<div class="p-3 bg-white/10 rounded-lg">
+<span class="material-symbols-outlined text-[24px]">publish</span>
+</div>
+<div>
+<p class="text-[11px] uppercase tracking-wider opacity-60">Active Tenders</p>
+<h4 class="text-2xl font-bold">24</h4>
+</div>
+</div>
+</div>
+<div class="bg-surface-container-highest p-6 rounded-xl border border-outline-variant">
+<div class="flex items-center gap-4">
+<div class="p-3 bg-white rounded-lg border border-outline-variant">
+<span class="material-symbols-outlined text-primary text-[24px]">verified</span>
+</div>
+<div>
+<p class="text-[11px] uppercase tracking-wider text-on-surface-variant">Awarded (MTD)</p>
+<h4 class="text-2xl font-bold text-primary">06</h4>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

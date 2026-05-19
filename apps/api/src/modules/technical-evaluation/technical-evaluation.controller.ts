@@ -45,4 +45,11 @@ export class TechnicalEvaluationController {
   finalize(@Param('tenderId') tenderId: string, @CurrentUser('id') userId: string) {
     return this.technicalEvaluationService.finalize(tenderId, userId);
   }
+
+  @Get('tenders/:tenderId/technical-criteria')
+  @RequirePermissions('technical:evaluate')
+  @ApiOperation({ operationId: 'listTechnicalCriteria', summary: 'Get evaluation criteria configured for tender' })
+  listCriteria(@Param('tenderId') tenderId: string) {
+    return this.technicalEvaluationService.listCriteria(tenderId);
+  }
 }

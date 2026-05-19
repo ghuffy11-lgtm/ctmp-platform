@@ -188,6 +188,55 @@ paths:
       responses:
         '204':
           description: Password reset completed.
+  /vendor-auth/me:
+    get:
+      tags: [Vendor Auth]
+      summary: Get the calling vendor's profile (self-service)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Vendor profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorProfileResponse'
+    patch:
+      tags: [Vendor Auth]
+      summary: Update non-sensitive fields on the calling vendor's profile
+      description: Email change is rejected here — use the verified-email flow.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorProfileUpdateRequest'
+      responses:
+        '200':
+          description: Updated vendor profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorProfileResponse'
+  /vendor-auth/me/bids:
+    get:
+      tags: [Vendor Auth]
+      summary: List the calling vendor's bids across all tenders
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Vendor's bids.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyBidsListResponse'
+
   /vendor-auth/mfa/verify:
     post:
       tags: [Vendor Auth]
@@ -392,6 +441,59 @@ paths:
               schema:
                 $ref: '#/components/schemas/Tender'
 
+  /tenders/{tenderId}/approve:
+    post:
+      tags: [Tenders]
+      summary: Approve tender from Internal Review
+      description: Requires tenders:approve. Transitions Internal Review → Approved. Writes approval_action and audit log.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comments:
+                  type: string
+      responses:
+        '200':
+          description: Tender approved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tender'
+
+  /tenders/{tenderId}/reject:
+    post:
+      tags: [Tenders]
+      summary: Reject tender from Internal Review
+      description: Requires tenders:approve. Reason is mandatory for audit. Sends back to Draft.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Tender rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tender'
+
   /tenders/{tenderId}/clarifications:
     parameters:
       - $ref: '#/components/parameters/TenderId'
@@ -463,6 +565,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Bid'
+    get:
+      tags: [Bids]
+      summary: List bids for a tender (admin only)
+      description: Requires bids:list. Commercial amounts are hidden unless caller has commercial:view; the commercialDetailsVisible flag per row indicates whether commercial fields are populated.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Tender bids list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenderBidsListResponse'
   /bids/{bidId}/technical-envelope:
     put:
       tags: [Bids]
@@ -545,7 +664,83 @@ paths:
               schema:
                 $ref: '#/components/schemas/BidSubmissionReceipt'
 
+  /bids/{bidId}/envelopes/{envelopeType}/documents:
+    post:
+      tags: [Bids]
+      summary: Upload a single document to a DRAFT envelope (vendor self-service)
+      description: >
+        Multipart upload. Server computes SHA-256 over the byte stream and persists the
+        resulting BidDocument row. Only allowed when bid status = DRAFT and envelope
+        status = DRAFT. Audit-logged. Vendor JWT scoped.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BidId'
+        - name: envelopeType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [TECHNICAL, COMMERCIAL]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Document accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BidDocumentUploadResponse'
+    get:
+      tags: [Bids]
+      summary: List documents currently attached to a DRAFT envelope
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BidId'
+        - name: envelopeType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [TECHNICAL, COMMERCIAL]
+      responses:
+        '200':
+          description: Envelope contents.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BidEnvelopeContents'
+
   /bids/{bidId}/documents/{documentId}:
+    delete:
+      tags: [Bids]
+      summary: Remove a document from a DRAFT envelope (vendor self-service)
+      description: Only allowed on DRAFT bid + DRAFT envelope. Audit-logged.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BidId'
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Document removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
     get:
       tags: [Bids]
       summary: Download a bid document
@@ -677,6 +872,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TechnicalEvaluationListResponse'
+  /tenders/{tenderId}/technical-criteria:
+    get:
+      tags: [Technical Evaluation]
+      summary: Get evaluation criteria configured for tender
+      description: Returns criteria list + pass threshold for the scorecard UI. Falls back to department/tender-type defaults if no tender-specific criteria stored.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '200':
+          description: Criteria configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TechnicalCriteriaResponse'
 
   /tenders/{tenderId}/committee-sessions:
     post:
@@ -699,6 +910,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommitteeSession'
+    get:
+      tags: [Committee]
+      summary: List committee sessions for tender
+      description: Newest first. Members[] populated with attendance flag once attendance has been recorded.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenderId'
+      responses:
+        '200':
+          description: Committee session list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitteeSessionListResponse'
   /committee-sessions/{sessionId}/attendance:
     post:
       tags: [Committee]
@@ -946,6 +1172,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ReportExportJob'
 
+  /reports/jobs:
+    get:
+      tags: [Reports]
+      summary: List recent report export jobs for caller
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Recent jobs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportExportJobListResponse'
   /reports/jobs/{jobId}:
     get:
       tags: [Reports]
@@ -983,6 +1225,310 @@ paths:
                 format: binary
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /vendors:
+    get:
+      tags: [Vendors]
+      summary: List vendors (admin)
+      description: Requires vendors:list. Filter by registrationStatus.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING_APPROVAL, APPROVED, REJECTED, SUSPENDED, BLACKLISTED]
+      responses:
+        '200':
+          description: Vendor list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorListResponse'
+  /vendors/{vendorId}:
+    get:
+      tags: [Vendors]
+      summary: Get vendor profile
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/VendorId'
+      responses:
+        '200':
+          description: Vendor profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vendor'
+    patch:
+      tags: [Vendors]
+      summary: Update vendor profile
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/VendorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorUpdateRequest'
+      responses:
+        '200':
+          description: Vendor updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vendor'
+  /vendors/{vendorId}/approve:
+    post:
+      tags: [Vendors]
+      summary: Approve vendor registration
+      description: Requires vendors:approve. Vendor must have emailVerified=true. Transitions PENDING_APPROVAL → APPROVED. Sends approval email. Audit logged.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/VendorId'
+      responses:
+        '200':
+          description: Vendor approved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vendor'
+  /vendors/{vendorId}/reject:
+    post:
+      tags: [Vendors]
+      summary: Reject vendor registration
+      description: Reason required for audit. Transitions PENDING_APPROVAL → REJECTED.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/VendorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Vendor rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vendor'
+  /vendors/{vendorId}/suspend:
+    post:
+      tags: [Vendors]
+      summary: Suspend approved vendor
+      description: Reason required for audit. Transitions APPROVED → SUSPENDED. Revokes active vendor sessions (bumps token version).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/VendorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Vendor suspended.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vendor'
+
+  /roles:
+    get:
+      tags: [Roles]
+      summary: List roles
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Role list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleListResponse'
+  /roles/{roleId}/permissions:
+    get:
+      tags: [Roles]
+      summary: Get permission IDs assigned to role
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RoleId'
+      responses:
+        '200':
+          description: Permission IDs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [permissionIds]
+                properties:
+                  permissionIds:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+    patch:
+      tags: [Roles]
+      summary: Replace permission set for role
+      description: System roles (is_system=true) are read-only and return 403. Each add/remove emits an audit event.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RoleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [permissionIds]
+              properties:
+                permissionIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Permissions updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permissionIds:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+  /permissions:
+    get:
+      tags: [Permissions]
+      summary: List all permission definitions
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Permission catalogue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PermissionListResponse'
+
+  /notification-templates:
+    get:
+      tags: [Notifications]
+      summary: List notification templates
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Template list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTemplateListResponse'
+  /notification-templates/{templateId}:
+    patch:
+      tags: [Notifications]
+      summary: Update notification template subject, body, or enabled flag
+      description: Reject empty bodyTemplate. Audits subject/body diff + enabled flips.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subject:
+                  type: string
+                bodyTemplate:
+                  type: string
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Template updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTemplate'
+
+  /system-settings:
+    get:
+      tags: [System Settings]
+      summary: List platform settings (excluding secrets)
+      description: Sensitive keys (JWT secrets, credentials) are never returned here.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettingListResponse'
+  /system-settings/batch:
+    post:
+      tags: [System Settings]
+      summary: Batch update platform settings
+      description: Atomic. Validates each value against the declared type. Rejects updates to read_only or sensitive keys. Per-key audit log.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [updates]
+              properties:
+                updates:
+                  type: array
+                  items:
+                    type: object
+                    required: [key, value]
+                    properties:
+                      key:
+                        type: string
+                      value:
+                        type: string
+      responses:
+        '200':
+          description: Settings updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettingListResponse'
 
 components:
   securitySchemes:
@@ -1028,6 +1574,20 @@ components:
         format: uuid
     JobId:
       name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VendorId:
+      name: vendorId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RoleId:
+      name: roleId
       in: path
       required: true
       schema:
@@ -1891,9 +2451,479 @@ components:
         id:
           type: string
           format: uuid
+        reportCode:
+          type: string
+        reportName:
+          type: string
         status:
           type: string
           enum: [QUEUED, RUNNING, COMPLETED, FAILED]
+        format:
+          type: string
+          enum: [XLSX, PDF]
+        enqueuedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        errorMessage:
+          type: string
+        fileSize:
+          type: integer
+    ReportExportJobListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ReportExportJob'
+    TenderBidsListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenderBidSummary'
+        total:
+          type: integer
+    TenderBidSummary:
+      type: object
+      required: [id, vendorId, technicalEnvelopeStatus]
+      properties:
+        id:
+          type: string
+          format: uuid
+        vendorId:
+          type: string
+          format: uuid
+        vendorCompany:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+        technicalEnvelopeStatus:
+          $ref: '#/components/schemas/EnvelopeStatus'
+        commercialEnvelopeStatus:
+          $ref: '#/components/schemas/EnvelopeStatus'
+        technicalResult:
+          type: string
+          enum: [PASS, FAIL]
+        technicalScore:
+          type: number
+        commercialDetailsVisible:
+          type: boolean
+        totalAmount:
+          type: number
+          description: Present only when caller has commercial:view AND commercialDetailsVisible=true.
+        currency:
+          type: string
+    TechnicalCriterion:
+      type: object
+      required: [code, name, maxScore]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        maxScore:
+          type: number
+        weight:
+          type: number
+        mandatory:
+          type: boolean
+    TechnicalCriteriaResponse:
+      type: object
+      required: [tenderId, criteria, passThreshold]
+      properties:
+        tenderId:
+          type: string
+          format: uuid
+        criteria:
+          type: array
+          items:
+            $ref: '#/components/schemas/TechnicalCriterion'
+        passThreshold:
+          type: number
+          description: Minimum total score required for PASS.
+        source:
+          type: string
+          enum: [TENDER, DEPARTMENT_DEFAULT, SYSTEM_DEFAULT]
+    CommitteeMember:
+      type: object
+      required: [userId, name, role]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          type: string
+        attended:
+          type: boolean
+    CommitteeSessionWithMembers:
+      allOf:
+        - $ref: '#/components/schemas/CommitteeSession'
+        - type: object
+          properties:
+            chairName:
+              type: string
+            members:
+              type: array
+              items:
+                $ref: '#/components/schemas/CommitteeMember'
+    CommitteeSessionListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommitteeSessionWithMembers'
+    Vendor:
+      type: object
+      required: [id, company, email, contactName, registrationStatus, emailVerified, registeredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        company:
+          type: string
+        email:
+          type: string
+        contactName:
+          type: string
+        contactPhone:
+          type: string
+        country:
+          type: string
+        category:
+          type: string
+        taxId:
+          type: string
+        registrationStatus:
+          type: string
+          enum: [PENDING_APPROVAL, APPROVED, REJECTED, SUSPENDED, BLACKLISTED]
+        emailVerified:
+          type: boolean
+        registeredAt:
+          type: string
+          format: date-time
+        approvedAt:
+          type: string
+          format: date-time
+        lastLoginAt:
+          type: string
+          format: date-time
+        documentCount:
+          type: integer
+    VendorListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Vendor'
+    VendorUpdateRequest:
+      type: object
+      properties:
+        company:
+          type: string
+        contactName:
+          type: string
+        contactPhone:
+          type: string
+        country:
+          type: string
+        category:
+          type: string
+        taxId:
+          type: string
+    Role:
+      type: object
+      required: [id, name, permissionCount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        permissionCount:
+          type: integer
+        userCount:
+          type: integer
+        isSystem:
+          type: boolean
+    RoleListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+    Permission:
+      type: object
+      required: [id, code, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        group:
+          type: string
+    PermissionListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+    NotificationTemplate:
+      type: object
+      required: [id, code, name, channel, bodyTemplate, enabled]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        channel:
+          type: string
+          enum: [EMAIL, IN_APP, SMS]
+        subject:
+          type: string
+        bodyTemplate:
+          type: string
+        enabled:
+          type: boolean
+    NotificationTemplateListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationTemplate'
+    PlatformSetting:
+      type: object
+      required: [key, value]
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        type:
+          type: string
+          enum: [STRING, NUMBER, BOOLEAN, JSON]
+        readOnly:
+          type: boolean
+    PlatformSettingListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformSetting'
+    VendorProfileResponse:
+      type: object
+      required: [vendor]
+      properties:
+        vendor:
+          type: object
+          required: [id, companyName, status, registeredAt]
+          properties:
+            id:
+              type: string
+              format: uuid
+            companyName:
+              type: string
+            registrationNumber:
+              type: string
+            taxNumber:
+              type: string
+            country:
+              type: string
+            address:
+              type: string
+            phone:
+              type: string
+            website:
+              type: string
+            status:
+              type: string
+              enum: [PENDING, APPROVED, REJECTED, SUSPENDED, BLACKLISTED]
+            registeredAt:
+              type: string
+              format: date-time
+            approvedAt:
+              type: string
+              format: date-time
+              nullable: true
+        primaryContact:
+          type: object
+          nullable: true
+          required: [id, email, fullName, emailVerified, mfaEnabled]
+          properties:
+            id:
+              type: string
+              format: uuid
+            email:
+              type: string
+            fullName:
+              type: string
+            phone:
+              type: string
+            emailVerified:
+              type: boolean
+            lastLoginAt:
+              type: string
+              format: date-time
+              nullable: true
+            mfaEnabled:
+              type: boolean
+    VendorProfileUpdateRequest:
+      type: object
+      properties:
+        companyName:
+          type: string
+        taxNumber:
+          type: string
+        country:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        website:
+          type: string
+        contactFullName:
+          type: string
+        contactPhone:
+          type: string
+    MyBidsListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/MyBidSummary'
+    MyBidSummary:
+      type: object
+      required: [id, tenderId, tenderReference, tenderTitle, status, technicalEnvelopeStatus, commercialEnvelopeStatus]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenderId:
+          type: string
+          format: uuid
+        tenderReference:
+          type: string
+        tenderTitle:
+          type: string
+        tenderStatus:
+          $ref: '#/components/schemas/TenderStatus'
+        submissionDeadline:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          $ref: '#/components/schemas/BidStatus'
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        technicalResult:
+          type: string
+          enum: [PASS, FAIL]
+        technicalEnvelopeStatus:
+          $ref: '#/components/schemas/EnvelopeStatus'
+        commercialEnvelopeStatus:
+          $ref: '#/components/schemas/EnvelopeStatus'
+        receiptNumber:
+          type: string
+    BidDocumentUploadResponse:
+      type: object
+      required: [id, bidEnvelopeId, envelopeType, filename, checksumSha256, fileSize]
+      properties:
+        id:
+          type: string
+          format: uuid
+        bidEnvelopeId:
+          type: string
+          format: uuid
+        envelopeType:
+          $ref: '#/components/schemas/EnvelopeType'
+        filename:
+          type: string
+        mimeType:
+          type: string
+        fileSize:
+          type: integer
+        checksumSha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        uploadedAt:
+          type: string
+          format: date-time
+    BidEnvelopeContents:
+      type: object
+      required: [envelopeId, envelopeType, status, documents]
+      properties:
+        envelopeId:
+          type: string
+          format: uuid
+        envelopeType:
+          $ref: '#/components/schemas/EnvelopeType'
+        status:
+          $ref: '#/components/schemas/EnvelopeStatus'
+        documents:
+          type: array
+          items:
+            type: object
+            required: [id, filename, fileSize, checksumSha256, uploadedAt]
+            properties:
+              id:
+                type: string
+                format: uuid
+              filename:
+                type: string
+              mimeType:
+                type: string
+              fileSize:
+                type: integer
+              checksumSha256:
+                type: string
+                pattern: '^[a-f0-9]{64}$'
+              uploadedAt:
+                type: string
+                format: date-time
     PaginatedResponse:
       type: object
       required: [page, pageSize, total]

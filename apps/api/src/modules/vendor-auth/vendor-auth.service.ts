@@ -10,15 +10,18 @@ import { ConfigService } from '@nestjs/config';
 import { randomBytes, createHash } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { TOTP } from 'otplib';
+import { AuditRiskLevel, EnvelopeType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { CaptchaService } from '../../common/services/captcha.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AuditService } from '../audit/audit.service';
 import { VendorRegisterDto } from './dto/vendor-register.dto';
 import { VendorLoginDto } from './dto/vendor-login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MfaVerifyVendorDto } from './dto/mfa-verify-vendor.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 export interface RequestContext {
   ipAddress?: string | null;
@@ -35,6 +38,7 @@ export class VendorAuthService {
     private readonly config: ConfigService,
     private readonly captcha: CaptchaService,
     private readonly notifications: NotificationsService,
+    private readonly audit: AuditService,
   ) {}
 
   // ---------------------------------------------------------------- register
@@ -307,5 +311,166 @@ export class VendorAuthService {
 
   private bcryptRounds(): number {
     return Number(this.config.get<string>('auth.bcryptRounds') ?? 12);
+  }
+
+  // ============================================================================
+  // Self-service profile + bid list (vendor JWT scoped)
+  // ============================================================================
+
+  async getProfile(vendorId: string) {
+    const vendor = await this.prisma.vendor.findUnique({
+      where: { id: vendorId },
+      include: {
+        vendorUsers: {
+          where: { isPrimaryContact: true },
+          take: 1,
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            phone: true,
+            emailVerifiedAt: true,
+            lastLoginAt: true,
+            mfaEnabled: true,
+          },
+        },
+      },
+    });
+    if (!vendor) throw new BadRequestException('Vendor not found');
+    const primary = vendor.vendorUsers[0];
+    return {
+      vendor: {
+        id: vendor.id,
+        companyName: vendor.companyName,
+        registrationNumber: vendor.registrationNumber ?? undefined,
+        taxNumber: vendor.taxNumber ?? undefined,
+        country: vendor.country ?? undefined,
+        address: vendor.address ?? undefined,
+        phone: vendor.phone ?? undefined,
+        website: vendor.website ?? undefined,
+        status: vendor.status,
+        registeredAt: vendor.createdAt.toISOString(),
+        approvedAt: vendor.approvedAt?.toISOString() ?? null,
+      },
+      primaryContact: primary
+        ? {
+            id: primary.id,
+            email: primary.email,
+            fullName: primary.fullName,
+            phone: primary.phone ?? undefined,
+            emailVerified: !!primary.emailVerifiedAt,
+            lastLoginAt: primary.lastLoginAt?.toISOString() ?? null,
+            mfaEnabled: primary.mfaEnabled,
+          }
+        : null,
+    };
+  }
+
+  async updateProfile(vendorId: string, actorVendorUserId: string, dto: UpdateProfileDto) {
+    const vendorPatch: Prisma.VendorUpdateInput = {};
+    if (dto.companyName !== undefined) vendorPatch.companyName = dto.companyName;
+    if (dto.taxNumber !== undefined) vendorPatch.taxNumber = dto.taxNumber;
+    if (dto.country !== undefined) vendorPatch.country = dto.country;
+    if (dto.address !== undefined) vendorPatch.address = dto.address;
+    if (dto.phone !== undefined) vendorPatch.phone = dto.phone;
+    if (dto.website !== undefined) vendorPatch.website = dto.website;
+
+    const userPatch: Prisma.VendorUserUpdateInput = {};
+    if (dto.contactFullName !== undefined) userPatch.fullName = dto.contactFullName;
+    if (dto.contactPhone !== undefined) userPatch.phone = dto.contactPhone;
+
+    if (Object.keys(vendorPatch).length === 0 && Object.keys(userPatch).length === 0) {
+      return this.getProfile(vendorId);
+    }
+
+    const before = await this.prisma.vendor.findUnique({
+      where: { id: vendorId },
+      include: {
+        vendorUsers: {
+          where: { isPrimaryContact: true },
+          take: 1,
+          select: { id: true, fullName: true, phone: true },
+        },
+      },
+    });
+    if (!before) throw new BadRequestException('Vendor not found');
+
+    const ops: Prisma.PrismaPromise<unknown>[] = [];
+    if (Object.keys(vendorPatch).length > 0) {
+      ops.push(this.prisma.vendor.update({ where: { id: vendorId }, data: vendorPatch }));
+    }
+    if (Object.keys(userPatch).length > 0 && before.vendorUsers[0]) {
+      ops.push(
+        this.prisma.vendorUser.update({
+          where: { id: before.vendorUsers[0].id },
+          data: userPatch,
+        }),
+      );
+    }
+    await this.prisma.$transaction(ops);
+
+    await this.audit.log({
+      eventType: 'VENDOR_PROFILE_UPDATED',
+      entityType: 'Vendor',
+      entityId: vendorId,
+      vendorId,
+      actorVendorUserId,
+      beforeValue: {
+        companyName: before.companyName,
+        taxNumber: before.taxNumber,
+        country: before.country,
+        address: before.address,
+        phone: before.phone,
+        website: before.website,
+        contactFullName: before.vendorUsers[0]?.fullName,
+        contactPhone: before.vendorUsers[0]?.phone,
+      },
+      afterValue: { ...vendorPatch, ...userPatch },
+      riskLevel: AuditRiskLevel.MEDIUM,
+    });
+
+    return this.getProfile(vendorId);
+  }
+
+  async listMyBids(vendorId: string, page: number, pageSize: number) {
+    const skip = (Math.max(1, page) - 1) * pageSize;
+    const [total, bids] = await this.prisma.$transaction([
+      this.prisma.bid.count({ where: { vendorId } }),
+      this.prisma.bid.findMany({
+        where: { vendorId },
+        skip,
+        take: pageSize,
+        orderBy: [{ updatedAt: 'desc' }],
+        include: {
+          tender: { select: { id: true, reference: true, title: true, status: true, submissionCloseAt: true } },
+          bidEnvelopes: { select: { envelopeType: true, status: true } },
+          bidSubmissionReceipt: { select: { receiptNumber: true, generatedAt: true } },
+        },
+      }),
+    ]);
+
+    return {
+      page,
+      pageSize,
+      total,
+      items: bids.map(b => {
+        const tech = b.bidEnvelopes.find(e => e.envelopeType === EnvelopeType.TECHNICAL);
+        const comm = b.bidEnvelopes.find(e => e.envelopeType === EnvelopeType.COMMERCIAL);
+        return {
+          id: b.id,
+          tenderId: b.tenderId,
+          tenderReference: b.tender.reference,
+          tenderTitle: b.tender.title,
+          tenderStatus: b.tender.status,
+          submissionDeadline: b.tender.submissionCloseAt?.toISOString() ?? null,
+          status: b.status,
+          submittedAt: b.submittedAt?.toISOString() ?? null,
+          technicalResult: b.technicalResult === 'PENDING' ? undefined : b.technicalResult,
+          technicalEnvelopeStatus: tech?.status ?? 'DRAFT',
+          commercialEnvelopeStatus: comm?.status ?? 'DRAFT',
+          receiptNumber: b.bidSubmissionReceipt?.receiptNumber ?? undefined,
+        };
+      }),
+    };
   }
 }

@@ -17,8 +17,8 @@ export class CommercialEvaluationController {
   @Get('tenders/:tenderId/commercial-comparison')
   @RequirePermissions('commercial:view')
   @ApiOperation({ operationId: 'getCommercialComparison', summary: 'Get commercial comparison — requires commercial:view permission' })
-  getComparison(@Param('tenderId') tenderId: string) {
-    return this.commercialEvaluationService.getComparison(tenderId);
+  getComparison(@Param('tenderId') tenderId: string, @CurrentUser() user: any) {
+    return this.commercialEvaluationService.getComparison(tenderId, user);
   }
 
   @Post('bids/:bidId/commercial-evaluations')

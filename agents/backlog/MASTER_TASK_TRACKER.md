@@ -97,6 +97,53 @@ When a task is completed, add a short completion note with date and key files.
   - Completed 2026-05-17. Shared `ErrorResponse` and common error responses added.
 - [x] Apply Phase 2 API contract correction patch (PM-accepted review items).
   - Completed 2026-05-17. Key file: `api-contracts/openapi/ctmp.openapi.yaml`. Fixed auth flows, added vendor login, aligned TenderStatus enum with DB, fixed PATCH semantics, removed ambiguous checksum flag, required recommendedBidId, added document download and report job endpoints, added tender list filters.
+- [x] Phase 7+ e2e expansion — late-submission, email-verification (MailHog), multi-vendor, commercial-visibility specs.
+  - Completed 2026-05-19. 4 new Playwright specs under `qa/playwright/tests/`. Replaced AD-bound `adminLogin` with `signAdminToken` (HMAC-SHA256 JWT signer using the api's `JWT_SECRET`) so QA bypasses AD. Added `signAdminTokenWithPermissions(userId, perms[])` for the visibility matrix and `signVendorToken(vendorUserId)` to bypass bcrypt + email-verify gate when seeding. New helpers: `helpers/mailhog.ts` (`waitForEmail`, `extractVerificationToken`, `clearMailbox`), `helpers/db.ts` extended with `ensureApprovedVendor` (idempotent APPROVED vendor + verified primary contact, bcrypt rehash on replay) + `ensurePastDeadlineTender` (submission_close_at in the past). `late-submission.spec.ts` proves the bid rejects on past deadline without exception, accepts with exception, and persists `LATE_SUBMITTED`. `email-verification.spec.ts` exercises the full MailHog round-trip end-to-end. `multi-vendor.spec.ts` runs 3 vendors with one below pass threshold and asserts commercial-comparison ranks the 2 PASS bids by price. `commercial-visibility.spec.ts` covers 3 admin-token shapes: full perms / no `commercial:view` (403) / `commercial:view` without `commercial:export` (`canExport=false`). Golden-path updated to call `signAdminToken` instead of the removed `adminLogin`. `qa/playwright` tsc clean.
+- [x] Production hardening (Phase 7+) — S3/MinIO storage abstraction, audit hash-chain advisory lock, startup chain verifier.
+  - Completed 2026-05-19. New `apps/api/src/common/storage/` module: `StorageBackend` interface, `LocalStorageBackend` (path-traversal guard, mkdir-recursive), `S3StorageBackend` (auto-create-buckets in dev, NoSuchKey→404 translation), `StorageModule` provides `STORAGE_BACKEND` symbol via `STORAGE_DRIVER` env. `BidStorageService` + `ReportStorageService` refactored to delegate to the backend; downstream `ReadStream` types loosened to `Readable`. New `apps/api/src/config/storage.config.ts`. `apps/api/src/config/audit.config.ts` adds `AUDIT_VERIFY_ON_START` + `AUDIT_VERIFY_LIMIT`. `AuditService.log()` now acquires `pg_advisory_xact_lock(0x6354_4d50)` inside the txn so concurrent replicas serialize through the same lock and cannot fork the chain. `AuditService.onModuleInit` runs `verifyChain(limit)` on boot, logs success, or emits a CRITICAL `security_alerts` row tagged `AUDIT_CHAIN_BREAK` on integrity failure. Docker compose: added MinIO service (port 9000 API + 9001 console, named volume `minio_data`); api service exports STORAGE_*, AUDIT_VERIFY_* env vars. `.env.example` documents all new knobs. Deps: `@aws-sdk/client-s3` ^3.700.0, `@aws-sdk/lib-storage` ^3.700.0. All 4 packages (`api`/`web-admin`/`web-vendor`/`qa/playwright`) tsc clean.
+- [x] Phase 5 Part 2 — Vendor Portal bid wizard + clarifications + profile + 3 backend gaps closed.
+  - Completed 2026-05-19. Backend: 4 new endpoints (`GET /vendor-auth/me`, `PATCH /vendor-auth/me`, `GET /vendor-auth/me/bids`, multipart `POST /bids/{id}/envelopes/{type}/documents` with server-side SHA-256, plus `DELETE /bids/{id}/documents/{docId}` and `GET /bids/{id}/envelopes/{type}/documents` and pivoted existing `GET /bids/{id}/documents/{docId}` to stream the file). New `BidStorageService` (mirrors `ReportStorageService` — path-traversal guard, mkdir, stream, delete). New `OptionalVendorOrUserGuard` so vendors can re-download their own DRAFT envelope docs while admins still hit the same endpoint for opened envelopes. AuditModule wired into vendor-auth + already-wired into bids. New audit event types: `BID_DOCUMENT_UPLOADED`, `BID_DOCUMENT_DELETED`, `VENDOR_PROFILE_UPDATED`. Frontend: replaced 3 placeholder pages — `bids/page.tsx` (stat cards + table from `/vendor-auth/me/bids`), `clarifications/page.tsx` (tender list + thread cards + ask form), `profile/page.tsx` (view+edit with email/MFA marked read-only). New pages — `bids/[bidId]/page.tsx` (detail + receipt), `bids/wizard/[tenderId]/page.tsx` (4-step wizard with stepper, FileDropZone, per-doc SHA-256 display, atomic submit-to-receipt), `tenders/[id]/page.tsx` (tender detail with Start-Bid CTA), `components/ui/StatusBadge.tsx` (copy of admin badge + bid-status entries), `components/forms/FileDropZone.tsx` (drag/drop + click multipart upload with auth header). OpenAPI: 4 new paths + 5 new schemas (`VendorProfileResponse`, `VendorProfileUpdateRequest`, `MyBidsListResponse`/`MyBidSummary`, `BidDocumentUploadResponse`, `BidEnvelopeContents`). Docker compose: added `bid_storage` named volume mounted at `/data/bid-documents` + `BID_STORAGE_PATH` env var. All 3 apps tsc clean; redocly lint 0 errors / 158 warnings (operationId deferred pattern preserved).
+- [x] BullMQ report-export worker (Phase 3 continuation, Part 4).
+  - Completed 2026-05-18. Added bullmq, exceljs, pdfkit deps. New files: `apps/api/src/config/reports.config.ts`, `apps/api/src/modules/reports/report-storage.service.ts` (local-disk persistence with path-traversal guard, stream helper), `report-renderer.service.ts` (Prisma datasets for 9 report codes + XLSX via exceljs + landscape A4 PDF via pdfkit), `report-queue.service.ts` (BullMQ Queue + Worker on configurable Redis, RUNNING→COMPLETED/FAILED transitions, retries 3 w/ exponential backoff). `reports.service.exportReport` enqueues after DB insert (rolls row to FAILED if enqueue throws); `download` streams via `ReportStorageService.stream()` + caller-scope check; controller pipes file with proper Content-Type/Disposition. Docker compose now mounts `report_storage` volume at `/data/reports` and exports REDIS_HOST/REPORT_* env vars. `.env.example` documents knobs. `pnpm-workspace.yaml` flips `msgpackr-extract: false` so optional native module no longer blocks install. API tsc clean.
+- [x] Phase 3 Part 3 — Schema migration 005 + service backfill (read + write) across all remaining stubs.
+  - Completed 2026-05-18. Migration 005 adds `tender_technical_criteria` table, `report_export_jobs` table, plus `Permission.name`, `NotificationTemplate.name`, `SystemSetting.category`, `SystemSetting.read_only`, `Tender.technical_pass_threshold` columns. Prisma schema updated + client regenerated. Backfilled services:
+    - tenders: findAll/findOne/create/update/lifecycle (publish/cancel/closeSubmissions/submitForApproval/downloadDocument). Tender reference auto-generated `TDR-{year}-{4-digit}`. Status enum API↔DB translation map.
+    - bids: draftBid/uploadTechnical/uploadCommercial/submit/getReceipt/downloadDocument. Submit generates SHA-256 receipt over canonical snapshot; both envelopes flipped + docs lockedAt in single txn. Late submission honored only when active GRANTED exception exists.
+    - clarifications: findAll/create/reply with vendor visibility filter (own clarifications + public replies), tender status guard (PUBLISHED/CLARIFICATION_PERIOD).
+    - late-submissions: findAll/create with one-active-per-(tender, vendor) check + isExceptionActive helper used by bids submit.
+    - technical-evaluation: openEnvelopes (SUBMISSION_CLOSED → TECHNICAL_OPENING, opens all SUBMITTED technical envelopes), evaluate (upserts per evaluator+bid with pass threshold from tender or 70 default), finalize (majority-vote across evaluators determines bid PASS/FAIL, seals passing commercials + locks failing commercials, transitions tender → COMMERCIAL_SEALED).
+    - committee: createSession (creates members with first as Chair), recordAttendance (replaces attendance rows atomically), openEnvelopes (quorum check, opens ONLY technically-passed commercial envelopes, transitions tender via COMMITTEE_COMMERCIAL_OPENING → COMMERCIAL_EVALUATION), getRecords, findOne, listForTender.
+    - commercial-evaluation: getComparison (rank by totalPrice, hides amount per-row when caller lacks commercial:view, audit-logged view), evaluate (upsert per evaluator + bid).
+    - award: recommend (transitions COMMERCIAL_EVALUATION → AWARD_RECOMMENDATION, sets awardedVendorId), approve (true → AWARDED + awardedAt; false reverts to COMMERCIAL_EVALUATION), issue (AWARDED → TENDER_CLOSED + marks winning bid AWARDED).
+    - reports: 9-entry hardcoded catalog grouped by category, exportReport (enqueues real DB row, audit log, commercial:export gate), getJob/download/listJobs (caller-scoped).
+  - AuditModule wired into 5 additional modules (technical-evaluation, committee, commercial-evaluation, award, reports). All state-changing services now emit hash-chained audit entries with appropriate risk levels (CRITICAL for COMMERCIAL_ENVELOPES_OPENED + AWARD_ISSUED + AWARD_APPROVED; HIGH for finalize/cancel/recommend/commercial-evaluation/system-setting-update; MEDIUM for tender lifecycle + envelope opening + comparison view; LOW for routine reads/creates).
+- [x] Phase 5 — Vendor Portal scaffold (`apps/web-vendor/`).
+  - Completed 2026-05-18. Next.js 15 + React 19 + Tailwind. Key files: `apps/web-vendor/package.json`, `next.config.ts`, `tsconfig.json`, `tailwind.config.ts`, `postcss.config.mjs`. Auth pages: `login/`, `register/` (with CAPTCHA token field — non-negotiable rule), `forgot-password/`. Portal shell: `(portal)/layout.tsx` with sidebar nav (Dashboard / Tenders / My Bids / Clarifications / Company Profile). Dashboard with stat cards + available tender list. Tenders list with search. `bids/` and `clarifications/` and `profile/` placeholders pending full implementation. `lib/api.ts` + `lib/auth.ts` (vendor cookie keys distinct from admin). Portal uses brand=`#1E40AF` accent=`#2563EB`. TypeScript clean.
+- [x] Phase 6 — Docker Compose stack.
+  - Completed 2026-05-18. `infrastructure/docker/docker-compose.yml` defines postgres:16-alpine, redis:7-alpine, api, web-admin, web-vendor services with healthchecks, volumes, env-var contract. Postgres auto-loads `database/migrations/*.sql` on first start. Three multi-stage Dockerfiles (api, web-admin, web-vendor) using pnpm + corepack. `.env.example` template + `README.md` with quick-start, secret-generation guidance, production deployment notes (reverse proxy, CAPTCHA hard requirement, audit-log integrity warning, SMTP fail-open caveat).
+- [x] Implement write API endpoints + hash-chained audit logging (Phase 3 continuation, Part 2).
+  - Completed 2026-05-18. Built `AuditService.log()` with SHA-256 hash chain (`prev_hash || canonical(payload) → hash_chain_value`); uses Prisma `$transaction` so the prev-hash read + insert cannot race; DB triggers continue to reject UPDATE/DELETE. Also implemented `AuditService.search()` and `getTenderLogs()` for the audit-log viewer page. Wired `AuditModule` into 5 modules via `imports:`. Implemented writes with state-machine validation + atomic txns + audit:
+    - `tenders.approve` — INTERNAL_REVIEW → APPROVED, MEDIUM risk. Comments captured as reason.
+    - `tenders.reject` — INTERNAL_REVIEW → DRAFT, MEDIUM risk. Reason required.
+    - `vendors.approve` — PENDING → APPROVED, blocks if primary contact email unverified; sets approvedBy + approvedAt. MEDIUM risk.
+    - `vendors.reject` — PENDING → REJECTED. MEDIUM risk. Reason required.
+    - `vendors.suspend` — APPROVED → SUSPENDED. Atomic txn also bumps `vendor_users.token_version` for every linked VendorUser to revoke active sessions. HIGH risk. Reason required.
+    - `roles.setPermissions` — diff old vs new; deleteMany + createMany in single txn; system roles return 403; HIGH risk audit with `metadata.added` + `metadata.removed`.
+    - `notifications.updateTemplate` — partial PATCH on subjectTemplate/bodyTemplate/isActive; rejects empty bodyTemplate; MEDIUM risk; no-op short-circuits without audit.
+    - `system-settings.batchUpdate` — pre-validation pass (sensitive-key block, read-only-key block, type-aware parse against `valueType`); atomic update txn; per-key HIGH-risk audit emitted after txn (since AuditService.log opens its own txn). Duplicates and unknown keys rejected at validation.
+  - `apps/api` tsc clean.
+  - Completed 2026-05-18. Replaced `throw new Error('Not implemented')` with real Prisma logic in:
+    - `vendors.service.findAll/findOne` — paginated list with primary-contact VendorUser join, document count, API↔DB status enum translation (PENDING_APPROVAL ↔ PENDING).
+    - `roles.service.findAll/findOne/getPermissions` — list with `_count` for permissionCount + userCount, system-role flag preserved.
+    - `permissions.service.findAll/getPermissionsForUser` — catalogue ordered by category + code; getPermissionsForUser joins user_roles → role_permissions to return permission codes (replaces stub used by JWT enrichment).
+    - `notifications.service.listTemplates` — schema maps `subject_template` → `subject`, `is_active` → `enabled`.
+    - `system-settings.service.list` — filters sensitive keys (jwt.secret, smtp.password, etc.), derives category from key prefix, normalizes `valueType` → STRING|NUMBER|BOOLEAN|JSON.
+    - `bids.service.listForTender` — joins vendor.companyName, derives technical/commercial envelope status from BidEnvelope rows. commercialDetailsVisible=false by design (commercial:view path is /commercial-comparison).
+    - `committee.service.listForTender` — sessions newest first with members (name from user.displayName, role from roleInCommittee or Chair/Member fallback) and attendance flag.
+    - `technical-evaluation.service.listCriteria` — returns SYSTEM_DEFAULT 4-row criteria (matches UI hardcoded set) until tender_technical_criteria table migration lands. Verifies tender exists.
+    - `reports.service.listJobs` — returns empty list until report_export_jobs table + job persistence land. Stub documents schema migration requirement.
+  - API tsc clean.
+  - Completed 2026-05-18. Added to `api-contracts/openapi/ctmp.openapi.yaml`: `POST /tenders/{id}/approve|reject`, `GET /tenders/{id}/bids`, `GET /tenders/{id}/technical-criteria`, `GET /tenders/{id}/committee-sessions`, `/vendors` admin CRUD (list with status filter, approve, reject, suspend), `/roles/{id}/permissions` GET+PATCH, `GET /permissions`, `/notification-templates` GET + PATCH, `/system-settings` GET + `/system-settings/batch` POST, `GET /reports/jobs`. Added 15 new schemas (Vendor, VendorListResponse, VendorUpdateRequest, Role, RoleListResponse, Permission, PermissionListResponse, NotificationTemplate + list, PlatformSetting + list, ReportExportJobListResponse, TenderBidsListResponse, TenderBidSummary, TechnicalCriterion, TechnicalCriteriaResponse, CommitteeMember, CommitteeSessionWithMembers, CommitteeSessionListResponse). Added VendorId + RoleId path parameters. Created `apps/api/src/modules/system-settings/` module (controller + service + module + wired in AppModule). Added stub endpoints in tenders, bids, technical-evaluation, committee, vendors, roles, notifications, reports controllers/services. Vendor controller flattened from `/vendors/registrations/{id}/*` to `/vendors/{id}/*` to match UI. API tsc clean; web-admin tsc clean; redocly lint: 0 errors, 146 warnings (deferred operationId, pre-existing pattern).
 
 ## Phase 3: Backend Scaffold
 
@@ -143,19 +190,41 @@ When a task is completed, add a short completion note with date and key files.
 
 ## Phase 4: Admin Portal
 
-- [ ] Initialize admin frontend app.
-- [ ] Add shell layout and navigation.
-- [ ] Add dashboard.
-- [ ] Add tender list/detail/create/edit.
-- [ ] Add approval queue.
-- [ ] Add clarification center.
-- [ ] Add technical evaluation workspace.
-- [ ] Add committee commercial opening screen.
-- [ ] Add commercial comparison screen with permission-controlled visibility.
-- [ ] Add vendor management.
-- [ ] Add reports.
-- [ ] Add audit log viewer.
-- [ ] Add system configuration screens.
+- [x] Initialize admin frontend app.
+  - Completed 2026-05-18. Next.js 15 + React 19 + Tailwind CSS. Key files: `apps/web-admin/package.json`, `apps/web-admin/next.config.ts`, `apps/web-admin/tsconfig.json`, `apps/web-admin/src/app/layout.tsx`. pnpm install passes. TypeScript clean.
+- [x] Add shell layout and navigation.
+  - Completed 2026-05-18. Sidebar `#0F172A` with permission-gated nav (commercial:view hides Commercial Comparison). Key files: `apps/web-admin/src/components/layout/Sidebar.tsx`, `apps/web-admin/src/app/(admin)/layout.tsx`.
+- [x] Add dashboard.
+  - Completed 2026-05-18. Full implementation. 6 stat cards (active tenders, pending approvals, open clarifications, in evaluation, awaiting opening, pending vendors), recent tenders table, upcoming deadlines panel, quick actions. Parallel-fetch by status. Key file: `apps/web-admin/src/app/(admin)/dashboard/page.tsx`. TypeScript clean.
+- [x] Add tender list/detail/create/edit.
+  - Completed 2026-05-18. Key files: `apps/web-admin/src/app/(admin)/tenders/page.tsx` (list + filter + pagination), `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` (detail with tabs, workflow progress, document list, lifecycle actions), `apps/web-admin/src/app/(admin)/tenders/new/page.tsx` (create form — Step 1), `apps/web-admin/src/app/(admin)/tenders/[id]/edit/page.tsx` (edit form pre-filled from API), `apps/web-admin/src/components/ui/StatusBadge.tsx` (reusable badge for all 17 lifecycle states). TypeScript clean.
+- [x] Add approval queue.
+  - Completed 2026-05-18. Key file: `apps/web-admin/src/app/(admin)/approvals/page.tsx`. Split-pane layout: left task list (Tender Approval + Award Approval), right detail panel with comments + approve/reject actions. Filters: search, task type, date. Fetches `GET /tenders?status=Internal%20Review` and `GET /tenders?status=Award%20Recommendation` in parallel. TypeScript clean. NOTE: `POST /tenders/{id}/approve` and `POST /tenders/{id}/reject` are not in the OpenAPI contract — need to be added.
+- [x] Add clarification center.
+  - Completed 2026-05-18. Key file: `apps/web-admin/src/app/(admin)/clarifications/page.tsx`. 3-panel layout: left tender list (Clarification Period tenders), center thread list with All/Pending/Answered tabs + sort, right icon toolbelt. Thread cards expand in-place with reply form (visibility toggle: Private/Public), collapsed cards show status. TypeScript clean.
+- [x] Add technical evaluation workspace.
+  - Completed 2026-05-18. Key file: `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx`. 3-col layout (tender list / bid list / scorecard). Compliance banner. POST `/bids/{id}/technical-evaluations` + POST `/tenders/{id}/finalize-technical-results`. NOTE: `GET /tenders/{id}/bids` not in OpenAPI contract — page degrades gracefully. Per-tender criteria currently hardcoded (4 rows, 70-pt threshold) — needs `GET /tenders/{id}/technical-criteria` or embedded config. TypeScript clean.
+- [x] Add committee commercial opening screen.
+  - Completed 2026-05-18. Key file: `apps/web-admin/src/app/(admin)/committee-opening/page.tsx`. Tender list (Commercial Sealed / Committee Commercial Opening), session header, attendance grid with quorum check, opening remarks, technically-qualified vendor table, primary `Open Commercial Envelopes` action gated on quorum+remarks. Wires `POST /committee-sessions/{id}/attendance` + `POST /committee-sessions/{id}/open-commercial-envelopes`. GAP: `GET /tenders/{id}/committee-sessions` not contracted — speculative call.
+- [x] Add commercial comparison screen with permission-controlled visibility.
+  - Completed 2026-05-18. Key file: `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx`. Hard `commercial:view` gate at page top with friendly NoAccessScreen. Tender list, ranked comparison table, per-cell `commercialDetailsVisible` honored (hides amount if false), permission chips (view/download/evaluate/export), `Recommend Award` action (rank 1), `Export Comparison` (gated by `commercial:export`). Reads `GET /tenders/{id}/commercial-comparison`.
+- [x] Add vendor management.
+  - Completed 2026-05-18. Key file: `apps/web-admin/src/app/(admin)/vendors/page.tsx`. 4 stat cards (total/pending/approved/rejected), search + status filter, list/detail split. Approve gated on email verification. Approve/Reject/Suspend all require audit reason. GAP: `/vendors`, `/vendors/{id}/approve|reject|suspend` not in OpenAPI but backend module exists.
+- [x] Add reports.
+  - Completed 2026-05-18. Key file: `apps/web-admin/src/app/(admin)/reports/page.tsx`. Catalog grouped by category, format toggle (XLSX/PDF), enqueue via `POST /reports/{code}/export`, job history polls every 5s for QUEUED/RUNNING jobs, blob-download with Authorization header. `commercial:export` gate on requiring reports. GAP: `GET /reports/jobs` (history) not contracted — speculative.
+- [x] Add audit log viewer.
+  - Completed 2026-05-18. Key file: `apps/web-admin/src/app/(admin)/audit-log/page.tsx`. Hard `audit:view` gate. Filters: search, eventType, entityType, risk level. Paginated table (50/pg). Row expansion shows IP/UA, before/after JSON, hash chain prefix. Notes hash-chain immutability at footer.
+- [x] Add security alerts page.
+  - Completed 2026-05-19. Key files: `apps/web-admin/src/app/(admin)/security-alerts/page.tsx`, `apps/web-admin/src/components/layout/Sidebar.tsx`. Hard `audit:view` gate. Lists AUDIT_CHAIN_BREAK and other security_alerts rows. Unacknowledged alerts highlighted in red. One-click Acknowledge calls PATCH `/security-alerts/:id/acknowledge`. Expandable rows show metadata, source IP, and acknowledger. Sidebar nav item added (gated by `audit:view`). TypeScript clean.
+- [x] Add system configuration screens.
+  - Completed 2026-05-18. Key file: `apps/web-admin/src/app/(admin)/settings/page.tsx`. 3 tabs: Roles &amp; Permissions (table + permission editor grouped by category, blocks edits on System roles), Notification Templates (per-template inline edit with subject/body/enabled), Platform Settings (grouped by category, type-aware inputs, batch save with dirty tracking). GAP: All endpoints (`/roles`, `/permissions`, `/notification-templates`, `/system-settings`) not contracted — backend modules exist per Phase 3.
+
+**Phase 4 foundation complete as of 2026-05-18:**
+  - Stitch designs: 14 HTML mockups in `apps/web-admin/stitch-designs/`. Use for layout reference only — colors are old palette.
+  - Color palette locked: Sidebar `#0F172A`, Accent `#3B82F6`, BG `#F1F5F9`, Card `#FFFFFF`, Text `#0F172A`/`#475569`, Success `#22C55E`, Danger `#EF4444`, Border `#E2E8F0`. Defined in `tailwind.config.ts` + `globals.css`.
+  - Auth: `apps/web-admin/src/app/login/page.tsx` — AD login + MFA step wired to API.
+  - API client: `apps/web-admin/src/lib/api.ts`, `apps/web-admin/src/lib/auth.ts`.
+  - Next session starts at: Add approval queue.
 
 ## Phase 5: Vendor Portal
 
@@ -191,7 +260,16 @@ When a task is completed, add a short completion note with date and key files.
 
 - [ ] Create manual UAT test suite.
 - [ ] Create API test plan.
-- [ ] Create Playwright test plan.
+- [x] Create Playwright test plan.
+  - Completed 2026-05-19. New workspace package `qa/playwright/` (added to `pnpm-workspace.yaml`). `playwright.config.ts` single-worker, serial. Helpers: `helpers/db.ts` (pg-driven seed/reset for admin user + tender + vendor), `helpers/api.ts` (admin/vendor login + authed fetch), `helpers/fixtures.ts` (text buffers as bid docs). Single golden-path spec `tests/golden-path.spec.ts` walks: vendor register → email force-verify → admin approve → vendor login → bid wizard upload×2 + submit → admin close + technical open + evaluate + finalize → committee session + attendance + commercial open + commercial eval → award recommend/approve/issue → audit-log assertion. MailHog added to `docker-compose.yml` (ports 1025+8025) + SMTP defaults updated. Tracker entries below covered by this single spec.
+- [x] Test immutable bid submission (covered by golden path).
+- [x] Test technical envelope opening after submission closure (covered by golden path).
+- [x] Test commercial envelope remains sealed before committee opening (covered by golden path).
+- [x] Test commercial visibility remains permission-controlled after opening.
+  - Completed 2026-05-19. `qa/playwright/tests/commercial-visibility.spec.ts` — three token shapes (full perms / no `commercial:view` → 403 / `commercial:view` only → `canExport=false`).
+- [x] Test late submission exception flow.
+  - Completed 2026-05-19. `qa/playwright/tests/late-submission.spec.ts`.
+- [x] Test audit logging (covered across golden-path + per-spec spot checks).
 - [ ] Test vendor registration CAPTCHA.
 - [ ] Test vendor password reset.
 - [ ] Test immutable bid submission.

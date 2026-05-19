@@ -78,4 +78,26 @@ export class TendersController {
   closeSubmissions(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.tendersService.closeSubmissions(id, userId);
   }
+
+  @Post(':id/approve')
+  @RequirePermissions('tenders:approve')
+  @ApiOperation({ operationId: 'approveTender', summary: 'Approve tender from Internal Review' })
+  approve(
+    @Param('id') id: string,
+    @Body('comments') comments: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.approve(id, comments, userId);
+  }
+
+  @Post(':id/reject')
+  @RequirePermissions('tenders:approve')
+  @ApiOperation({ operationId: 'rejectTender', summary: 'Reject tender from Internal Review' })
+  reject(
+    @Param('id') id: string,
+    @Body('reason') reason: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.reject(id, reason, userId);
+  }
 }

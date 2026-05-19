@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CTMP - Login</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#022448",
+                        "surface-bright": "#faf9fc",
+                        "on-tertiary-fixed-variant": "#60410c",
+                        "on-tertiary-fixed": "#291800",
+                        "on-secondary": "#ffffff",
+                        "on-primary-container": "#8aa4cf",
+                        "inverse-surface": "#2f3033",
+                        "surface-container-low": "#f4f3f7",
+                        "surface-container": "#eeedf1",
+                        "primary-fixed-dim": "#adc8f5",
+                        "primary-container": "#1e3a5f",
+                        "tertiary": "#341f00",
+                        "on-tertiary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-highest": "#e3e2e6",
+                        "on-primary-fixed": "#001c3b",
+                        "background": "#faf9fc",
+                        "tertiary-fixed": "#ffddb2",
+                        "surface": "#faf9fc",
+                        "on-secondary-container": "#fefcff",
+                        "outline": "#74777f",
+                        "inverse-primary": "#adc8f5",
+                        "on-tertiary-container": "#c69b5f",
+                        "on-surface": "#1a1c1e",
+                        "on-primary": "#ffffff",
+                        "secondary-container": "#316bf3",
+                        "on-surface-variant": "#43474e",
+                        "secondary": "#0051d5",
+                        "surface-variant": "#e3e2e6",
+                        "on-error-container": "#93000a",
+                        "on-secondary-fixed": "#00174b",
+                        "tertiary-fixed-dim": "#edbf7f",
+                        "surface-tint": "#455f87",
+                        "outline-variant": "#c4c6cf",
+                        "on-secondary-fixed-variant": "#003ea8",
+                        "inverse-on-surface": "#f1f0f4",
+                        "error-container": "#ffdad6",
+                        "on-background": "#1a1c1e",
+                        "secondary-fixed": "#dbe1ff",
+                        "primary-fixed": "#d5e3ff",
+                        "error": "#ba1a1a",
+                        "surface-dim": "#dad9dd",
+                        "on-primary-fixed-variant": "#2d486d",
+                        "tertiary-container": "#503300",
+                        "surface-container-high": "#e9e7eb",
+                        "secondary-fixed-dim": "#b4c5ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "stack-sm": "0.5rem",
+                        "sidebar-width": "260px",
+                        "container-padding": "2rem",
+                        "gutter": "1.5rem",
+                        "stack-md": "1rem",
+                        "stack-lg": "1.5rem"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Inter"],
+                        "label-md": ["Inter"],
+                        "title-lg": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "title-sm": ["Inter"],
+                        "body-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "title-lg": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "label-sm": ["11px", {"lineHeight": "14px", "fontWeight": "500"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "display-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "title-sm": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-primary-container min-h-screen flex items-center justify-center p-gutter relative overflow-hidden">
+<!-- Subtle Background Pattern -->
+<div class="absolute inset-0 opacity-10 pointer-events-none">
+<div class="absolute inset-0" style="background-image: radial-gradient(circle at 2px 2px, #ffffff 1px, transparent 0); background-size: 40px 40px;"></div>
+</div>
+<!-- Login Container -->
+<div class="relative w-full max-w-[440px] flex flex-col items-center">
+<!-- Logo and Branding -->
+<div class="flex flex-col items-center mb-stack-lg gap-stack-sm text-center">
+<div class="w-16 h-16 bg-white/10 rounded-xl flex items-center justify-center border border-white/20 backdrop-blur-sm mb-stack-sm">
+<span class="material-symbols-outlined text-on-primary text-[40px]" data-icon="account_balance">account_balance</span>
+</div>
+<h1 class="font-headline-md text-headline-md text-on-primary tracking-tight">CTMP Admin</h1>
+<p class="font-label-md text-label-md text-on-primary-container uppercase tracking-widest opacity-80">Enterprise Procurement</p>
+</div>
+<!-- Authentication Card -->
+<div class="w-full bg-white rounded-xl shadow-2xl p-8 md:p-10 border border-outline-variant/30">
+<div class="mb-8">
+<h2 class="font-display-lg text-display-lg text-primary mb-2">Sign In</h2>
+<p class="font-body-md text-body-md text-on-surface-variant">Access the Tender Management Portal</p>
+</div>
+<form class="space-y-stack-lg">
+<!-- Username Field -->
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant block uppercase" for="username">Username</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline" data-icon="alternate_email">alternate_email</span>
+<input class="w-full pl-10 pr-4 py-3 rounded-lg border border-outline-variant bg-surface-container-lowest focus:ring-2 focus:ring-secondary focus:border-secondary transition-all font-body-md text-body-md text-on-surface outline-none" id="username" placeholder="jsmith@company.local" type="text"/>
+</div>
+</div>
+<!-- Password Field -->
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant block uppercase" for="password">Password</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline" data-icon="lock">lock</span>
+<input class="w-full pl-10 pr-12 py-3 rounded-lg border border-outline-variant bg-surface-container-lowest focus:ring-2 focus:ring-secondary focus:border-secondary transition-all font-body-md text-body-md text-on-surface outline-none" id="password" placeholder="••••••••••••" type="password"/>
+<button class="absolute right-3 top-1/2 -translate-y-1/2 text-outline hover:text-primary transition-colors" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="visibility">visibility</span>
+</button>
+</div>
+</div>
+<!-- Sign In Button -->
+<div class="pt-2">
+<button class="w-full bg-secondary hover:bg-secondary-container text-white font-title-sm text-title-sm py-4 rounded-lg shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-2 group" type="submit">
+                        Sign In
+                        <span class="material-symbols-outlined text-[20px] group-hover:translate-x-1 transition-transform" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</form>
+<!-- AD Note -->
+<div class="mt-8 pt-6 border-t border-outline-variant flex items-start gap-3 bg-surface-container-low/50 p-4 rounded-lg">
+<span class="material-symbols-outlined text-secondary text-[20px]" data-icon="info">info</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+                    Use your Active Directory credentials to log in. Contact the IT Service Desk if you experience any authentication issues.
+                </p>
+</div>
+</div>
+<!-- Footer Links -->
+<div class="mt-8 flex gap-gutter">
+<a class="font-label-sm text-label-sm text-on-primary-container hover:text-on-primary transition-colors underline underline-offset-4" href="#">Privacy Policy</a>
+<a class="font-label-sm text-label-sm text-on-primary-container hover:text-on-primary transition-colors underline underline-offset-4" href="#">Terms of Service</a>
+<a class="font-label-sm text-label-sm text-on-primary-container hover:text-on-primary transition-colors underline underline-offset-4" href="#">System Status</a>
+</div>
+</div>
+<!-- Background Decorative Elements -->
+<div class="fixed -bottom-20 -left-20 w-80 h-80 bg-secondary/10 rounded-full blur-[100px] pointer-events-none"></div>
+<div class="fixed -top-20 -right-20 w-80 h-80 bg-secondary-container/20 rounded-full blur-[100px] pointer-events-none"></div>
+</body></html>

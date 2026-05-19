@@ -1,0 +1,318 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { get, patch } from '@/lib/api';
+import { getAccessToken } from '@/lib/auth';
+import { StatusBadge } from '@/components/ui/StatusBadge';
+
+const CATEGORIES = [
+  'Construction', 'IT Services', 'Healthcare', 'Engineering',
+  'Services', 'Insurance', 'Consulting', 'Supply',
+];
+
+const PROCUREMENT_TYPES = ['Open Tender', 'Restricted', 'Single Source'];
+
+interface TenderData {
+  id: string;
+  referenceNumber: string;
+  title: string;
+  description: string;
+  category: string;
+  status: string;
+  procurementType: string | null;
+  estimatedBudget: number | null;
+  submissionDeadline: string | null;
+}
+
+interface FormData {
+  title: string;
+  category: string;
+  procurementType: string;
+  estimatedBudget: string;
+  submissionDeadlineDate: string;
+  submissionDeadlineTime: string;
+  description: string;
+}
+
+function toFormData(tender: TenderData): FormData {
+  let deadlineDate = '';
+  let deadlineTime = '';
+  if (tender.submissionDeadline) {
+    const d = new Date(tender.submissionDeadline);
+    deadlineDate = d.toISOString().slice(0, 10);
+    deadlineTime = d.toTimeString().slice(0, 5);
+  }
+  return {
+    title: tender.title,
+    category: tender.category ?? '',
+    procurementType: tender.procurementType ?? '',
+    estimatedBudget: tender.estimatedBudget != null ? String(tender.estimatedBudget) : '',
+    submissionDeadlineDate: deadlineDate,
+    submissionDeadlineTime: deadlineTime,
+    description: tender.description ?? '',
+  };
+}
+
+function FieldLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
+  return (
+    <label className="block text-xs font-semibold text-text-secondary uppercase tracking-wide mb-1.5">
+      {children}
+      {required && <span className="text-danger ml-0.5">*</span>}
+    </label>
+  );
+}
+
+export default function EditTenderPage() {
+  const params = useParams();
+  const router = useRouter();
+  const tenderId = params.id as string;
+
+  const [tender, setTender] = useState<TenderData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<FormData | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const token = getAccessToken();
+        const result = await get<TenderData>(`/tenders/${tenderId}`, token);
+        setTender(result);
+        setForm(toFormData(result));
+      } catch (err) {
+        setLoadError(err instanceof Error ? err.message : 'Failed to load tender');
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [tenderId]);
+
+  function update<K extends keyof FormData>(field: K, value: FormData[K]) {
+    setForm(f => f ? { ...f, [field]: value } : f);
+  }
+
+  async function handleSave() {
+    if (!form || !form.title.trim()) return;
+    setSaving(true);
+    try {
+      const token = getAccessToken();
+      let submissionDeadline: string | null = null;
+      if (form.submissionDeadlineDate) {
+        const time = form.submissionDeadlineTime || '23:59';
+        submissionDeadline = new Date(`${form.submissionDeadlineDate}T${time}:00`).toISOString();
+      }
+      await patch(`/tenders/${tenderId}`, {
+        title: form.title.trim(),
+        category: form.category || null,
+        procurementType: form.procurementType || null,
+        estimatedBudget: form.estimatedBudget ? Number(form.estimatedBudget) : null,
+        submissionDeadline,
+        description: form.description.trim() || null,
+      }, token);
+      router.push(`/tenders/${tenderId}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-8 max-w-5xl mx-auto space-y-4">
+        <div className="h-3.5 bg-card rounded animate-pulse w-40" />
+        <div className="h-8 bg-card rounded animate-pulse w-72" />
+        <div className="h-64 bg-card rounded-xl animate-pulse" />
+      </div>
+    );
+  }
+
+  if (loadError || !tender || !form) {
+    return (
+      <div className="p-8 max-w-5xl mx-auto flex flex-col items-center gap-3 py-24">
+        <span className="material-symbols-outlined text-[48px] text-danger">error_outline</span>
+        <p className="text-sm text-text-secondary">{loadError ?? 'Tender not found'}</p>
+        <Link href="/tenders" className="text-sm text-accent hover:underline font-semibold">
+          Back to Tenders
+        </Link>
+      </div>
+    );
+  }
+
+  const canSave = form.title.trim().length > 0 && !saving;
+
+  return (
+    <div className="p-8 max-w-5xl mx-auto">
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-1.5 text-xs text-text-secondary mb-6">
+        <Link href="/tenders" className="hover:text-accent transition-colors">Tenders</Link>
+        <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+        <Link href={`/tenders/${tenderId}`} className="hover:text-accent transition-colors">
+          {tender.referenceNumber}
+        </Link>
+        <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+        <span className="text-text-primary font-semibold">Edit</span>
+      </nav>
+
+      <div className="flex items-center gap-3 mb-8">
+        <h1 className="text-2xl font-bold text-text-primary tracking-tight">Edit Tender</h1>
+        <StatusBadge status={tender.status} />
+      </div>
+
+      {/* Form Card */}
+      <div className="bg-card rounded-xl border border-border shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
+        {/* Card Header */}
+        <div className="px-8 py-5 border-b border-border bg-bg rounded-t-xl">
+          <h2 className="text-base font-semibold text-text-primary">Basic Information</h2>
+          <p className="text-sm text-text-secondary mt-0.5">
+            Update the details of this tender. Reference number cannot be changed.
+          </p>
+        </div>
+
+        {/* Form Body */}
+        <div className="p-8 space-y-7">
+          {/* Row 1: Title + Reference */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <FieldLabel required>Tender Title</FieldLabel>
+              <input
+                type="text"
+                value={form.title}
+                onChange={e => update('title', e.target.value)}
+                placeholder="e.g. Annual IT Infrastructure Upgrade 2024"
+                className="w-full px-4 py-2.5 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-bg placeholder:text-text-secondary/40 transition-shadow"
+              />
+            </div>
+            <div>
+              <FieldLabel>Reference Number</FieldLabel>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={tender.referenceNumber}
+                  disabled
+                  className="w-full px-4 py-2.5 text-sm border border-border rounded-lg bg-bg text-text-secondary/60 cursor-not-allowed pr-10 font-mono"
+                />
+                <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-[16px] text-text-secondary/40">
+                  lock
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2: Category + Budget */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <FieldLabel>Category</FieldLabel>
+              <select
+                value={form.category}
+                onChange={e => update('category', e.target.value)}
+                className="w-full px-4 py-2.5 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-bg cursor-pointer transition-shadow"
+              >
+                <option value="">Select Category</option>
+                {CATEGORIES.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <FieldLabel>Estimated Budget (USD)</FieldLabel>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-text-secondary">
+                  $
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.estimatedBudget}
+                  onChange={e => update('estimatedBudget', e.target.value)}
+                  placeholder="0.00"
+                  className="w-full pl-8 pr-4 py-2.5 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-bg placeholder:text-text-secondary/40 transition-shadow"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Procurement Type */}
+          <div>
+            <FieldLabel>Procurement Type</FieldLabel>
+            <div className="flex flex-wrap gap-6 mt-1">
+              {PROCUREMENT_TYPES.map(type => (
+                <label key={type} className="flex items-center gap-2.5 cursor-pointer group">
+                  <input
+                    type="radio"
+                    name="procurementType"
+                    value={type}
+                    checked={form.procurementType === type}
+                    onChange={() => update('procurementType', type)}
+                    className="w-4 h-4 accent-accent"
+                  />
+                  <span className="text-sm text-text-primary group-hover:text-accent transition-colors">
+                    {type}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Submission Deadline */}
+          <div className="max-w-lg">
+            <FieldLabel>Submission Deadline</FieldLabel>
+            <div className="grid grid-cols-2 gap-4">
+              <input
+                type="date"
+                value={form.submissionDeadlineDate}
+                onChange={e => update('submissionDeadlineDate', e.target.value)}
+                className="px-4 py-2.5 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-bg transition-shadow"
+              />
+              <input
+                type="time"
+                value={form.submissionDeadlineTime}
+                onChange={e => update('submissionDeadlineTime', e.target.value)}
+                className="px-4 py-2.5 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-bg transition-shadow"
+              />
+            </div>
+            <p className="flex items-center gap-1 text-xs text-text-secondary mt-2">
+              <span className="material-symbols-outlined text-[13px]">info</span>
+              Closing time is based on GMT+3 (Kuwait time).
+            </p>
+          </div>
+
+          {/* Description */}
+          <div>
+            <FieldLabel>Tender Description</FieldLabel>
+            <textarea
+              value={form.description}
+              onChange={e => update('description', e.target.value)}
+              placeholder="Provide a detailed overview of the procurement requirements, scope of work, and key performance indicators..."
+              rows={6}
+              className="w-full px-4 py-3 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-bg placeholder:text-text-secondary/40 resize-none transition-shadow"
+            />
+          </div>
+        </div>
+
+        {/* Card Footer */}
+        <div className="px-8 py-5 border-t border-border bg-bg rounded-b-xl flex items-center justify-between">
+          <Link
+            href={`/tenders/${tenderId}`}
+            className="flex items-center gap-1.5 text-sm text-text-secondary hover:bg-bg px-4 py-2 rounded-lg transition-colors border border-border"
+          >
+            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            Discard Changes
+          </Link>
+          <button
+            onClick={handleSave}
+            disabled={!canSave}
+            className="flex items-center gap-1.5 px-6 py-2.5 text-sm font-semibold bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            <span className="material-symbols-outlined text-[16px]">save</span>
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,6 +1,7 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+  - 'qa/playwright'
 
 allowBuilds:
   '@nestjs/core': true
@@ -8,4 +9,7 @@ allowBuilds:
   '@prisma/engines': true
   '@scarf/scarf': true
   bcrypt: true
+  msgpackr-extract: false
   prisma: true
+  sharp: true
+  unrs-resolver: true

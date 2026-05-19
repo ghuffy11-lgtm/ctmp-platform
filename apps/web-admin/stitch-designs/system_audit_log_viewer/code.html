@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CTMP Audit Log Viewer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container": "#eeedf1",
+                        "inverse-on-surface": "#f1f0f4",
+                        "on-error-container": "#93000a",
+                        "on-error": "#ffffff",
+                        "secondary-fixed": "#dbe1ff",
+                        "secondary": "#0051d5",
+                        "surface": "#faf9fc",
+                        "on-secondary": "#ffffff",
+                        "surface-container-low": "#f4f3f7",
+                        "inverse-surface": "#2f3033",
+                        "on-tertiary-container": "#c69b5f",
+                        "tertiary-fixed-dim": "#edbf7f",
+                        "primary-fixed-dim": "#adc8f5",
+                        "outline-variant": "#c4c6cf",
+                        "surface-variant": "#e3e2e6",
+                        "on-background": "#1a1c1e",
+                        "background": "#faf9fc",
+                        "on-secondary-container": "#fefcff",
+                        "primary-fixed": "#d5e3ff",
+                        "on-secondary-fixed-variant": "#003ea8",
+                        "on-primary-fixed": "#001c3b",
+                        "on-tertiary-fixed": "#291800",
+                        "on-primary-fixed-variant": "#2d486d",
+                        "secondary-container": "#316bf3",
+                        "surface-dim": "#dad9dd",
+                        "error-container": "#ffdad6",
+                        "outline": "#74777f",
+                        "on-primary": "#ffffff",
+                        "inverse-primary": "#adc8f5",
+                        "surface-container-lowest": "#ffffff",
+                        "primary": "#022448",
+                        "tertiary": "#341f00",
+                        "on-surface": "#1a1c1e",
+                        "surface-tint": "#455f87",
+                        "tertiary-fixed": "#ffddb2",
+                        "on-primary-container": "#8aa4cf",
+                        "on-surface-variant": "#43474e",
+                        "on-secondary-fixed": "#00174b",
+                        "tertiary-container": "#503300",
+                        "on-tertiary": "#ffffff",
+                        "surface-bright": "#faf9fc",
+                        "surface-container-highest": "#e3e2e6",
+                        "on-tertiary-fixed-variant": "#60410c",
+                        "surface-container-high": "#e9e7eb",
+                        "secondary-fixed-dim": "#b4c5ff",
+                        "error": "#ba1a1a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "stack-sm": "0.5rem",
+                        "stack-lg": "1.5rem",
+                        "gutter": "1.5rem",
+                        "sidebar-width": "260px",
+                        "container-padding": "2rem",
+                        "stack-md": "1rem"
+                    },
+                    "fontFamily": {
+                        "title-lg": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "label-md": ["Inter"],
+                        "body-md": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "title-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "title-lg": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "display-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "label-sm": ["11px", {"lineHeight": "14px", "fontWeight": "500"}],
+                        "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "title-sm": ["16px", {"lineHeight": "24px", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        .audit-table-row:hover {
+            background-color: rgba(0, 81, 213, 0.02);
+        }
+    </style>
+</head>
+<body class="text-on-surface">
+<!-- Side Navigation Bar -->
+<aside class="w-[260px] h-screen fixed left-0 top-0 bg-primary dark:bg-primary-container flex flex-col h-full py-stack-lg z-50">
+<div class="px-gutter mb-stack-lg">
+<h1 class="font-title-lg text-title-lg font-bold text-on-primary">CTMP Admin</h1>
+<p class="text-on-primary/60 font-label-md text-label-md">Enterprise Procurement</p>
+</div>
+<nav class="flex-1 overflow-y-auto">
+<ul class="flex flex-col">
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined">dashboard</span><span class="font-label-md text-label-md">Dashboard</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined">gavel</span><span class="font-label-md text-label-md">Tenders</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined">fact_check</span><span class="font-label-md text-label-md">Approvals</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined">question_answer</span><span class="font-label-md text-label-md">Clarifications</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined">analytics</span><span class="font-label-md text-label-md">Technical Evaluation</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined">groups</span><span class="font-label-md text-label-md">Committee &amp; Commercial</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined">account_balance</span><span class="font-label-md text-label-md">Vendor Management</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined">description</span><span class="font-label-md text-label-md">Reports</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 bg-white/10 border-l-4 border-secondary text-on-primary opacity-90 transition-all duration-150" href="#"><span class="material-symbols-outlined">history</span><span class="font-label-md text-label-md">Audit Log</span></a></li>
+<li><a class="flex items-center gap-stack-md px-4 py-3 text-on-primary/70 hover:bg-white/5 hover:text-on-primary transition-colors" href="#"><span class="material-symbols-outlined">settings</span><span class="font-label-md text-label-md">System Configuration</span></a></li>
+</ul>
+</nav>
+</aside>
+<!-- Main Content Area -->
+<div class="ml-[260px] min-h-screen flex flex-col">
+<!-- Top Navigation Bar -->
+<header class="flex justify-between items-center h-16 w-full px-gutter bg-surface dark:bg-surface-dim shadow-sm border-b border-outline-variant z-40 sticky top-0">
+<div class="flex items-center gap-stack-md">
+<span class="font-headline-md text-headline-md font-bold text-primary">Tender Management Portal</span>
+<div class="ml-8 relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">search</span>
+<input class="bg-surface-container-low border-none rounded-lg pl-10 pr-4 py-2 text-body-md w-64 focus:ring-2 focus:ring-primary" placeholder="Search logs..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-stack-md">
+<div class="text-right mr-4">
+<p class="font-label-md text-label-md text-on-surface">Admin User</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Procurement Dept</p>
+</div>
+<button class="p-2 rounded-full hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant">notifications</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center overflow-hidden">
+<img alt="User Profile" class="w-full h-full object-cover" data-alt="A professional headshot of a corporate procurement officer, middle-aged male, wearing a sharp navy business suit with a crisp white shirt. The background is a blurred office interior with soft natural lighting coming from large windows. The overall aesthetic is professional, clean, and high-fidelity, matching a modern enterprise software interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDR1Cvbi1jcaSsm69RsJUPIsosu5pAhk58ZFm2wWpfDN57_N9yVxird71i9EOk2IJYm1rWGdBuvkB-eTS-sSPGu3q98TI3lr5fjaf7PJBDouPLEs5mRPxSXMSr8JCydVDqXKqwi5_nLneMLDfYMxn-x_lTld1wBQAd31DB-JdZeek1ZwmF9SnmxAhQbKmIruS41XGHL09Vb106zRIcvtUN-yVe9Ypbm018W_TYTEiV7FtmP9b3nQgKGCRZ5OwPaoLwQA4Ylf-xmoymZ"/>
+</div>
+<button class="p-2 rounded-full hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant">logout</span>
+</button>
+</div>
+</header>
+<!-- Content Canvas -->
+<main class="p-8 flex-1">
+<!-- Page Header -->
+<div class="flex justify-between items-center mb-8">
+<div>
+<h2 class="font-display-lg text-display-lg text-primary">System Audit Log</h2>
+<p class="text-on-surface-variant font-body-md">Comprehensive immutable record of all system operations and administrative actions.</p>
+</div>
+<div class="flex gap-stack-sm">
+<button class="flex items-center gap-2 px-4 py-2 bg-white border border-outline-variant rounded-lg text-primary font-title-sm hover:bg-surface-container-low transition-colors">
+<span class="material-symbols-outlined">download</span>
+                        Export Log (PDF/CSV)
+                    </button>
+<button class="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-lg font-title-sm hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined" data-weight="fill">refresh</span>
+                        Refresh
+                    </button>
+</div>
+</div>
+<!-- Filter Bar -->
+<div class="bg-white p-4 rounded-xl border border-outline-variant shadow-sm mb-6 flex flex-wrap gap-4 items-end">
+<div class="flex-1 min-w-[200px]">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1">Date Range</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">calendar_month</span>
+<input class="w-full pl-10 border border-outline rounded-lg py-2 text-body-sm focus:ring-2 focus:ring-secondary" placeholder="Oct 01, 2023 - Oct 31, 2023" type="text"/>
+</div>
+</div>
+<div class="flex-1 min-w-[200px]">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1">Actor Search</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">person</span>
+<input class="w-full pl-10 border border-outline rounded-lg py-2 text-body-sm focus:ring-2 focus:ring-secondary" placeholder="Search name or role..." type="text"/>
+</div>
+</div>
+<div class="flex-1 min-w-[200px]">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1">Action Type</label>
+<select class="w-full border border-outline rounded-lg py-2 text-body-sm focus:ring-2 focus:ring-secondary bg-white">
+<option>All Actions</option>
+<option>Login / Session</option>
+<option>Tender Update</option>
+<option>Commercial View</option>
+<option>Vendor Approval</option>
+</select>
+</div>
+<div class="flex-1 min-w-[150px]">
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1">Subject ID</label>
+<input class="w-full border border-outline rounded-lg py-2 text-body-sm focus:ring-2 focus:ring-secondary" placeholder="e.g. TDR-2024-0082" type="text"/>
+</div>
+<button class="bg-secondary-container text-on-secondary-container px-6 py-2 rounded-lg font-title-sm hover:opacity-90 transition-opacity">
+                    Apply Filters
+                </button>
+</div>
+<!-- Audit Log Table -->
+<div class="bg-white rounded-xl border border-outline-variant shadow-sm overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead class="bg-surface-container-low sticky top-0">
+<tr>
+<th class="px-4 py-3 font-label-md text-label-md text-on-surface-variant border-b border-outline-variant">Timestamp</th>
+<th class="px-4 py-3 font-label-md text-label-md text-on-surface-variant border-b border-outline-variant">Actor</th>
+<th class="px-4 py-3 font-label-md text-label-md text-on-surface-variant border-b border-outline-variant">Action</th>
+<th class="px-4 py-3 font-label-md text-label-md text-on-surface-variant border-b border-outline-variant">Subject ID</th>
+<th class="px-4 py-3 font-label-md text-label-md text-on-surface-variant border-b border-outline-variant">IP Address</th>
+<th class="px-4 py-3 font-label-md text-label-md text-on-surface-variant border-b border-outline-variant text-center">Result</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container">
+<!-- Row 1 -->
+<tr class="audit-table-row transition-colors">
+<td class="px-4 py-3 font-body-sm text-body-sm whitespace-nowrap">Oct 24, 2023, 14:20:05</td>
+<td class="px-4 py-3">
+<p class="font-body-sm font-semibold">Robert S.</p>
+<p class="text-label-sm text-on-surface-variant uppercase tracking-wider">Procurement Admin</p>
+</td>
+<td class="px-4 py-3 font-body-sm">Commercial Comparison Viewed</td>
+<td class="px-4 py-3 font-body-sm font-mono text-secondary">TDR-2024-0082</td>
+<td class="px-4 py-3 font-body-sm text-on-surface-variant">192.168.1.104</td>
+<td class="px-4 py-3 text-center">
+<span class="px-2 py-1 rounded bg-green-500/10 text-green-700 text-label-sm font-bold border border-green-200">SUCCESS</span>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="audit-table-row transition-colors">
+<td class="px-4 py-3 font-body-sm text-body-sm whitespace-nowrap">Oct 24, 2023, 13:55:12</td>
+<td class="px-4 py-3">
+<p class="font-body-sm font-semibold">Sarah Jenkins</p>
+<p class="text-label-sm text-on-surface-variant uppercase tracking-wider">Technical Reviewer</p>
+</td>
+<td class="px-4 py-3 font-body-sm">Score Sheet Updated</td>
+<td class="px-4 py-3 font-body-sm font-mono text-secondary">TDR-2024-0015</td>
+<td class="px-4 py-3 font-body-sm text-on-surface-variant">10.0.42.18</td>
+<td class="px-4 py-3 text-center">
+<span class="px-2 py-1 rounded bg-green-500/10 text-green-700 text-label-sm font-bold border border-green-200">SUCCESS</span>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="audit-table-row transition-colors bg-red-50/20">
+<td class="px-4 py-3 font-body-sm text-body-sm whitespace-nowrap">Oct 24, 2023, 13:12:44</td>
+<td class="px-4 py-3">
+<p class="font-body-sm font-semibold">Unknown</p>
+<p class="text-label-sm text-on-surface-variant uppercase tracking-wider">Guest</p>
+</td>
+<td class="px-4 py-3 font-body-sm text-error">Failed Login Attempt</td>
+<td class="px-4 py-3 font-body-sm font-mono text-on-surface-variant">USR-8821</td>
+<td class="px-4 py-3 font-body-sm text-on-surface-variant">185.22.14.99</td>
+<td class="px-4 py-3 text-center">
+<span class="px-2 py-1 rounded bg-error-container text-on-error-container text-label-sm font-bold border border-error/20">FAILURE</span>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="audit-table-row transition-colors">
+<td class="px-4 py-3 font-body-sm text-body-sm whitespace-nowrap">Oct 24, 2023, 12:45:00</td>
+<td class="px-4 py-3">
+<p class="font-body-sm font-semibold">David K.</p>
+<p class="text-label-sm text-on-surface-variant uppercase tracking-wider">System Architect</p>
+</td>
+<td class="px-4 py-3 font-body-sm">Audit Log Exported</td>
+<td class="px-4 py-3 font-body-sm font-mono text-secondary">LOG-XPT-01</td>
+<td class="px-4 py-3 font-body-sm text-on-surface-variant">192.168.1.55</td>
+<td class="px-4 py-3 text-center">
+<span class="px-2 py-1 rounded bg-green-500/10 text-green-700 text-label-sm font-bold border border-green-200">SUCCESS</span>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="audit-table-row transition-colors">
+<td class="px-4 py-3 font-body-sm text-body-sm whitespace-nowrap">Oct 24, 2023, 11:30:19</td>
+<td class="px-4 py-3">
+<p class="font-body-sm font-semibold">Robert S.</p>
+<p class="text-label-sm text-on-surface-variant uppercase tracking-wider">Procurement Admin</p>
+</td>
+<td class="px-4 py-3 font-body-sm">Vendor "AeroGlobal" Blacklisted</td>
+<td class="px-4 py-3 font-body-sm font-mono text-secondary">VND-9904</td>
+<td class="px-4 py-3 font-body-sm text-on-surface-variant">192.168.1.104</td>
+<td class="px-4 py-3 text-center">
+<span class="px-2 py-1 rounded bg-green-500/10 text-green-700 text-label-sm font-bold border border-green-200">SUCCESS</span>
+</td>
+</tr>
+<!-- Row 6 -->
+<tr class="audit-table-row transition-colors">
+<td class="px-4 py-3 font-body-sm text-body-sm whitespace-nowrap">Oct 24, 2023, 10:15:42</td>
+<td class="px-4 py-3">
+<p class="font-body-sm font-semibold">System Agent</p>
+<p class="text-label-sm text-on-surface-variant uppercase tracking-wider">Automated Service</p>
+</td>
+<td class="px-4 py-3 font-body-sm">Tender TDR-2024-0012 Deadline Passed</td>
+<td class="px-4 py-3 font-body-sm font-mono text-secondary">TDR-2024-0012</td>
+<td class="px-4 py-3 font-body-sm text-on-surface-variant">localhost</td>
+<td class="px-4 py-3 text-center">
+<span class="px-2 py-1 rounded bg-green-500/10 text-green-700 text-label-sm font-bold border border-green-200">SUCCESS</span>
+</td>
+</tr>
+<!-- Row 7 -->
+<tr class="audit-table-row transition-colors">
+<td class="px-4 py-3 font-body-sm text-body-sm whitespace-nowrap">Oct 24, 2023, 09:05:00</td>
+<td class="px-4 py-3">
+<p class="font-body-sm font-semibold">Robert S.</p>
+<p class="text-label-sm text-on-surface-variant uppercase tracking-wider">Procurement Admin</p>
+</td>
+<td class="px-4 py-3 font-body-sm">User Session Started</td>
+<td class="px-4 py-3 font-body-sm font-mono text-secondary">SES-45521</td>
+<td class="px-4 py-3 font-body-sm text-on-surface-variant">192.168.1.104</td>
+<td class="px-4 py-3 text-center">
+<span class="px-2 py-1 rounded bg-green-500/10 text-green-700 text-label-sm font-bold border border-green-200">SUCCESS</span>
+</td>
+</tr>
+</tbody>
+</table>
+<!-- Pagination Placeholder -->
+<div class="px-gutter py-4 bg-surface-container-lowest flex justify-between items-center border-t border-outline-variant">
+<p class="text-label-md text-on-surface-variant">Showing 1 to 7 of 2,450 entries</p>
+<div class="flex gap-2">
+<button class="px-3 py-1 border border-outline rounded hover:bg-surface-container transition-colors font-label-md">Previous</button>
+<button class="px-3 py-1 bg-secondary text-on-secondary rounded font-label-md">1</button>
+<button class="px-3 py-1 border border-outline rounded hover:bg-surface-container transition-colors font-label-md">2</button>
+<button class="px-3 py-1 border border-outline rounded hover:bg-surface-container transition-colors font-label-md">3</button>
+<button class="px-3 py-1 border border-outline rounded hover:bg-surface-container transition-colors font-label-md">Next</button>
+</div>
+</div>
+</div>
+<!-- Bento Info Cards for Context -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+<div class="bg-primary-container p-6 rounded-xl border border-primary/20 flex items-center gap-4">
+<div class="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-white">security</span>
+</div>
+<div>
+<p class="text-on-primary-container font-label-sm uppercase tracking-widest">Integrity Hash</p>
+<p class="text-white font-title-lg truncate w-48">sha256:7f9e...2a11</p>
+</div>
+</div>
+<div class="bg-surface p-6 rounded-xl border border-outline-variant flex items-center gap-4">
+<div class="w-12 h-12 bg-secondary/10 rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary">running_with_errors</span>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm uppercase tracking-widest">Failure Rate (24h)</p>
+<p class="text-primary font-display-lg text-[24px]">0.8%</p>
+</div>
+</div>
+<div class="bg-surface p-6 rounded-xl border border-outline-variant flex items-center gap-4">
+<div class="w-12 h-12 bg-tertiary-fixed/30 rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-tertiary-container">storage</span>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm uppercase tracking-widest">Storage Status</p>
+<p class="text-primary font-display-lg text-[24px]">Immutable Archive</p>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

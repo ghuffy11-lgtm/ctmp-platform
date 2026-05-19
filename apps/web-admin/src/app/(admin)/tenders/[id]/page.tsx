@@ -1,0 +1,476 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { get, post } from '@/lib/api';
+import { getAccessToken } from '@/lib/auth';
+import { StatusBadge } from '@/components/ui/StatusBadge';
+
+interface TenderDocument {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  uploadedAt: string;
+  fileType: string;
+}
+
+interface TenderDetail {
+  id: string;
+  referenceNumber: string;
+  title: string;
+  description: string;
+  category: string;
+  status: string;
+  procurementType: string | null;
+  estimatedBudget: number | null;
+  submissionDeadline: string | null;
+  departmentName: string;
+  departmentCode: string;
+  createdAt: string;
+  bidCount: number;
+  daysLeft: number | null;
+  documents: TenderDocument[];
+}
+
+type TabId = 'overview' | 'clarifications' | 'bids' | 'audit';
+
+const TABS: { id: TabId; label: string; icon: string }[] = [
+  { id: 'overview', label: 'Overview', icon: 'info' },
+  { id: 'clarifications', label: 'Clarifications', icon: 'forum' },
+  { id: 'bids', label: 'Bids', icon: 'description' },
+  { id: 'audit', label: 'Audit Trail', icon: 'policy' },
+];
+
+const LIFECYCLE_STAGES = [
+  { label: 'Draft', key: 'Draft' },
+  { label: 'Internal Review', key: 'Internal Review' },
+  { label: 'Approved', key: 'Approved' },
+  { label: 'Published', key: 'Published' },
+  { label: 'Clarification Period', key: 'Clarification Period' },
+  { label: 'Submission Closed', key: 'Submission Closed' },
+  { label: 'Technical Evaluation', key: 'Technical Evaluation' },
+  { label: 'Comm. Opening', key: 'Committee Commercial Opening' },
+  { label: 'Commercial Eval.', key: 'Commercial Evaluation / Comparison' },
+  { label: 'Award Recommendation', key: 'Award Recommendation' },
+  { label: 'Awarded', key: 'Awarded' },
+];
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getFileIcon(fileType: string): string {
+  if (fileType.includes('pdf')) return 'picture_as_pdf';
+  if (fileType.includes('word') || fileType.includes('doc')) return 'description';
+  if (fileType.includes('sheet') || fileType.includes('excel') || fileType.includes('xls')) return 'table_chart';
+  return 'attachment';
+}
+
+const EDITABLE_STATUSES = ['Draft', 'Internal Review', 'Approved'];
+const CANCELLABLE_STATUSES = ['Draft', 'Internal Review', 'Approved', 'Published', 'Clarification Period'];
+
+export default function TenderDetailPage() {
+  const params = useParams();
+  const tenderId = params.id as string;
+  const [tab, setTab] = useState<TabId>('overview');
+  const [tender, setTender] = useState<TenderDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  async function loadTender() {
+    setLoading(true);
+    try {
+      const token = getAccessToken();
+      const result = await get<TenderDetail>(`/tenders/${tenderId}`, token);
+      setTender(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load tender');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadTender(); }, [tenderId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleAction(action: string) {
+    if (!tender) return;
+    setActionLoading(action);
+    try {
+      const token = getAccessToken();
+      await post(`/tenders/${tenderId}/${action}`, {}, token);
+      await loadTender();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-8 max-w-[1400px] mx-auto space-y-4">
+        <div className="h-3.5 bg-card rounded animate-pulse w-40" />
+        <div className="h-8 bg-card rounded animate-pulse w-96" />
+        <div className="h-4 bg-card rounded animate-pulse w-52" />
+      </div>
+    );
+  }
+
+  if (error || !tender) {
+    return (
+      <div className="p-8 max-w-[1400px] mx-auto flex flex-col items-center gap-3 py-24">
+        <span className="material-symbols-outlined text-[48px] text-danger">error_outline</span>
+        <p className="text-sm text-text-secondary">{error ?? 'Tender not found'}</p>
+        <Link href="/tenders" className="text-sm text-accent hover:underline font-semibold">
+          Back to Tenders
+        </Link>
+      </div>
+    );
+  }
+
+  const currentStageIndex = LIFECYCLE_STAGES.findIndex(s => s.key === tender.status);
+
+  return (
+    <div className="p-8 max-w-[1400px] mx-auto">
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-1.5 text-xs text-text-secondary mb-6">
+        <Link href="/tenders" className="hover:text-accent transition-colors">Tenders</Link>
+        <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+        <span className="text-text-primary font-semibold">{tender.referenceNumber}</span>
+      </nav>
+
+      {/* Page Header */}
+      <div className="flex items-start justify-between mb-6 gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3 mb-2 flex-wrap">
+            <h1 className="text-2xl font-bold text-text-primary tracking-tight">{tender.title}</h1>
+            <StatusBadge status={tender.status} />
+          </div>
+          <p className="text-sm text-text-secondary">
+            <span className="font-semibold text-text-primary">{tender.referenceNumber}</span>
+            {' · '}Created{' '}
+            {new Date(tender.createdAt).toLocaleDateString('en-GB', {
+              day: 'numeric', month: 'short', year: 'numeric',
+            })}
+          </p>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {tender.status === 'Draft' && (
+            <button
+              onClick={() => handleAction('submit-for-approval')}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
+            >
+              {actionLoading === 'submit-for-approval' ? (
+                <>
+                  <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                  Submitting…
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[16px]">send</span>
+                  Submit for Approval
+                </>
+              )}
+            </button>
+          )}
+          {tender.status === 'Approved' && (
+            <button
+              onClick={() => handleAction('publish')}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-[16px]">publish</span>
+              {actionLoading === 'publish' ? 'Publishing…' : 'Publish'}
+            </button>
+          )}
+          {tender.status === 'Published' && (
+            <button
+              onClick={() => handleAction('close-submissions')}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 border border-border text-text-secondary text-sm font-semibold rounded-lg hover:bg-bg transition-colors disabled:opacity-60"
+            >
+              {actionLoading === 'close-submissions' ? 'Closing…' : 'Close Submissions'}
+            </button>
+          )}
+          {EDITABLE_STATUSES.includes(tender.status) && (
+            <Link
+              href={`/tenders/${tender.id}/edit`}
+              className="px-4 py-2 border border-border text-text-secondary text-sm font-semibold rounded-lg hover:bg-bg transition-colors flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-[16px]">edit</span>
+              Edit
+            </Link>
+          )}
+          {CANCELLABLE_STATUSES.includes(tender.status) && (
+            <button
+              onClick={() => {
+                if (confirm('Cancel this tender? This action cannot be undone.')) {
+                  handleAction('cancel');
+                }
+              }}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 border border-danger/30 text-danger text-sm font-semibold rounded-lg hover:bg-danger/5 transition-colors disabled:opacity-60"
+            >
+              Cancel Tender
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-border mb-6">
+        <div className="flex gap-1">
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex items-center gap-1.5 px-4 pb-3 pt-1 text-sm font-semibold border-b-2 transition-colors ${
+                tab === t.id
+                  ? 'border-accent text-accent'
+                  : 'border-transparent text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">{t.icon}</span>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Overview Tab */}
+      {tab === 'overview' && (
+        <div className="grid grid-cols-12 gap-6">
+          {/* Left Column */}
+          <div className="col-span-12 lg:col-span-8 space-y-5">
+            {/* Description Card */}
+            <div className="bg-card rounded-xl border border-border shadow-[0_1px_4px_rgba(0,0,0,0.04)] p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <span className="material-symbols-outlined text-[20px] text-accent">info</span>
+                <h3 className="text-base font-semibold text-text-primary">Project Description</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <p className="text-sm text-text-secondary leading-relaxed">
+                    {tender.description || 'No description provided.'}
+                  </p>
+                  <div>
+                    <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-2">
+                      Lead Department
+                    </p>
+                    <div className="flex items-center gap-3 bg-bg p-3 rounded-lg border border-border">
+                      <div className="w-9 h-9 bg-accent/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <span className="material-symbols-outlined text-[18px] text-accent">business</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-text-primary">{tender.departmentName}</p>
+                        <p className="text-xs text-text-secondary">{tender.departmentCode}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-bg rounded-lg border border-border overflow-hidden">
+                  <div className="px-4 py-3 border-b border-border bg-card">
+                    <h4 className="text-sm font-semibold text-text-primary">Key Details</h4>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-text-secondary">Category</span>
+                      <span className="text-xs font-semibold text-text-primary">{tender.category || '—'}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-text-secondary">Procurement Type</span>
+                      <span className="text-xs font-semibold text-text-primary">{tender.procurementType ?? '—'}</span>
+                    </div>
+                    {tender.estimatedBudget != null && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-text-secondary">Est. Budget</span>
+                        <span className="text-xs font-semibold text-text-primary">
+                          {tender.estimatedBudget.toLocaleString('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            maximumFractionDigits: 0,
+                          })}
+                        </span>
+                      </div>
+                    )}
+                    {tender.submissionDeadline && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-text-secondary">Submission Deadline</span>
+                        <span className="text-xs font-semibold text-danger">
+                          {new Date(tender.submissionDeadline).toLocaleDateString('en-GB', {
+                            day: 'numeric', month: 'short', year: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Documents Card */}
+            <div className="bg-card rounded-xl border border-border shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
+              <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[20px] text-accent">folder_open</span>
+                  <h3 className="text-base font-semibold text-text-primary">Tender Documents</h3>
+                  <span className="ml-1 text-xs font-semibold bg-bg border border-border text-text-secondary px-2 py-0.5 rounded-full">
+                    {tender.documents.length}
+                  </span>
+                </div>
+                {EDITABLE_STATUSES.includes(tender.status) && (
+                  <button className="flex items-center gap-1.5 text-sm text-accent hover:underline font-semibold">
+                    <span className="material-symbols-outlined text-[16px]">upload</span>
+                    Upload
+                  </button>
+                )}
+              </div>
+              {tender.documents.length === 0 ? (
+                <div className="py-10 text-center">
+                  <span className="material-symbols-outlined text-[40px] text-text-secondary/30 block mb-2">
+                    folder_open
+                  </span>
+                  <p className="text-sm text-text-secondary">No documents attached yet.</p>
+                </div>
+              ) : (
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-bg border-b border-border">
+                      <th className="px-6 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">File</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">Size</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">Uploaded</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider text-right">
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {tender.documents.map(doc => (
+                      <tr key={doc.id} className="hover:bg-bg/60 transition-colors">
+                        <td className="px-6 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <span className="material-symbols-outlined text-[20px] text-text-secondary">
+                              {getFileIcon(doc.fileType)}
+                            </span>
+                            <span className="text-sm text-text-primary">{doc.fileName}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-3.5 text-sm text-text-secondary">{formatFileSize(doc.fileSize)}</td>
+                        <td className="px-6 py-3.5 text-sm text-text-secondary">
+                          {new Date(doc.uploadedAt).toLocaleDateString('en-GB', {
+                            day: 'numeric', month: 'short', year: 'numeric',
+                          })}
+                        </td>
+                        <td className="px-6 py-3.5 text-right">
+                          <button
+                            className="p-1.5 hover:bg-bg rounded-lg text-text-secondary hover:text-accent transition-colors"
+                            title="Download"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">download</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column */}
+          <div className="col-span-12 lg:col-span-4 space-y-5">
+            {/* Stats Bento */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-sidebar text-white p-5 rounded-xl">
+                <p className="text-xs font-semibold tracking-widest text-white/50 uppercase mb-2">Days Left</p>
+                <p className="text-4xl font-bold leading-none">
+                  {tender.daysLeft != null && tender.daysLeft >= 0 ? tender.daysLeft : '—'}
+                </p>
+              </div>
+              <div className="bg-card border border-border p-5 rounded-xl">
+                <p className="text-xs font-semibold tracking-widest text-text-secondary uppercase mb-2">Bids</p>
+                <p className="text-4xl font-bold text-text-primary leading-none">
+                  {String(tender.bidCount ?? 0).padStart(2, '0')}
+                </p>
+              </div>
+            </div>
+
+            {/* Workflow Progress */}
+            <div className="bg-card rounded-xl border border-border shadow-[0_1px_4px_rgba(0,0,0,0.04)] p-5">
+              <h4 className="text-sm font-semibold text-text-primary mb-5">Workflow Progress</h4>
+              <div className="space-y-2">
+                {LIFECYCLE_STAGES.map((stage, i) => {
+                  const done = currentStageIndex >= 0 && i < currentStageIndex;
+                  const active = i === currentStageIndex;
+                  const pending = currentStageIndex >= 0 ? i > currentStageIndex : i > 0;
+                  return (
+                    <div key={stage.key} className={`flex items-center gap-3 ${pending ? 'opacity-40' : ''}`}>
+                      <div
+                        className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold transition-colors ${
+                          done
+                            ? 'bg-success text-white'
+                            : active
+                            ? 'bg-accent text-white ring-4 ring-accent/20'
+                            : 'bg-bg border border-border text-text-secondary'
+                        }`}
+                      >
+                        {done ? (
+                          <span className="material-symbols-outlined text-[11px]">check</span>
+                        ) : (
+                          i + 1
+                        )}
+                      </div>
+                      <span
+                        className={`text-xs transition-colors ${
+                          active
+                            ? 'font-semibold text-accent'
+                            : done
+                            ? 'text-text-secondary'
+                            : 'text-text-secondary'
+                        }`}
+                      >
+                        {stage.label}
+                      </span>
+                      {active && (
+                        <span className="ml-auto text-[10px] font-semibold text-accent bg-accent/10 px-1.5 py-0.5 rounded-full">
+                          Now
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stub tabs */}
+      {tab !== 'overview' && (
+        <div className="bg-card rounded-xl border border-border p-16 text-center">
+          <span className="material-symbols-outlined text-[48px] text-text-secondary/20 block mb-4">
+            {TABS.find(t => t.id === tab)?.icon}
+          </span>
+          <p className="text-sm font-semibold text-text-primary mb-1">
+            {tab === 'clarifications' && 'Clarification Center'}
+            {tab === 'bids' && 'Submitted Bids'}
+            {tab === 'audit' && 'Audit Trail'}
+          </p>
+          <p className="text-xs text-text-secondary">
+            {tab === 'clarifications' && 'Vendor questions and procurement officer replies will appear here.'}
+            {tab === 'bids' && 'Submitted bid envelopes will appear here after the submission deadline.'}
+            {tab === 'audit' && 'A tamper-proof log of all actions taken on this tender.'}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
