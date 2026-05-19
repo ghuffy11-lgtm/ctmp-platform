@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import ExcelJS from 'exceljs';
+import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../../database/prisma.service';
 
