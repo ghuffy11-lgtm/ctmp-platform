@@ -1,4 +1,4 @@
-import { IsString, IsEmail, IsNotEmpty, MinLength, IsOptional, Length } from 'class-validator';
+import { IsString, IsEmail, IsNotEmpty, MinLength, IsOptional } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -20,10 +20,9 @@ export class VendorRegisterDto {
   @IsOptional()
   taxNumber?: string;
 
-  @ApiPropertyOptional({ description: 'ISO 3166-1 alpha-2 country code (2 characters)' })
+  @ApiPropertyOptional({ description: 'ISO 3166-1 alpha-2 country code' })
   @Transform(({ value }) => (value === '' ? undefined : value))
   @IsString()
-  @Length(2, 2)
   @IsOptional()
   country?: string;
 
