@@ -259,14 +259,24 @@ When a task is completed, add a short completion note with date and key files.
 
 ## Phase 6: Infrastructure
 
-- [ ] Create local Docker Compose.
-- [ ] Add PostgreSQL service.
-- [ ] Add Redis service.
-- [ ] Add API service.
-- [ ] Add admin portal service.
-- [ ] Add vendor portal service.
-- [ ] Add environment variable templates.
-- [ ] Add SMTP configuration documentation.
+- [x] Create local Docker Compose.
+  - Completed 2026-05-18. Full stack in `infrastructure/docker/docker-compose.yml`.
+- [x] Add PostgreSQL service.
+  - Completed 2026-05-18. postgres:16-alpine with auto-migration loading.
+- [x] Add Redis service.
+  - Completed 2026-05-18. redis:7-alpine with persistence.
+- [x] Add API service.
+  - Completed 2026-05-18. NestJS API with health checks.
+- [x] Add admin portal service.
+  - Completed 2026-05-18. Next.js 15 web-admin.
+- [x] Add vendor portal service.
+  - Completed 2026-05-18. Next.js 15 web-vendor.
+- [x] Add environment variable templates.
+  - Completed 2026-05-18. `.env.example` with all knobs documented.
+- [x] Add SMTP configuration documentation.
+  - Completed 2026-05-18. MailHog for dev/QA; production SMTP guidance in README.
+- [x] Add setup/cleanup helper scripts for local development.
+  - Completed 2026-05-20. `infrastructure/scripts/docker-setup.sh` (generates secrets, starts stack, seeds DB), `docker-clean.sh` (cleanup), comprehensive README.
 - [ ] Add backup and restore runbook.
 - [ ] Add on-prem deployment runbook.
 

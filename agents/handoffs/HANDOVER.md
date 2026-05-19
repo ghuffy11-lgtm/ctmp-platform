@@ -6,6 +6,37 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-20 — Docker infrastructure setup + report-exports test fix (complete)
+
+**Date/time:** 2026-05-20, 08:15 GMT+3
+**Agent/task:** Fix report-exports e2e test + build Docker helper scripts.
+
+**Files changed:**
+- `qa/playwright/tests/report-exports.spec.ts` — line 28: added `await` to `signAdminToken()` call (was returning Promise, not string).
+- `infrastructure/scripts/docker-setup.sh` — new bash script for one-command local stack startup.
+- `infrastructure/scripts/docker-clean.sh` — new bash script for cleanup with optional full reset.
+- `infrastructure/scripts/README.md` — comprehensive guide to local Docker development.
+- `agents/backlog/MASTER_TASK_TRACKER.md` — marked Phase 6 infrastructure items complete.
+
+**Justification:**
+Report-exports test was failing with 401 Unauthorized because the token was a Promise<string> instead of a string. The async `signAdminToken()` function was not being awaited. Docker infrastructure was already functional but lacked developer-facing setup scripts and docs; new scripts reduce onboarding friction.
+
+**Testing:**
+- Report-exports test should now pass (awaiting CI run 42 completion).
+- Docker setup script tested to verify it generates .env, starts compose, seeds DB.
+- All 27 e2e tests should pass once CI completes.
+
+**Verification:**
+- signAdminToken import shows it returns Promise<string> (line 10 of api.ts).
+- Fix aligns with golden-path test which also uses signAdminToken correctly.
+- Docker scripts check for Docker/Compose availability, use idempotent operations (migrations already in compose, seeds use psql with ON CONFLICT).
+
+**Open questions:** None.
+
+**Next recommended step:** Confirm CI run 42 shows 27/27 tests passing, then move to Phase 6 backup/restore + deployment runbooks or Phase 8 decision/skills documentation.
+
+---
+
 ## 2026-05-19 — Phase 8+ Follow-up #11: Committee session creation fails on duplicate memberIds (resolved)
 
 **Date/time:** 2026-05-19, 23:04 GMT+3
