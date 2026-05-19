@@ -93,13 +93,14 @@ test.describe.serial('Golden path — register → bid → evaluate → award', 
     await page.goto(`${ADMIN_BASE}/vendors`);
     await expect(page.getByText(VENDOR.company).first()).toBeVisible({ timeout: 10_000 });
     await page.getByText(VENDOR.company).first().click();
-    await page.getByRole('button', { name: /Approve Vendor/i }).click();
 
-    // Wait for the approval API request to complete + UI to reflect.
-    await page.waitForResponse(
+    // Register waitForResponse BEFORE the click so we don't race the POST.
+    const approveResponse = page.waitForResponse(
       resp => resp.url().includes('/vendors/') && resp.url().includes('/approve') && resp.ok(),
       { timeout: 10_000 },
     );
+    await page.getByRole('button', { name: /Approve Vendor/i }).click();
+    await approveResponse;
   });
 
   test('vendor logs in + submits bid', async ({ page }) => {
