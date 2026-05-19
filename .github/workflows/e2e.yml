@@ -40,6 +40,8 @@ jobs:
           WEB_VENDOR_PORT=4300
           MAILHOG_SMTP_PORT=1025
           MAILHOG_WEB_PORT=8025
+          PUBLIC_API_URL=http://localhost:3000
+          CORS_ORIGINS=http://localhost:4200,http://localhost:4300
           EOF
 
       - name: Build and start stack

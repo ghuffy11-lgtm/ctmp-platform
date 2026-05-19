@@ -105,6 +105,7 @@ services:
       STORAGE_S3_AUTO_CREATE_BUCKETS: ${STORAGE_S3_AUTO_CREATE_BUCKETS:-true}
       AUDIT_VERIFY_ON_START: ${AUDIT_VERIFY_ON_START:-true}
       AUDIT_VERIFY_LIMIT: ${AUDIT_VERIFY_LIMIT:-1000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200,http://localhost:4300}
     ports:
       - '${API_PORT:-3000}:3000'
     volumes:
