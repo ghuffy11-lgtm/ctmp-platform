@@ -2,6 +2,55 @@
 
 Helper scripts for local development and deployment of CTMP.
 
+## WSL2 + Docker Desktop Setup (Windows Server 2022)
+
+### Step 1: Enable Windows Features
+
+Run PowerShell as Administrator:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File infrastructure\scripts\wsl2-setup.ps1
+```
+
+This will:
+- Enable VirtualMachinePlatform and WSL features
+- Prompt for restart
+- Auto-restart your computer
+
+After restart, run the same command again to continue.
+
+### Step 2: Install Ubuntu 22.04
+
+```powershell
+wsl --install -d Ubuntu-22.04
+# First login will prompt for username/password
+```
+
+### Step 3: Install Docker Desktop
+
+1. Download from https://www.docker.com/products/docker-desktop
+2. Run installer (check "Install required Windows components for WSL 2")
+3. Docker Settings → Resources → WSL Integration → Enable Ubuntu-22.04
+4. Restart Docker Desktop
+
+### Step 4: Start Stack in WSL2
+
+From WSL2 Ubuntu terminal:
+
+```bash
+cd /mnt/d/Work/CTMP/ctmp-platform
+bash infrastructure/scripts/wsl2-docker-start.sh
+```
+
+Script will:
+- Generate random JWT secrets in .env
+- Start all services (postgres, redis, api, web-admin, web-vendor)
+- Wait for health checks
+- Apply baseline seed data
+- Report access URLs
+
+See `docs/runbooks/LOCAL_DOCKER_SETUP.md` for detailed guide with troubleshooting.
+
 ## Docker Development
 
 ### Quick Start
