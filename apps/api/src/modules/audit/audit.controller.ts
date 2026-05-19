@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Query, Param, UseGuards, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -50,6 +50,9 @@ export class AuditController {
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
   ) {
+    if (!/^\d+$/.test(id)) {
+      throw new BadRequestException('id must be a positive integer');
+    }
     return this.auditService.acknowledgeAlert(BigInt(id), userId);
   }
 }

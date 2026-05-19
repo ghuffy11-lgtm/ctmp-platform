@@ -186,5 +186,17 @@ describe('AuditService', () => {
         }),
       );
     });
+
+    it('throws NotFoundException when alert does not exist', async () => {
+      const p2025 = Object.assign(new Error('Record not found'), {
+        code: 'P2025',
+        name: 'PrismaClientKnownRequestError',
+      });
+      // Make it look like a Prisma error instance
+      Object.setPrototypeOf(p2025, require('@prisma/client').Prisma.PrismaClientKnownRequestError.prototype);
+      prismaMock.securityAlert.update.mockRejectedValue(p2025);
+
+      await expect(service.acknowledgeAlert(99n, 'user-1')).rejects.toThrow('not found');
+    });
   });
 });

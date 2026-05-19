@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { AuditRiskLevel, Prisma } from '@prisma/client';
@@ -291,8 +291,8 @@ export class AuditService implements OnModuleInit {
     pageSize?: number;
     unacknowledgedOnly?: boolean;
   }) {
-    const page = query.page ?? 1;
-    const pageSize = query.pageSize ?? 50;
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = Math.max(1, Math.min(query.pageSize ?? 50, 200));
     const skip = (page - 1) * pageSize;
     const where = query.unacknowledgedOnly ? { acknowledgedAt: null } : {};
 
@@ -328,9 +328,16 @@ export class AuditService implements OnModuleInit {
   }
 
   async acknowledgeAlert(id: bigint, acknowledgedBy: string): Promise<void> {
-    await this.prisma.securityAlert.update({
-      where: { id },
-      data: { acknowledgedBy, acknowledgedAt: new Date() },
-    });
+    try {
+      await this.prisma.securityAlert.update({
+        where: { id },
+        data: { acknowledgedBy, acknowledgedAt: new Date() },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        throw new NotFoundException(`Security alert ${id} not found`);
+      }
+      throw err;
+    }
   }
 }
