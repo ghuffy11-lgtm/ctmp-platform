@@ -15,7 +15,7 @@ export class LateSubmissionsController {
   constructor(private readonly lateSubmissionsService: LateSubmissionsService) {}
 
   @Get()
-  @RequirePermissions('late_submission:list')
+  @RequirePermissions('late_submission:view')
   @ApiOperation({ operationId: 'listLateSubmissionExceptions', summary: 'List late submission exceptions for a tender' })
   findAll(@Param('tenderId') tenderId: string) {
     return this.lateSubmissionsService.findAll(tenderId);

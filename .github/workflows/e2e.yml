@@ -59,6 +59,13 @@ jobs:
           done
           echo "ERROR: postgres did not become ready" >&2; exit 1
 
+      - name: Apply baseline seeds (roles/permissions + notification templates)
+        run: |
+          for f in database/seeds/*.sql; do
+            echo "applying $f"
+            docker exec -i ctmp-postgres psql -U ctmp -d ctmp -v ON_ERROR_STOP=1 < "$f"
+          done
+
       - name: Wait for API health
         run: |
           for i in $(seq 1 30); do

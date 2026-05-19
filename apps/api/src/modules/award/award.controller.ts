@@ -38,7 +38,7 @@ export class AwardController {
   }
 
   @Post('award')
-  @RequirePermissions('award:issue')
+  @RequirePermissions('award:finalize')
   @ApiOperation({ operationId: 'issueAward', summary: 'Issue formal award' })
   issue(@Param('tenderId') tenderId: string, @CurrentUser('id') userId: string) {
     return this.awardService.issue(tenderId, userId);

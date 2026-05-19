@@ -1,12 +1,15 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AuditRiskLevel } from '@prisma/client';
+import { AuditRiskLevel, NotificationStatus } from '@prisma/client';
+import * as nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
+  private transporter: Transporter | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -14,23 +17,90 @@ export class NotificationsService {
     private readonly audit: AuditService,
   ) {}
 
+  private getTransporter(): Transporter {
+    if (this.transporter) return this.transporter;
+    const host = this.config.get<string>('SMTP_HOST') ?? 'localhost';
+    const port = Number(this.config.get<string>('SMTP_PORT') ?? '1025');
+    const user = this.config.get<string>('SMTP_USER');
+    const pass = this.config.get<string>('SMTP_PASSWORD');
+    this.transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      ...(user ? { auth: { user, pass: pass ?? '' } } : {}),
+      ignoreTLS: !user,
+    });
+    return this.transporter;
+  }
+
+  private render(template: string, variables: Record<string, string>): string {
+    return template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, key) =>
+      variables[key] !== undefined ? String(variables[key]) : '',
+    );
+  }
+
   async sendEmail(to: string, templateCode: string, variables: Record<string, string>) {
-    // TODO: load template from notification_templates, render, send via nodemailer, log delivery
+    const template = await this.prisma.notificationTemplate.findUnique({
+      where: { code: templateCode },
+    });
+    if (!template) {
+      throw new NotFoundException(`Notification template not found: ${templateCode}`);
+    }
+    if (!template.isActive) {
+      this.logger.warn(`Skipping disabled template ${templateCode}`);
+      return { status: 'SKIPPED' as const };
+    }
+
+    const subject = this.render(template.subjectTemplate, variables);
+    const body = this.render(template.bodyTemplate, variables);
+    const from = this.config.get<string>('SMTP_FROM') ?? 'no-reply@ctmp.local';
+
+    let status: NotificationStatus = NotificationStatus.QUEUED;
+    let error: string | null = null;
+    let sentAt: Date | null = null;
+
+    try {
+      const info = await this.getTransporter().sendMail({
+        from,
+        to,
+        subject,
+        text: body,
+      });
+      status = NotificationStatus.SENT;
+      sentAt = new Date();
+      this.logger.log(`sent ${templateCode} to ${to} (messageId=${info.messageId})`);
+    } catch (err) {
+      status = NotificationStatus.FAILED;
+      error = err instanceof Error ? err.message : String(err);
+      this.logger.error(`sendEmail ${templateCode} to ${to} failed: ${error}`);
+    }
+
+    await this.prisma.notificationLog.create({
+      data: {
+        templateCode,
+        subject,
+        recipientEmail: to,
+        status,
+        error,
+        sentAt,
+      },
+    });
+
+    if (status === NotificationStatus.FAILED) {
+      throw new Error(`Email delivery failed: ${error}`);
+    }
+    return { status };
+  }
+
+  async notifyTenderPublished(_tenderId: string) {
     throw new Error('Not implemented');
   }
 
-  async notifyTenderPublished(tenderId: string) {
-    // TODO: send to all invited vendors
+  async notifyBidSubmitted(_bidId: string) {
     throw new Error('Not implemented');
   }
 
-  async notifyBidSubmitted(bidId: string) {
-    // TODO: send receipt to vendor, notify procurement team
-    throw new Error('Not implemented');
-  }
-
-  async notifyAwardDecision(tenderId: string) {
-    // TODO: notify winner + losers with appropriate messages
+  async notifyAwardDecision(_tenderId: string) {
     throw new Error('Not implemented');
   }
 

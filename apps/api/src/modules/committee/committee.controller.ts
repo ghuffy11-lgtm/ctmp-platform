@@ -27,7 +27,7 @@ export class CommitteeController {
   }
 
   @Get('tenders/:tenderId/committee-sessions')
-  @RequirePermissions('committee:view_records')
+  @RequirePermissions('committee:view_minutes')
   @ApiOperation({ operationId: 'listCommitteeSessions', summary: 'List committee sessions for tender (newest first)' })
   listForTender(@Param('tenderId') tenderId: string) {
     return this.committeeService.listForTender(tenderId);
@@ -52,7 +52,7 @@ export class CommitteeController {
   }
 
   @Get('committee-sessions/:sessionId/opening-records')
-  @RequirePermissions('committee:view_records')
+  @RequirePermissions('committee:view_minutes')
   @ApiOperation({ operationId: 'getOpeningRecords', summary: 'Get commercial opening records' })
   getRecords(@Param('sessionId') sessionId: string) {
     return this.committeeService.getRecords(sessionId);

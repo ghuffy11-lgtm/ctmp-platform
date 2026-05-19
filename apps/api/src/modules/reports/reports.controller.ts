@@ -16,7 +16,7 @@ export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get()
-  @RequirePermissions('reports:list')
+  @RequirePermissions('reports:view')
   @ApiOperation({ operationId: 'listReports', summary: 'List available report types' })
   listReports() {
     return this.reportsService.listReports();

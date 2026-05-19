@@ -15,7 +15,7 @@ export class VendorsController {
   constructor(private readonly vendorsService: VendorsService) {}
 
   @Get()
-  @RequirePermissions('vendors:list')
+  @RequirePermissions('vendor:view')
   @ApiOperation({ operationId: 'listVendors', summary: 'List vendors with optional status filter' })
   findAll(
     @Query('status') status?: string,
@@ -30,28 +30,28 @@ export class VendorsController {
   }
 
   @Get(':id')
-  @RequirePermissions('vendors:read')
+  @RequirePermissions('vendor:view')
   @ApiOperation({ operationId: 'getVendor', summary: 'Get vendor profile' })
   findOne(@Param('id') id: string) {
     return this.vendorsService.findOne(id);
   }
 
   @Patch(':id')
-  @RequirePermissions('vendors:update')
+  @RequirePermissions('vendor:edit_profile')
   @ApiOperation({ operationId: 'updateVendor', summary: 'Update vendor profile' })
   update(@Param('id') id: string, @Body() dto: UpdateVendorDto) {
     return this.vendorsService.update(id, dto);
   }
 
   @Post(':id/approve')
-  @RequirePermissions('vendors:approve')
+  @RequirePermissions('vendor:approve')
   @ApiOperation({ operationId: 'approveVendor', summary: 'Approve vendor registration' })
   approve(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.vendorsService.approve(id, userId);
   }
 
   @Post(':id/reject')
-  @RequirePermissions('vendors:approve')
+  @RequirePermissions('vendor:reject')
   @ApiOperation({ operationId: 'rejectVendor', summary: 'Reject vendor registration' })
   reject(
     @Param('id') id: string,
@@ -62,7 +62,7 @@ export class VendorsController {
   }
 
   @Post(':id/suspend')
-  @RequirePermissions('vendors:approve')
+  @RequirePermissions('vendor:suspend')
   @ApiOperation({ operationId: 'suspendVendor', summary: 'Suspend an approved vendor' })
   suspend(
     @Param('id') id: string,

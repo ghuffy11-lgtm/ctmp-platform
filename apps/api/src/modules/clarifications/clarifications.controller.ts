@@ -16,14 +16,14 @@ export class ClarificationsController {
   constructor(private readonly clarificationsService: ClarificationsService) {}
 
   @Get('tenders/:tenderId/clarifications')
-  @RequirePermissions('clarifications:list')
+  @RequirePermissions('clarification:view_internal')
   @ApiOperation({ operationId: 'listClarifications', summary: 'List clarifications for a tender' })
   findAll(@Param('tenderId') tenderId: string, @CurrentUser() user: any) {
     return this.clarificationsService.findAll(tenderId, user);
   }
 
   @Post('tenders/:tenderId/clarifications')
-  @RequirePermissions('clarifications:create')
+  @RequirePermissions('clarification:create')
   @ApiOperation({ operationId: 'createClarification', summary: 'Submit clarification question' })
   create(
     @Param('tenderId') tenderId: string,
@@ -34,7 +34,7 @@ export class ClarificationsController {
   }
 
   @Post('clarifications/:id/reply')
-  @RequirePermissions('clarifications:reply')
+  @RequirePermissions('clarification:reply')
   @ApiOperation({ operationId: 'replyClarification', summary: 'Reply to clarification' })
   reply(
     @Param('id') id: string,

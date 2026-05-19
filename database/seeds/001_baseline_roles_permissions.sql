@@ -101,7 +101,13 @@ INSERT INTO permissions (code, category, description) VALUES
     ('system:configure',             'system', 'Configure system settings.'),
     ('roles:manage',                 'system', 'Manage roles.'),
     ('permissions:manage',           'system', 'Manage permission grants.'),
-    ('notification_templates:manage','system', 'Manage notification templates.')
+    ('notification_templates:manage','system', 'Manage notification templates.'),
+    -- users (internal user administration)
+    ('users:list',                   'users', 'List internal users.'),
+    ('users:read',                   'users', 'Read internal user profile.'),
+    ('users:create',                 'users', 'Create internal user.'),
+    ('users:update',                 'users', 'Update internal user.'),
+    ('users:delete',                 'users', 'Deactivate internal user.')
 ON CONFLICT (code) DO NOTHING;
 
 -- ---------------------------------------------------------------------
@@ -123,6 +129,11 @@ WITH grants(role_code, permission_code) AS (
     ('SYSTEM_ADMIN', 'commercial:view_status'),
     ('SYSTEM_ADMIN', 'audit:view'),
     ('SYSTEM_ADMIN', 'reports:view'),
+    ('SYSTEM_ADMIN', 'users:list'),
+    ('SYSTEM_ADMIN', 'users:read'),
+    ('SYSTEM_ADMIN', 'users:create'),
+    ('SYSTEM_ADMIN', 'users:update'),
+    ('SYSTEM_ADMIN', 'users:delete'),
 
     -- PROCUREMENT_ADMIN: full procurement operations except commercial details (acquired separately).
     ('PROCUREMENT_ADMIN', 'tender:create'),

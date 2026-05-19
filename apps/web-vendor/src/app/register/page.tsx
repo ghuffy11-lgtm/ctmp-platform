@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import Link from 'next/link';
 import { post } from '@/lib/api';
 
@@ -132,10 +132,15 @@ function Field({
   required?: boolean;
   colspan?: boolean;
 }) {
+  const inputId = useId();
   return (
     <div className={colspan ? 'col-span-full' : ''}>
-      <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">{label}{required && ' *'}</label>
+      <label htmlFor={inputId} className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">
+        {label}{required && ' *'}
+      </label>
       <input
+        id={inputId}
+        aria-label={label}
         type={type}
         value={value}
         onChange={e => onChange(e.target.value)}

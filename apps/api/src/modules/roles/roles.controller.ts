@@ -14,49 +14,49 @@ export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   @Get()
-  @RequirePermissions('roles:list')
+  @RequirePermissions('roles:manage')
   @ApiOperation({ operationId: 'listRoles', summary: 'List all roles' })
   findAll() {
     return this.rolesService.findAll();
   }
 
   @Get(':id')
-  @RequirePermissions('roles:read')
+  @RequirePermissions('roles:manage')
   @ApiOperation({ operationId: 'getRole', summary: 'Get role with permissions' })
   findOne(@Param('id') id: string) {
     return this.rolesService.findOne(id);
   }
 
   @Post()
-  @RequirePermissions('roles:create')
+  @RequirePermissions('roles:manage')
   @ApiOperation({ operationId: 'createRole', summary: 'Create role' })
   create(@Body() body: any) {
     return this.rolesService.create(body);
   }
 
   @Patch(':id')
-  @RequirePermissions('roles:update')
+  @RequirePermissions('roles:manage')
   @ApiOperation({ operationId: 'updateRole', summary: 'Update role' })
   update(@Param('id') id: string, @Body() body: any) {
     return this.rolesService.update(id, body);
   }
 
   @Delete(':id')
-  @RequirePermissions('roles:delete')
+  @RequirePermissions('roles:manage')
   @ApiOperation({ operationId: 'deleteRole', summary: 'Delete role' })
   remove(@Param('id') id: string) {
     return this.rolesService.remove(id);
   }
 
   @Get(':id/permissions')
-  @RequirePermissions('roles:read')
+  @RequirePermissions('roles:manage')
   @ApiOperation({ operationId: 'getRolePermissions', summary: 'Get permission IDs assigned to role' })
   getPermissions(@Param('id') id: string) {
     return this.rolesService.getPermissions(id);
   }
 
   @Patch(':id/permissions')
-  @RequirePermissions('roles:update')
+  @RequirePermissions('roles:manage')
   @ApiOperation({ operationId: 'setRolePermissions', summary: 'Replace permission set for role' })
   setPermissions(
     @Param('id') id: string,

@@ -13,7 +13,7 @@ export class PermissionsController {
   constructor(private readonly permissionsService: PermissionsService) {}
 
   @Get()
-  @RequirePermissions('permissions:list')
+  @RequirePermissions('permissions:manage')
   @ApiOperation({ operationId: 'listPermissions', summary: 'List all available permissions' })
   findAll() {
     return this.permissionsService.findAll();

@@ -17,70 +17,70 @@ export class TendersController {
   constructor(private readonly tendersService: TendersService) {}
 
   @Get()
-  @RequirePermissions('tenders:list')
+  @RequirePermissions('tender:view')
   @ApiOperation({ operationId: 'listTenders', summary: 'List tenders with filters' })
   findAll(@Query() query: ListTendersDto) {
     return this.tendersService.findAll(query);
   }
 
   @Post()
-  @RequirePermissions('tenders:create')
+  @RequirePermissions('tender:create')
   @ApiOperation({ operationId: 'createTender', summary: 'Create tender draft' })
   create(@Body() dto: CreateTenderDto, @CurrentUser('id') userId: string) {
     return this.tendersService.create(dto, userId);
   }
 
   @Get(':id')
-  @RequirePermissions('tenders:read')
+  @RequirePermissions('tender:view')
   @ApiOperation({ operationId: 'getTender', summary: 'Get tender detail' })
   findOne(@Param('id') id: string) {
     return this.tendersService.findOne(id);
   }
 
   @Patch(':id')
-  @RequirePermissions('tenders:update')
+  @RequirePermissions('tender:edit')
   @ApiOperation({ operationId: 'updateTender', summary: 'Update tender draft' })
   update(@Param('id') id: string, @Body() dto: UpdateTenderDto) {
     return this.tendersService.update(id, dto);
   }
 
   @Get(':id/documents/:documentId')
-  @RequirePermissions('tenders:read')
+  @RequirePermissions('tender:view')
   @ApiOperation({ operationId: 'downloadTenderDocument', summary: 'Download tender document' })
   downloadDocument(@Param('id') id: string, @Param('documentId') documentId: string) {
     return this.tendersService.downloadDocument(id, documentId);
   }
 
   @Post(':id/submit-for-approval')
-  @RequirePermissions('tenders:submit')
+  @RequirePermissions('tender:edit')
   @ApiOperation({ operationId: 'submitTenderForApproval', summary: 'Submit tender for internal approval' })
   submitForApproval(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.tendersService.submitForApproval(id, userId);
   }
 
   @Post(':id/publish')
-  @RequirePermissions('tenders:publish')
+  @RequirePermissions('tender:publish')
   @ApiOperation({ operationId: 'publishTender', summary: 'Publish approved tender' })
   publish(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.tendersService.publish(id, userId);
   }
 
   @Post(':id/cancel')
-  @RequirePermissions('tenders:cancel')
+  @RequirePermissions('tender:cancel')
   @ApiOperation({ operationId: 'cancelTender', summary: 'Cancel tender' })
   cancel(@Param('id') id: string, @Body('reason') reason: string, @CurrentUser('id') userId: string) {
     return this.tendersService.cancel(id, reason, userId);
   }
 
   @Post(':id/close-submissions')
-  @RequirePermissions('tenders:close_submissions')
+  @RequirePermissions('tender:close_submission')
   @ApiOperation({ operationId: 'closeSubmissions', summary: 'Close bid submission window' })
   closeSubmissions(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.tendersService.closeSubmissions(id, userId);
   }
 
   @Post(':id/approve')
-  @RequirePermissions('tenders:approve')
+  @RequirePermissions('tender:approve')
   @ApiOperation({ operationId: 'approveTender', summary: 'Approve tender from Internal Review' })
   approve(
     @Param('id') id: string,
@@ -91,7 +91,7 @@ export class TendersController {
   }
 
   @Post(':id/reject')
-  @RequirePermissions('tenders:approve')
+  @RequirePermissions('tender:approve')
   @ApiOperation({ operationId: 'rejectTender', summary: 'Reject tender from Internal Review' })
   reject(
     @Param('id') id: string,

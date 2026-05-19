@@ -14,14 +14,14 @@ export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get()
-  @RequirePermissions('notifications:configure')
+  @RequirePermissions('notification_templates:manage')
   @ApiOperation({ operationId: 'listNotificationTemplates', summary: 'List notification templates' })
   listTemplates() {
     return this.notificationsService.listTemplates();
   }
 
   @Patch(':id')
-  @RequirePermissions('notifications:configure')
+  @RequirePermissions('notification_templates:manage')
   @ApiOperation({ operationId: 'updateNotificationTemplate', summary: 'Update notification template subject/body/enabled flag' })
   updateTemplate(
     @Param('id') id: string,

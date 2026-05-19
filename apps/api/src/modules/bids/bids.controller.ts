@@ -36,7 +36,7 @@ export class BidsController {
   }
 
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequirePermissions('bids:list')
+  @RequirePermissions('bid:view_metadata')
   @Get('tenders/:tenderId/bids')
   @ApiOperation({ operationId: 'listTenderBids', summary: 'List bids for a tender (admin only)' })
   listForTender(
