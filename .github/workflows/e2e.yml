@@ -1,0 +1,135 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Docker stack ────────────────────────────────────────────────────────
+      - name: Create .env for docker compose
+        run: |
+          cat > infrastructure/docker/.env << 'EOF'
+          POSTGRES_USER=ctmp
+          POSTGRES_PASSWORD=ctmp_ci
+          POSTGRES_DB=ctmp
+          POSTGRES_PORT=5432
+          REDIS_PORT=6379
+          NODE_ENV=production
+          API_PORT=3000
+          JWT_SECRET=ci-jwt-secret-for-testing-only-32chars
+          JWT_REFRESH_SECRET=ci-jwt-refresh-secret-only-32chars
+          VENDOR_JWT_SECRET=ci-vendor-jwt-secret-only-32chars
+          VENDOR_JWT_REFRESH_SECRET=ci-vendor-jwt-refresh-only-32ch
+          SMTP_HOST=mailhog
+          SMTP_PORT=1025
+          CAPTCHA_PROVIDER=none
+          CAPTCHA_SECRET_KEY=
+          AUDIT_VERIFY_ON_START=false
+          STORAGE_DRIVER=local
+          REPORT_WORKER_ENABLED=true
+          REPORT_WORKER_CONCURRENCY=1
+          WEB_ADMIN_PORT=4200
+          WEB_VENDOR_PORT=4300
+          MAILHOG_SMTP_PORT=1025
+          MAILHOG_WEB_PORT=8025
+          EOF
+
+      - name: Build and start stack
+        run: |
+          docker compose \
+            -f infrastructure/docker/docker-compose.yml \
+            --env-file infrastructure/docker/.env \
+            up -d --build
+        timeout-minutes: 25
+
+      - name: Wait for postgres
+        run: |
+          for i in $(seq 1 30); do
+            docker exec ctmp-postgres pg_isready -U ctmp -d ctmp 2>/dev/null && echo "postgres ready" && break
+            echo "waiting for postgres... ($i/30)"
+            sleep 5
+          done
+
+      - name: Wait for API health
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000/api/health && echo "" && echo "api ready" && break
+            echo "waiting for api... ($i/30)"
+            sleep 5
+          done
+
+      - name: Wait for web-admin
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4200 > /dev/null && echo "web-admin ready" && break
+            echo "waiting for web-admin... ($i/30)"
+            sleep 5
+          done
+
+      - name: Wait for web-vendor
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4300 > /dev/null && echo "web-vendor ready" && break
+            echo "waiting for web-vendor... ($i/30)"
+            sleep 5
+          done
+
+      # ── Node / pnpm ─────────────────────────────────────────────────────────
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install QA dependencies
+        run: pnpm --filter @ctmp/qa-playwright install
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @ctmp/qa-playwright exec playwright install chromium --with-deps
+
+      # ── Tests ───────────────────────────────────────────────────────────────
+      - name: Run e2e tests
+        env:
+          QA_API_URL: http://localhost:3000
+          QA_ADMIN_URL: http://localhost:4200
+          QA_VENDOR_URL: http://localhost:4300
+          QA_MAILHOG_URL: http://localhost:8025
+          QA_JWT_SECRET: ci-jwt-secret-for-testing-only-32chars
+          QA_VENDOR_JWT_SECRET: ci-vendor-jwt-secret-only-32chars
+          DATABASE_URL: postgresql://ctmp:ctmp_ci@localhost:5432/ctmp
+        run: pnpm --filter @ctmp/qa-playwright run test
+
+      # ── Artifacts ───────────────────────────────────────────────────────────
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: qa/playwright/playwright-report/
+          retention-days: 14
+
+      - name: Upload traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: qa/playwright/test-results/
+          retention-days: 7
+
+      - name: Dump docker logs on failure
+        if: failure()
+        run: |
+          docker compose -f infrastructure/docker/docker-compose.yml --env-file infrastructure/docker/.env logs --tail=100
