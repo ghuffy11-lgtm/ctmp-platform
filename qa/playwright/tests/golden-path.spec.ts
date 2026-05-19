@@ -97,7 +97,7 @@ test.describe.serial('Golden path — register → bid → evaluate → award', 
 
     // Wait for the approval API request to complete + UI to reflect.
     await page.waitForResponse(
-      resp => resp.url().includes('/vendors/') && resp.url().includes('/approve') && resp.status() === 200,
+      resp => resp.url().includes('/vendors/') && resp.url().includes('/approve') && resp.ok(),
       { timeout: 10_000 },
     );
   });
