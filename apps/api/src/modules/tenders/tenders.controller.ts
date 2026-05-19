@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { OptionalVendorOrUserGuard } from '../../common/guards/optional-vendor-or-user.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { TendersService } from './tenders.service';
 import { CreateTenderDto } from './dto/create-tender.dto';
@@ -18,6 +19,7 @@ export class TendersController {
   constructor(private readonly tendersService: TendersService) {}
 
   @Get()
+  @Public()
   @UseGuards(OptionalVendorOrUserGuard)
   @ApiOperation({ operationId: 'listTenders', summary: 'List tenders with filters (accessible to vendors for published browsing)' })
   findAll(@Query() query: ListTendersDto) {
@@ -32,6 +34,7 @@ export class TendersController {
   }
 
   @Get(':id')
+  @Public()
   @UseGuards(OptionalVendorOrUserGuard)
   @ApiOperation({ operationId: 'getTender', summary: 'Get tender detail (accessible to vendors for published tenders)' })
   findOne(@Param('id') id: string) {
