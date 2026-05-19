@@ -26,9 +26,12 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apk add --no-cache wget
-COPY --from=build /repo/apps/api/dist ./dist
-COPY --from=build /repo/apps/api/package.json ./package.json
-COPY --from=build /repo/apps/api/prisma ./prisma
-COPY --from=build /repo/apps/api/node_modules ./node_modules
+COPY --from=build /repo/node_modules /app/node_modules
+COPY --from=build /repo/packages /app/packages
+COPY --from=build /repo/apps/api/node_modules /app/apps/api/node_modules
+COPY --from=build /repo/apps/api/dist /app/apps/api/dist
+COPY --from=build /repo/apps/api/package.json /app/apps/api/package.json
+COPY --from=build /repo/apps/api/prisma /app/apps/api/prisma
+WORKDIR /app/apps/api
 EXPOSE 3000
 CMD ["node", "dist/main.js"]

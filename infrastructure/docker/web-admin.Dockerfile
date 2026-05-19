@@ -24,10 +24,13 @@ RUN pnpm exec next build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=build /repo/apps/web-admin/.next ./.next
-COPY --from=build /repo/apps/web-admin/public ./public
-COPY --from=build /repo/apps/web-admin/package.json ./package.json
-COPY --from=build /repo/apps/web-admin/node_modules ./node_modules
-COPY --from=build /repo/apps/web-admin/next.config.ts ./next.config.ts
+COPY --from=build /repo/node_modules /app/node_modules
+COPY --from=build /repo/packages /app/packages
+COPY --from=build /repo/apps/web-admin/node_modules /app/apps/web-admin/node_modules
+COPY --from=build /repo/apps/web-admin/.next /app/apps/web-admin/.next
+COPY --from=build /repo/apps/web-admin/public /app/apps/web-admin/public
+COPY --from=build /repo/apps/web-admin/package.json /app/apps/web-admin/package.json
+COPY --from=build /repo/apps/web-admin/next.config.ts /app/apps/web-admin/next.config.ts
+WORKDIR /app/apps/web-admin
 EXPOSE 4200
 CMD ["pnpm", "start"]
