@@ -23,7 +23,9 @@ export class CommitteeService {
     if (tender.status !== TenderStatus.COMMERCIAL_SEALED) {
       throw new BadRequestException(`Committee session requires tender in COMMERCIAL_SEALED`);
     }
-    if (!dto.memberIds || dto.memberIds.length < 2) {
+
+    const uniqueMembers = Array.from(new Set(dto.memberIds));
+    if (!uniqueMembers || uniqueMembers.length < 2) {
       throw new BadRequestException('At least 2 committee members required');
     }
 
@@ -35,7 +37,7 @@ export class CommitteeService {
         createdBy: userId,
         status: CommitteeSessionStatus.SCHEDULED,
         committeeMembers: {
-          create: dto.memberIds.map((userId, idx) => ({
+          create: uniqueMembers.map((userId, idx) => ({
             userId,
             isChair: idx === 0,
             roleInCommittee: idx === 0 ? 'Chair' : 'Member',
