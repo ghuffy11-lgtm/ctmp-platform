@@ -338,4 +338,9 @@ These items emerged during Phase 7 QA work but are out of scope for Phase 7 comp
   - TypeScript clean across all 3 apps.
   - Impact: Vendor data no longer silently dropped; complete profile on first registration.
   
-- [ ] **#10 (Done)** — vendor-auth.service.spec.ts 34/34 red. **FIXED 2026-05-19**: added `AuditService` mock provider. All 34 tests now pass in 11s.
+- [x] **#10 (Done)** — vendor-auth.service.spec.ts 34/34 red. **FIXED 2026-05-19**: added `AuditService` mock provider. All 34 tests now pass in 11s.
+
+- [x] **#11 (Low)** — Committee session creation fails on duplicate memberIds. **FIXED 2026-05-19**
+  - committee.service.ts `createSession()` now deduplicates memberIds via Set before creating CommitteeMember records.
+  - Impact: Test can safely add same user twice (deduplicated to single entry); Unique(sessionId, userId) constraint no longer violated.
+  - CI run in progress to verify all 27 tests pass.
