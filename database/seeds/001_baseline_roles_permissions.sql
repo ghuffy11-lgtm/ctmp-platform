@@ -39,7 +39,9 @@ ON CONFLICT (code) DO NOTHING;
 -- Permissions (spec section 11)
 -- ---------------------------------------------------------------------
 
-INSERT INTO permissions (code, category, description) VALUES
+INSERT INTO permissions (code, name, category, description)
+SELECT v.code, v.code, v.category, v.description
+FROM (VALUES
     -- vendor
     ('vendor:view',                  'vendor', 'View vendor list and profile.'),
     ('vendor:create',                'vendor', 'Create vendor records on behalf of a vendor.'),
@@ -108,6 +110,7 @@ INSERT INTO permissions (code, category, description) VALUES
     ('users:create',                 'users', 'Create internal user.'),
     ('users:update',                 'users', 'Update internal user.'),
     ('users:delete',                 'users', 'Deactivate internal user.')
+) AS v(code, category, description)
 ON CONFLICT (code) DO NOTHING;
 
 -- ---------------------------------------------------------------------
