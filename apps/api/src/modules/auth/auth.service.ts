@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Client } from 'ldapts';
 import { TOTP } from 'otplib';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../database/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { MfaVerifyDto } from './dto/mfa-verify.dto';
@@ -18,12 +19,20 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto) {
-    const bound = await this.bindToAd(dto.username, dto.password);
-    if (!bound) throw new UnauthorizedException('Invalid credentials');
-
-    const user = await this.prisma.user.findUnique({ where: { adUsername: dto.username } });
-    if (!user) throw new UnauthorizedException('User account not found');
+    const user = await this.prisma.user.findFirst({
+      where: { OR: [{ adUsername: dto.username }, { email: dto.username }] },
+    });
+    if (!user) throw new UnauthorizedException('Invalid credentials');
     if (user.status !== 'ACTIVE') throw new UnauthorizedException('User account is inactive');
+
+    let authenticated = false;
+    if (user.authType === 'LOCAL') {
+      if (!user.passwordHash) throw new UnauthorizedException('Invalid credentials');
+      authenticated = await bcrypt.compare(dto.password, user.passwordHash);
+    } else {
+      authenticated = await this.bindToAd(dto.username, dto.password);
+    }
+    if (!authenticated) throw new UnauthorizedException('Invalid credentials');
 
     await this.prisma.user.update({
       where: { id: user.id },
