@@ -6,6 +6,37 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-19 — CI workflow YAML fix (heredoc indent inside block scalar)
+
+**Date/time:** 2026-05-19  
+**Agent/task:** First push of `develop` triggered run `26090377501` which rejected at parse time (0s duration, "This run likely failed because of a workflow file issue"). Diagnose and fix.
+
+**Files changed:**
+- `.github/workflows/e2e.yml` (lines 19-43 heredoc body re-indented)
+
+**Root cause:**
+The `Create .env for docker compose` step used `run: |` (YAML literal block scalar). YAML decides the strip-prefix from the indent of the first non-empty content line — in this case 10 spaces (`          cat > ...`). The subsequent env-var lines were at column 0, which is LESS than the strip prefix, so the YAML parser ended the block scalar after the single `cat` line and tried to parse `POSTGRES_USER=ctmp` as a root-level YAML mapping key — rejected, workflow never queued.
+
+The previous handover entry (CI e2e pipeline) noted "content at column 0 — required by shell `<< 'EOF'`; GitHub Actions YAML is parsed as a block scalar so the content is valid even though indented YAML would reject column-0 lines". That note was wrong — YAML doesn't accept column-0 content inside a 10-space block scalar; it terminates the scalar.
+
+**Fix:**
+Indented the heredoc body (and the closing `EOF`) to the same column as the `cat` line. YAML's strip prefix removes the 10 spaces uniformly before bash sees the script, so the shell still reads a column-0 heredoc body terminated by a column-0 `EOF` — the resulting `.env` file contains no leading whitespace and `docker compose --env-file` is happy.
+
+Also tightened `<< 'EOF'` to `<<'EOF'` (no space — both work in bash, but the no-space form is the conventional spelling).
+
+**Verification:**
+- `python -c "import yaml; yaml.safe_load(open('.github/workflows/e2e.yml'))"` — parses without error.
+- Commit `4018f1e` pushed to `origin/develop` — should trigger a new CI run.
+
+**Open questions:**
+- Has the new run booted the full Docker stack on `ubuntu-latest` runners? Health-wait loops were not exercised on the first attempt. Watch this run for timing failures (postgres / api / web-admin / web-vendor each have 30 × 5 s windows).
+
+**Next recommended step:**
+1. Check the new run's status (`gh run list --branch develop --repo ghuffy11-lgtm/ctmp-platform`). If it green-lights, mark Task 7 truly closed and move on to the three remaining Phase 7 e2e specs.
+2. If the new run fails on a downstream step (build / health / test), capture logs via `gh run view <id> --log-failed` and iterate.
+
+---
+
 ## 2026-05-19 — Session cleanup: audit perm alignment, late-exception link + audit, multi-vendor seed, sidebar badge, tracker hygiene
 
 **Date/time:** 2026-05-19  
