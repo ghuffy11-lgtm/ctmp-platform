@@ -20,6 +20,11 @@ const ADMIN = {
   password: 'QaPass!2026',
   displayName: 'QA Commercial-Visibility Admin',
 };
+const ADMIN_SECOND = {
+  email: 'qa-cv-admin-2@hadiclinic.com.kw',
+  password: 'QaPass!2026',
+  displayName: 'QA Commercial-Visibility Admin 2',
+};
 const VENDOR = {
   email: 'qa-cv-vendor@example.com',
   password: 'QaPass!2026',
@@ -34,11 +39,13 @@ const TENDER = {
 
 test.describe.serial('Commercial visibility permission matrix', () => {
   let adminUserId: string;
+  let secondAdminUserId: string;
   let tenderId: string;
   let bidId: string;
 
   test.beforeAll(async () => {
     adminUserId = await ensureAdminUser(ADMIN);
+    secondAdminUserId = await ensureAdminUser(ADMIN_SECOND);
     tenderId = await ensurePublishedTender({
       reference: TENDER.reference,
       title: TENDER.title,
@@ -89,7 +96,7 @@ test.describe.serial('Commercial visibility permission matrix', () => {
         method: 'POST',
         body: JSON.stringify({
           scheduledAt: new Date().toISOString(),
-          memberIds: [adminUserId, adminUserId],
+          memberIds: [adminUserId, secondAdminUserId],
         }),
       },
     );

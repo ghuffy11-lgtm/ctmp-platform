@@ -35,7 +35,12 @@ export default function VendorRegisterPage() {
     setLoading(true);
     setError(null);
     try {
-      await post('/vendor-auth/register', { ...form, captchaToken });
+      await post('/vendor-auth/register', {
+        companyName: form.companyName,
+        email: form.contactEmail,
+        password: form.password,
+        captchaToken,
+      });
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');

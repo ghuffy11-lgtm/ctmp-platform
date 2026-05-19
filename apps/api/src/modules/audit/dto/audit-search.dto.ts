@@ -35,5 +35,5 @@ export class AuditSearchDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  limit?: number = 50;
+  pageSize?: number = 50;
 }
