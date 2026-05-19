@@ -125,7 +125,7 @@ export async function authFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
-  return fetch(`${API_BASE}/api${path}`, {
+  return fetch(`${API_BASE}/api/v1${path}`, {
     ...init,
     headers: {
       ...(init.headers ?? {}),

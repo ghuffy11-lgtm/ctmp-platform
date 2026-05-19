@@ -30,7 +30,7 @@ jobs:
           VENDOR_JWT_REFRESH_SECRET=ci-vendor-jwt-refresh-only-32ch
           SMTP_HOST=mailhog
           SMTP_PORT=1025
-          CAPTCHA_PROVIDER=none
+          CAPTCHA_PROVIDER=stub
           CAPTCHA_SECRET_KEY=
           AUDIT_VERIFY_ON_START=false
           STORAGE_DRIVER=local

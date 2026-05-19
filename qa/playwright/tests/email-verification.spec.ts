@@ -24,8 +24,7 @@ test.describe.serial('Vendor email verification round-trip via MailHog', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         companyName: VENDOR.companyName,
-        contactFullName: VENDOR.contactName,
-        contactEmail: VENDOR.email,
+        email: VENDOR.email,
         password: VENDOR.password,
         captchaToken: 'qa-fixture-captcha-token',
       }),
