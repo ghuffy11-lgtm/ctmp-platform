@@ -132,7 +132,7 @@ export default function ReportsPage() {
     const token = getAccessToken();
     // Streaming download — open in new tab with Authorization header is awkward;
     // here we use fetch + blob to preserve auth.
-    fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}/api/reports/jobs/${job.id}/download`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}/api/v1/reports/jobs/${job.id}/download`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       credentials: 'include',
     })

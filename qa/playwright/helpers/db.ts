@@ -46,13 +46,13 @@ export async function ensureAdminUser(args: {
 
     // System Admin role (seeded by 001_baseline_roles_permissions.sql in real envs).
     let roleRow = await client.query<{ id: string }>(
-      `SELECT id FROM roles WHERE code = 'system_admin' LIMIT 1`,
+      `SELECT id FROM roles WHERE code = 'SYSTEM_ADMIN' LIMIT 1`,
     );
     let roleId: string;
     if (roleRow.rowCount === 0) {
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO roles (id, code, name, description, is_system, created_at)
-         VALUES (gen_random_uuid(), 'system_admin', 'System Admin', 'Full system access', true, now())
+         VALUES (gen_random_uuid(), 'SYSTEM_ADMIN', 'System Admin', 'Full system access', true, now())
          RETURNING id`,
       );
       roleId = inserted.rows[0].id;

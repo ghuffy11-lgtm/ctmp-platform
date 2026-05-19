@@ -6,6 +6,7 @@ import { VendorAuthService } from './vendor-auth.service';
 import { PrismaService } from '../../database/prisma.service';
 import { CaptchaService } from '../../common/services/captcha.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AuditService } from '../audit/audit.service';
 
 // ------------------------------------------------------------------
 // Mock bcrypt
@@ -112,6 +113,7 @@ const configMock = {
 
 const captchaMock = { validate: jest.fn() };
 const notificationsMock = { sendEmail: jest.fn() };
+const auditMock = { log: jest.fn() };
 
 // ------------------------------------------------------------------
 // Suite
@@ -126,6 +128,7 @@ describe('VendorAuthService', () => {
     jwtMock.sign.mockReturnValue('mock.token');
     captchaMock.validate.mockResolvedValue({ verified: true, logId: BigInt(42) });
     notificationsMock.sendEmail.mockResolvedValue(undefined);
+    auditMock.log.mockResolvedValue(undefined);
     prismaMock.$transaction.mockImplementation(async (cb: any) => cb(prismaMock));
 
     const module: TestingModule = await Test.createTestingModule({
@@ -136,6 +139,7 @@ describe('VendorAuthService', () => {
         { provide: ConfigService, useValue: configMock },
         { provide: CaptchaService, useValue: captchaMock },
         { provide: NotificationsService, useValue: notificationsMock },
+        { provide: AuditService, useValue: auditMock },
       ],
     }).compile();
 
