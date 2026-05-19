@@ -87,7 +87,7 @@ test.describe.serial('Golden path — register → bid → evaluate → award', 
     await page.waitForURL(/dashboard|tenders/, { timeout: 15_000 });
 
     await page.goto(`${ADMIN_BASE}/vendors`);
-    await expect(page.getByText(VENDOR.company)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(VENDOR.company).first()).toBeVisible({ timeout: 10_000 });
     await page.getByText(VENDOR.company).first().click();
     await page.getByRole('button', { name: /Approve Vendor/i }).click();
     await page.getByRole('button', { name: /OK|Yes|Confirm/i }).click().catch(() => {});
