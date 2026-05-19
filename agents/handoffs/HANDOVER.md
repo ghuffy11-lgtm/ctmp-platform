@@ -6,6 +6,57 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-19 — Phase 7 e2e: vendor-registration CAPTCHA spec added
+
+**Date/time:** 2026-05-19 (same session as warm-up cleanups below)
+**Agent/task:** Land tracker item 294 — vendor-registration CAPTCHA e2e.
+
+**Files changed:**
+- `qa/playwright/tests/vendor-registration-captcha.spec.ts` — new spec, 4 serial cases against `POST /api/v1/vendor-auth/register` using the stub CAPTCHA provider (`apps/api/src/common/services/captcha.service.ts:46-52`: empty/`'invalid'` fail, anything else succeeds).
+
+**Spec coverage:**
+1. Missing `captchaToken` → 400 from DTO `@IsNotEmpty` (validation pipe rejects before the service runs, so no `captcha_verification_logs` row is written).
+2. `captchaToken: 'invalid'` → 400 with `CAPTCHA verification failed`; one new `FAILURE` row written; no `vendor_users` row created.
+3. Valid token → 201 + `PENDING_VERIFICATION`; one new `SUCCESS` row; the new `vendor_registration_requests` row resolves `captcha_verification_id` to a `SUCCESS` row stamped `provider='stub'`. Confirms the integrity-of-evidence link spec §11 requires (every self-registration is FK-bound to a captcha attempt).
+4. Replay of same email → 400 "Email already registered".
+
+**Why:** Closes Phase 7 e2e item 294. The CAPTCHA gate is one of the project's non-negotiable business rules (CLAUDE.md "Vendor self-registration **requires CAPTCHA** validated server-side, plus rate limiting and email verification"). Without a regression spec the FK between `vendor_registration_requests.captcha_verification_id` and the log row could quietly rot.
+
+**Verification:**
+- `pnpm exec tsc --noEmit` clean in `qa/playwright`.
+- Docker stack not running locally; CI run on the next push to `develop` exercises the spec inside the existing e2e workflow (`.github/workflows/e2e.yml`).
+
+**Open questions:**
+- Stub provider is permissive (any non-empty non-`'invalid'` token passes). Real provider switch (`captcha.provider=hcaptcha` etc.) still TODO at `captcha.service.ts:50`. Spec is provider-agnostic on the SUCCESS path.
+
+**Next recommended step:** Pick up tracker item 295 (vendor password-reset e2e) — MailHog plumbing is already proven by `email-verification.spec.ts`.
+
+---
+
+## 2026-05-19 — Warm-up cleanups: four follow-ups closed
+
+**Date/time:** 2026-05-19 (post-CI-green continuation)
+**Agent/task:** Knock out the cheap follow-ups queued by the previous handover before starting the next big track.
+
+**Files changed:**
+- `qa/playwright/helpers/db.ts:49,55` — role lookup + insert now use canonical `SYSTEM_ADMIN` (was lowercase `system_admin`, which collided with the role seeded by `001_baseline_roles_permissions.sql` and left a duplicate "system_admin" role row behind on every CI run).
+- `apps/web-admin/src/components/layout/Sidebar.tsx:62-73` — logout `fetch` now targets `${NEXT_PUBLIC_API_URL}/api/v1/auth/logout` with the bearer header, instead of relative `/api/auth/logout` (which 404'd against the Next host). Tokens still get cleared client-side regardless of the API response.
+- `apps/web-admin/src/app/(admin)/reports/page.tsx:135` — `/api/reports/jobs/.../download` → `/api/v1/reports/jobs/.../download`. Matches the URI versioning enabled in `apps/api/src/main.ts:19`.
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.spec.ts` — added `AuditService` import + `auditMock = { log: jest.fn() }` + provider registration. `VendorAuthService` constructor takes the audit service (used in `updateProfile` at `vendor-auth.service.ts:412`) and was throwing `Nest can't resolve dependencies` for every test. All 34 tests now pass in 11s.
+
+**Why:** Each item was a 30-second mechanical fix that the previous handover queued as "known follow-ups for next session." Cumulatively they restore the vendor-auth unit suite (was 34/34 failing) and fix two production bugs in admin UI (logout 404, reports download 404). Cleanup before tackling the three remaining Phase 7 e2e specs.
+
+**Verification:**
+- `pnpm exec jest src/modules/vendor-auth/vendor-auth.service.spec.ts` → `34 passed, 34 total` in `apps/api`.
+- `pnpm exec tsc --noEmit` clean in `apps/web-admin` and `qa/playwright`.
+- Sidebar `token` (line 30) still in scope when used inside `handleLogout` headers.
+
+**Open questions:** None.
+
+**Next recommended step:** Pick up one of the three remaining Phase 7 tracker items — `tracker:294` vendor-registration CAPTCHA e2e, `tracker:295` vendor password-reset e2e, or `tracker:296` report-exports e2e.
+
+---
+
 ## 2026-05-19 — CI fully green: 17/17 e2e tests passing on develop
 
 **Date/time:** 2026-05-19 (continuation; final CI run 26115367061 in 6m36s)
