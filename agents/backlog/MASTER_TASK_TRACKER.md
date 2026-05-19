@@ -306,3 +306,21 @@ When a task is completed, add a short completion note with date and key files.
 - [ ] Keep `docs/decisions/DECISION_LOG.md` updated after decisions.
 - [ ] Keep `agents/skills/PROJECT_SKILLS.md` updated with reusable patterns.
 - [ ] Keep this task tracker updated.
+
+## Phase 8+ Follow-ups (queued from Phase 7 session notes)
+
+These items emerged during Phase 7 QA work but are out of scope for Phase 7 completion. Queue for Phase 8 or Phase 9 depending on priority.
+
+- [ ] **#7 (Medium)** — GET /tenders vendor-visibility filter. Currently `@Public() @UseGuards(OptionalVendorOrUserGuard)` accepts vendor JWT, but server-side filtering (only PUBLIC visibility + PUBLISHED/CLARIFICATION_PERIOD status) not yet enforced. Vendor list returns all tenders. Spec §3.1 visibility rules apply. Tighten when vendor tender list UI hardens.
+  - Location: `apps/api/src/modules/tenders/tenders.service.ts:findAll()`.
+  - Impact: vendor portal currently sees tenders they shouldn't.
+  
+- [ ] **#8 (Medium)** — AuthService.login LOCAL auth branch missing brute-force protection. `vendor-auth.service.ts` has `failedLoginCount` + `lockedUntil` + lockout backoff; `auth.service.ts` LOGIN path for LOCAL users never increments counter or honors lock. Inconsistent security posture between vendor (bcrypt) + admin (AD bind) auth.
+  - Location: `apps/api/src/modules/auth/auth.service.ts:login()`, lines ~60–80.
+  - Impact: LOCAL admin users not subject to brute-force rate limiting.
+
+- [ ] **#9 (Low)** — Vendor registration form collects 9 fields (companyName, registrationNumber, taxNumber, country, address, phone, contactEmail, contactFullName, contactPhone) but only sends 4 to the API (companyName, email, password, captchaToken). Either extend `VendorRegisterDto` + `vendor-auth.service.register()` to persist the 7 fields, or trim the form UI.
+  - Location: `apps/web-vendor/src/app/register/page.tsx` (lines 8–19) + `apps/api/src/modules/vendor-auth/dto/vendor-register.dto.ts`.
+  - Impact: form UX collects data that's silently dropped; vendor profile incomplete unless added later via `/vendor-auth/me` PATCH.
+  
+- [ ] **#10 (Done)** — vendor-auth.service.spec.ts 34/34 red. **FIXED 2026-05-19**: added `AuditService` mock provider. All 34 tests now pass in 11s.
