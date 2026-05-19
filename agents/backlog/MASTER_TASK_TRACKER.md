@@ -315,9 +315,13 @@ These items emerged during Phase 7 QA work but are out of scope for Phase 7 comp
   - Location: `apps/api/src/modules/tenders/tenders.service.ts:findAll()`.
   - Impact: vendor portal currently sees tenders they shouldn't.
   
-- [ ] **#8 (Medium)** — AuthService.login LOCAL auth branch missing brute-force protection. `vendor-auth.service.ts` has `failedLoginCount` + `lockedUntil` + lockout backoff; `auth.service.ts` LOGIN path for LOCAL users never increments counter or honors lock. Inconsistent security posture between vendor (bcrypt) + admin (AD bind) auth.
-  - Location: `apps/api/src/modules/auth/auth.service.ts:login()`, lines ~60–80.
-  - Impact: LOCAL admin users not subject to brute-force rate limiting.
+- [x] **#8 (Medium)** — AuthService.login LOCAL auth branch missing brute-force protection. **FIXED 2026-05-19**
+  - Migration 006 adds `failed_login_count` + `locked_until` to users table (matching vendor_users pattern).
+  - Prisma schema updated with new User model fields.
+  - auth.service.ts `login()` now: checks lockedUntil for LOCAL auth, calls recordFailedLogin on failed password, resets counters on successful login.
+  - New helper `recordFailedLogin()` mirrors vendor-auth pattern (configurable maxFailedLogins=5, lockoutMinutes=15).
+  - 6 new unit tests cover LOCAL auth lockout scenarios; all 25 auth.service tests passing.
+  - Impact: LOCAL admin users now subject to same brute-force rate limiting as vendor users.
 
 - [ ] **#9 (Low)** — Vendor registration form collects 9 fields (companyName, registrationNumber, taxNumber, country, address, phone, contactEmail, contactFullName, contactPhone) but only sends 4 to the API (companyName, email, password, captchaToken). Either extend `VendorRegisterDto` + `vendor-auth.service.register()` to persist the 7 fields, or trim the form UI.
   - Location: `apps/web-vendor/src/app/register/page.tsx` (lines 8–19) + `apps/api/src/modules/vendor-auth/dto/vendor-register.dto.ts`.

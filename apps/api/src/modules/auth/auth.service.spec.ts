@@ -38,6 +38,8 @@ const baseUser = {
   mfaEnabled: false,
   mfaSecret: null,
   tokenVersion: 0,
+  failedLoginCount: 0,
+  lockedUntil: null,
   status: 'ACTIVE',
   lastLoginAt: null,
 };
@@ -50,6 +52,7 @@ const inactiveUser = { ...baseUser, id: 'user-uuid-3', status: 'INACTIVE' };
 // -------------------------------------------------------------------
 const prismaMock = {
   user: {
+    findFirst: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
   },
@@ -72,6 +75,8 @@ const configMock = {
       'jwt.expiresIn': '8h',
       'jwt.refreshSecret': 'test-refresh-secret',
       'jwt.refreshExpiresIn': '7d',
+      'auth.maxFailedLogins': '5',
+      'auth.lockoutMinutes': '15',
     };
     return cfg[key];
   }),
@@ -109,7 +114,7 @@ describe('AuthService', () => {
   // -----------------------------------------------------------------
   describe('login', () => {
     it('returns access and refresh tokens when AD credentials valid and MFA disabled', async () => {
-      prismaMock.user.findUnique.mockResolvedValue(baseUser);
+      prismaMock.user.findFirst.mockResolvedValue(baseUser);
       jwtMock.sign
         .mockReturnValueOnce('access.token')
         .mockReturnValueOnce('refresh.token');
@@ -152,7 +157,8 @@ describe('AuthService', () => {
     });
 
     it('returns requiresMfa true and tempToken when user has MFA enabled', async () => {
-      prismaMock.user.findUnique.mockResolvedValue(mfaUser);
+      prismaMock.user.findFirst.mockResolvedValue(mfaUser);
+      prismaMock.user.update.mockResolvedValue(mfaUser);
       jwtMock.sign.mockReturnValueOnce('temp.mfa.token');
 
       const result = await service.login({ username: 'mfauser', password: 'P@ssw0rd' });
@@ -169,17 +175,89 @@ describe('AuthService', () => {
     });
 
     it('throws UnauthorizedException when user not found in database', async () => {
-      prismaMock.user.findUnique.mockResolvedValue(null);
+      prismaMock.user.findFirst.mockResolvedValue(null);
 
       await expect(service.login({ username: 'nobody', password: 'P@ssw0rd' }))
         .rejects.toThrow(UnauthorizedException);
     });
 
     it('throws UnauthorizedException when user account is inactive', async () => {
-      prismaMock.user.findUnique.mockResolvedValue(inactiveUser);
+      prismaMock.user.findFirst.mockResolvedValue(inactiveUser);
 
       await expect(service.login({ username: 'jdoe', password: 'P@ssw0rd' }))
         .rejects.toThrow(UnauthorizedException);
+    });
+
+    // LOCAL auth brute-force protection
+    it('allows LOCAL auth user with correct password', async () => {
+      const localUser = { ...baseUser, authType: 'LOCAL', passwordHash: await require('bcrypt').hash('password123', 10) };
+      prismaMock.user.findFirst.mockResolvedValue(localUser);
+      jwtMock.sign.mockReturnValueOnce('access.token').mockReturnValueOnce('refresh.token');
+
+      const result = await service.login({ username: 'localuser', password: 'password123' });
+
+      expect(result).toMatchObject({ accessToken: 'access.token', refreshToken: 'refresh.token' });
+      expect(prismaMock.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ failedLoginCount: 0, lockedUntil: null }),
+        }),
+      );
+    });
+
+    it('increments failedLoginCount and throws for LOCAL auth with wrong password', async () => {
+      const localUser = { ...baseUser, authType: 'LOCAL', passwordHash: '$2b$10$invalid', failedLoginCount: 0, lockedUntil: null };
+      prismaMock.user.findFirst.mockResolvedValue(localUser);
+
+      await expect(service.login({ username: 'localuser', password: 'wrongpassword' }))
+        .rejects.toThrow(UnauthorizedException);
+
+      expect(prismaMock.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ failedLoginCount: { increment: 1 } }),
+        }),
+      );
+    });
+
+    it('locks LOCAL auth user after max failed login attempts', async () => {
+      const localUser = { ...baseUser, authType: 'LOCAL', passwordHash: '$2b$10$invalid', failedLoginCount: 4, lockedUntil: null };
+      prismaMock.user.findFirst.mockResolvedValue(localUser);
+
+      await expect(service.login({ username: 'localuser', password: 'wrongpassword' }))
+        .rejects.toThrow(UnauthorizedException);
+
+      expect(prismaMock.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            failedLoginCount: { increment: 1 },
+            lockedUntil: expect.any(Date),
+          }),
+        }),
+      );
+    });
+
+    it('throws UnauthorizedException when LOCAL auth user is temporarily locked', async () => {
+      const futureDate = new Date(Date.now() + 15 * 60 * 1000);
+      const lockedUser = { ...baseUser, authType: 'LOCAL', lockedUntil: futureDate };
+      prismaMock.user.findFirst.mockResolvedValue(lockedUser);
+
+      await expect(service.login({ username: 'localuser', password: 'password123' }))
+        .rejects.toThrow('Account temporarily locked');
+
+      expect(prismaMock.user.update).not.toHaveBeenCalled();
+    });
+
+    it('resets failedLoginCount to 0 on successful LOCAL auth login', async () => {
+      const localUser = { ...baseUser, authType: 'LOCAL', passwordHash: await require('bcrypt').hash('password123', 10), failedLoginCount: 3, lockedUntil: null };
+      prismaMock.user.findFirst.mockResolvedValue(localUser);
+      jwtMock.sign.mockReturnValueOnce('access.token').mockReturnValueOnce('refresh.token');
+
+      await service.login({ username: 'localuser', password: 'password123' });
+
+      expect(prismaMock.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ failedLoginCount: 0 }),
+        }),
+      );
     });
   });
 

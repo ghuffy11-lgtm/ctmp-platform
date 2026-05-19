@@ -25,18 +25,28 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('Invalid credentials');
     if (user.status !== 'ACTIVE') throw new UnauthorizedException('User account is inactive');
 
+    // Check lockout for LOCAL auth users
+    if (user.authType === 'LOCAL' && user.lockedUntil && user.lockedUntil > new Date()) {
+      throw new UnauthorizedException('Account temporarily locked');
+    }
+
     let authenticated = false;
     if (user.authType === 'LOCAL') {
       if (!user.passwordHash) throw new UnauthorizedException('Invalid credentials');
       authenticated = await bcrypt.compare(dto.password, user.passwordHash);
+      if (!authenticated) {
+        await this.recordFailedLogin(user);
+        throw new UnauthorizedException('Invalid credentials');
+      }
     } else {
       authenticated = await this.bindToAd(dto.username, dto.password);
+      if (!authenticated) throw new UnauthorizedException('Invalid credentials');
     }
-    if (!authenticated) throw new UnauthorizedException('Invalid credentials');
 
+    // Reset failed login count on successful auth
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { lastLoginAt: new Date() },
+      data: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: new Date() },
     });
 
     if (user.mfaEnabled) {
@@ -139,6 +149,21 @@ export class AuthService {
     return userRoles.flatMap((ur: any) =>
       ur.role.rolePermissions.map((rp: any) => rp.permission.code as string),
     );
+  }
+
+  private async recordFailedLogin(user: { id: string; failedLoginCount: number }) {
+    const max = Number(this.config.get<string>('auth.maxFailedLogins') ?? 5);
+    const lockoutMin = Number(this.config.get<string>('auth.lockoutMinutes') ?? 15);
+    const nextCount = user.failedLoginCount + 1;
+    const lock = nextCount >= max ? new Date(Date.now() + lockoutMin * 60 * 1000) : null;
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginCount: { increment: 1 },
+        lockedUntil: lock,
+      },
+    });
   }
 
   private async bindToAd(username: string, password: string): Promise<boolean> {

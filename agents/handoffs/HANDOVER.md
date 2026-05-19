@@ -6,6 +6,36 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-19 — Phase 8+ Follow-up #8: Brute-force protection for LOCAL auth users
+
+**Date/time:** 2026-05-19, 22:26 GMT+3
+**Agent/task:** Phase 8+ Follow-up #8 — AuthService LOCAL auth brute-force protection.
+
+**Files changed:**
+- `database/migrations/006_user_brute_force_protection.sql` — new migration adding `failed_login_count` (INT, default 0) + `locked_until` (TIMESTAMPTZ, nullable) to users table; partial index on locked_until.
+- `apps/api/prisma/schema.prisma` — User model: added `failedLoginCount` and `lockedUntil` fields.
+- `apps/api/src/modules/auth/auth.service.ts` — `login()` method: lockout check before password verify (LOCAL only), `recordFailedLogin()` on failed attempt, reset counters on success. New private `recordFailedLogin(user)` helper mirrors vendor-auth pattern (maxFailedLogins=5, lockoutMinutes=15).
+- `apps/api/src/modules/auth/auth.service.spec.ts` — updated fixtures (added `failedLoginCount`, `lockedUntil` to baseUser); added `findFirst` mock; added 6 new unit tests (LOCAL correct password, LOCAL wrong password, LOCAL lockout, LOCAL locked check, reset counters on success); all 25 tests passing.
+
+**Justification:**
+LOCAL auth users (internal system admin accounts) were missing brute-force rate limiting that vendor users already have. Inconsistent security posture. This fix applies the same lockout logic: after N failed attempts (configurable, default 5), account locks for M minutes (configurable, default 15).
+
+**Testing:**
+- All 25 auth.service.spec tests pass.
+- 6 new tests cover: correct password accept, wrong password rejection + counter, max attempt lockout, locked user rejection, counter reset on success.
+- TypeScript clean across @ctmp/api.
+
+**Verification:**
+- Migration 006 creates columns in correct state (zero failures, no lock initially).
+- Prisma client regenerated and tsc passes.
+- Config keys `auth.maxFailedLogins` + `auth.lockoutMinutes` picked up from app config (defaults 5 + 15).
+
+**Open questions:** None — follows vendor-auth pattern exactly.
+
+**Next recommended step:** #7 (vendor-visibility filter on GET /tenders) or #9 (form field mismatch). #7 is Medium priority and affects vendor portal access control.
+
+---
+
 ## 2026-05-19 — Phase 7 e2e complete: all 3 remaining specs landed
 
 **Date/time:** 2026-05-19 (continuation)
