@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { post } from '@/lib/api';
 import { setTokens } from '@/lib/auth';
@@ -14,6 +14,9 @@ interface LoginResponse {
 
 export default function LoginPage() {
   const router = useRouter();
+  const usernameId = useId();
+  const passwordId = useId();
+  const mfaCodeId = useId();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [mfaCode, setMfaCode] = useState('');
@@ -71,8 +74,10 @@ export default function LoginPage() {
         {!mfaRequired ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+              <label htmlFor={usernameId} className="block text-sm font-medium text-gray-700 mb-1">Username</label>
               <input
+                id={usernameId}
+                aria-label="Username"
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -82,8 +87,10 @@ export default function LoginPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <label htmlFor={passwordId} className="block text-sm font-medium text-gray-700 mb-1">Password</label>
               <input
+                id={passwordId}
+                aria-label="Password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -112,8 +119,10 @@ export default function LoginPage() {
               </p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Verification Code</label>
+              <label htmlFor={mfaCodeId} className="block text-sm font-medium text-gray-700 mb-1">Verification Code</label>
               <input
+                id={mfaCodeId}
+                aria-label="Verification Code"
                 type="text"
                 value={mfaCode}
                 onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}

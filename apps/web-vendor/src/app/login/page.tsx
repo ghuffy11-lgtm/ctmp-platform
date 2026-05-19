@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { post } from '@/lib/api';
@@ -15,6 +15,8 @@ interface LoginResponse {
 
 export default function VendorLoginPage() {
   const router = useRouter();
+  const emailId = useId();
+  const passwordId = useId();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mfaCode, setMfaCode] = useState('');
@@ -77,8 +79,10 @@ export default function VendorLoginPage() {
         {!mfaSession ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">Email</label>
+              <label htmlFor={emailId} className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">Email</label>
               <input
+                id={emailId}
+                aria-label="Email"
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
@@ -87,8 +91,10 @@ export default function VendorLoginPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">Password</label>
+              <label htmlFor={passwordId} className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">Password</label>
               <input
+                id={passwordId}
+                aria-label="Password"
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
