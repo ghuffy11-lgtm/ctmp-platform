@@ -311,9 +311,15 @@ When a task is completed, add a short completion note with date and key files.
 
 These items emerged during Phase 7 QA work but are out of scope for Phase 7 completion. Queue for Phase 8 or Phase 9 depending on priority.
 
-- [ ] **#7 (Medium)** — GET /tenders vendor-visibility filter. Currently `@Public() @UseGuards(OptionalVendorOrUserGuard)` accepts vendor JWT, but server-side filtering (only PUBLIC visibility + PUBLISHED/CLARIFICATION_PERIOD status) not yet enforced. Vendor list returns all tenders. Spec §3.1 visibility rules apply. Tighten when vendor tender list UI hardens.
-  - Location: `apps/api/src/modules/tenders/tenders.service.ts:findAll()`.
-  - Impact: vendor portal currently sees tenders they shouldn't.
+- [x] **#7 (Medium)** — GET /tenders vendor-visibility filter. **FIXED 2026-05-19**
+  - tenders.controller.ts: `findAll()` and `findOne()` now pass @CurrentUser() to service methods.
+  - tenders.service.ts:
+    - `findAll(query, user?)` applies AND filter for vendors: `visibility = PUBLIC` AND `status IN (PUBLISHED, CLARIFICATION_PERIOD)`.
+    - `findOne(id, user?)` checks vendor access; throws 403 if tender not accessible.
+  - Admin users see all tenders (no visibility filter applied).
+  - Spec §3.1 visibility rules now enforced at API boundary.
+  - TypeScript clean across all 3 apps.
+  - Impact: Vendors now correctly restricted to PUBLIC tenders in PUBLISHED/CLARIFICATION_PERIOD states.
   
 - [x] **#8 (Medium)** — AuthService.login LOCAL auth branch missing brute-force protection. **FIXED 2026-05-19**
   - Migration 006 adds `failed_login_count` + `locked_until` to users table (matching vendor_users pattern).

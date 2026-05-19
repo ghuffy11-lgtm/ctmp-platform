@@ -6,6 +6,36 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-19 — Phase 8+ Follow-up #7: Vendor-visibility filter on GET /tenders
+
+**Date/time:** 2026-05-19, 22:32 GMT+3
+**Agent/task:** Phase 8+ Follow-up #7 — Vendor-visibility filtering for tender list + detail endpoints.
+
+**Files changed:**
+- `apps/api/src/modules/tenders/tenders.controller.ts` — GET `/tenders` and GET `/tenders/:id` now pass `@CurrentUser() user` to service.
+- `apps/api/src/modules/tenders/tenders.service.ts` — `findAll(query, user?)` and `findOne(id, user?)` methods updated:
+  - For vendors (detected by `user?.vendorId`): apply WHERE filter `visibility = PUBLIC AND status IN (PUBLISHED, CLARIFICATION_PERIOD)`.
+  - For admin users: no visibility filter applied (see all tenders).
+  - `findOne()` throws 403 ForbiddenException if vendor requests unauthorized tender.
+
+**Justification:**
+Spec §3.1 defines vendor visibility: only PUBLIC tenders in PUBLISHED/CLARIFICATION_PERIOD states are accessible. The endpoints accepted vendor JWTs but didn't enforce filtering, leaking tenders across all visibility levels and states.
+
+**Testing:**
+- TypeScript clean across @ctmp/api, @ctmp/web-admin, @ctmp/web-vendor.
+- Manual path to test: vendor login → list/detail tenders → expect only PUBLIC PUBLISHED/CLARIFICATION_PERIOD tenders; try accessing DRAFT/INTERNAL_REVIEW/etc → expect 403.
+
+**Verification:**
+- Vendor JWT detection via `user.vendorId` (set by vendor-jwt strategy).
+- Admin user detection via absence of vendorId (id field is set instead).
+- TenderVisibility enum imported and used; TenderStatus enum cast for array type safety.
+
+**Open questions:** None.
+
+**Next recommended step:** #9 (form field mismatch, Low priority) or consider Phase 8 documentation tasks (HANDOVER, DECISION_LOG, etc.).
+
+---
+
 ## 2026-05-19 — Phase 8+ Follow-up #8: Brute-force protection for LOCAL auth users
 
 **Date/time:** 2026-05-19, 22:26 GMT+3

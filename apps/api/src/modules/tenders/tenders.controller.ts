@@ -22,8 +22,8 @@ export class TendersController {
   @Public()
   @UseGuards(OptionalVendorOrUserGuard)
   @ApiOperation({ operationId: 'listTenders', summary: 'List tenders with filters (accessible to vendors for published browsing)' })
-  findAll(@Query() query: ListTendersDto) {
-    return this.tendersService.findAll(query);
+  findAll(@Query() query: ListTendersDto, @CurrentUser() user: any) {
+    return this.tendersService.findAll(query, user);
   }
 
   @Post()
@@ -37,8 +37,8 @@ export class TendersController {
   @Public()
   @UseGuards(OptionalVendorOrUserGuard)
   @ApiOperation({ operationId: 'getTender', summary: 'Get tender detail (accessible to vendors for published tenders)' })
-  findOne(@Param('id') id: string) {
-    return this.tendersService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.tendersService.findOne(id, user);
   }
 
   @Patch(':id')

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { TenderStatus, AuditRiskLevel, Prisma } from '@prisma/client';
+import { TenderStatus, TenderVisibility, AuditRiskLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateTenderDto } from './dto/create-tender.dto';
@@ -40,12 +40,20 @@ export class TendersService {
     private readonly audit: AuditService,
   ) {}
 
-  async findAll(query: ListTendersDto) {
+  async findAll(query: ListTendersDto, user?: any) {
     const where: Prisma.TenderWhereInput = {};
     if (query.status && STATUS_API_TO_DB[query.status]) {
       where.status = STATUS_API_TO_DB[query.status];
     }
     if (query.departmentId) where.departmentId = query.departmentId;
+
+    // Vendor visibility filter: only PUBLIC visibility + PUBLISHED/CLARIFICATION_PERIOD status
+    if (user?.vendorId) {
+      where.AND = [
+        { visibility: TenderVisibility.PUBLIC },
+        { status: { in: [TenderStatus.PUBLISHED, TenderStatus.CLARIFICATION_PERIOD] } },
+      ];
+    }
 
     const page = Number(query.page ?? 1);
     const pageSize = Number(query.limit ?? 20);
@@ -70,7 +78,7 @@ export class TendersService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: any) {
     const tender = await this.prisma.tender.findUnique({
       where: { id },
       include: {
@@ -80,6 +88,15 @@ export class TendersService {
       },
     });
     if (!tender) throw new NotFoundException('Tender not found');
+
+    // Vendor visibility: only PUBLIC visibility + PUBLISHED/CLARIFICATION_PERIOD status
+    if (user?.vendorId) {
+      const allowedStatuses = [TenderStatus.PUBLISHED, TenderStatus.CLARIFICATION_PERIOD] as TenderStatus[];
+      if (tender.visibility !== TenderVisibility.PUBLIC || !allowedStatuses.includes(tender.status)) {
+        throw new ForbiddenException('Tender not accessible to vendor');
+      }
+    }
+
     return this.serializeDetail(tender);
   }
 
