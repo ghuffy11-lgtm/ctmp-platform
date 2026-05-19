@@ -86,12 +86,20 @@ test.describe.serial('Golden path — register → bid → evaluate → award', 
     await page.getByRole('button', { name: /Sign In/i }).click();
     await page.waitForURL(/dashboard|tenders/, { timeout: 15_000 });
 
+    // Approve button uses window.confirm; Playwright dismisses by default,
+    // so install an accept handler before triggering the click.
+    page.on('dialog', dialog => dialog.accept());
+
     await page.goto(`${ADMIN_BASE}/vendors`);
     await expect(page.getByText(VENDOR.company).first()).toBeVisible({ timeout: 10_000 });
     await page.getByText(VENDOR.company).first().click();
     await page.getByRole('button', { name: /Approve Vendor/i }).click();
-    await page.getByRole('button', { name: /OK|Yes|Confirm/i }).click().catch(() => {});
-    // Approve dialog uses window.confirm — Playwright auto-accepts via dialog handler.
+
+    // Wait for the approval API request to complete + UI to reflect.
+    await page.waitForResponse(
+      resp => resp.url().includes('/vendors/') && resp.url().includes('/approve') && resp.status() === 200,
+      { timeout: 10_000 },
+    );
   });
 
   test('vendor logs in + submits bid', async ({ page }) => {
