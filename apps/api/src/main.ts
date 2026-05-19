@@ -14,7 +14,12 @@ async function bootstrap() {
   const apiPrefix = config.get<string>('app.apiPrefix', 'api');
 
   app.use(helmet());
-  app.enableCors({ origin: config.get<string[]>('app.corsOrigins', []) });
+  app.enableCors({
+    origin: config.get<string[]>('app.corsOrigins', []),
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
   app.setGlobalPrefix(apiPrefix);
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
 
