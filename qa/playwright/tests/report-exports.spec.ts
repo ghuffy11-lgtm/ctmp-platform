@@ -25,7 +25,7 @@ test.describe.serial('Report export enqueue → poll → download', () => {
       password: 'QaReportPass!2026',
       displayName: 'QA Report Admin',
     })) as unknown as string;
-    adminToken = signAdminToken(adminUserId) as unknown as string;
+    adminToken = await signAdminToken(adminUserId);
 
     tenderId = (await ensurePublishedTender({
       reference: `QA_REPORT_${Date.now()}`,
