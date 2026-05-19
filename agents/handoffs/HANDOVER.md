@@ -6,6 +6,29 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-19 — Phase 7 e2e: password-reset spec + CAPTCHA CI verification
+
+**Date/time:** 2026-05-19 (same session)
+**Agent/task:** Tracker item 295 (vendor password-reset e2e) + check CI from item 294 (CAPTCHA).
+
+**Files changed:**
+- `qa/playwright/tests/vendor-password-reset.spec.ts` — new spec, 5 serial cases for `POST /vendor-auth/forgot-password` → MailHog extraction → `POST /vendor-auth/reset-password` → login.
+
+**Spec coverage:**
+1. `forgot-password` with valid email → 204 (no body; security: don't leak email existence).
+2. Reset-password email lands in MailHog with token.
+3. `reset-password` with token + newPassword → 200; token row marked `usedAt`.
+4. Login with newPassword succeeds, returns `accessToken`.
+5. Replay of same token → 400 "already used|invalid".
+
+Spec setup: `ensureApprovedVendor` seeds initial password, test resets to new. Mirrors `email-verification.spec.ts` MailHog pattern.
+
+**CI Status:** CAPTCHA spec CI run 26118123911 pushed, awaiting completion (was in-progress when this started). Both specs queued in the next push.
+
+**Tracker** + **Handover** updated with this entry.
+
+---
+
 ## 2026-05-19 — Phase 7 e2e: vendor-registration CAPTCHA spec added
 
 **Date/time:** 2026-05-19 (same session as warm-up cleanups below)
