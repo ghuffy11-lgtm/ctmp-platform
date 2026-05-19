@@ -74,7 +74,7 @@ test.describe.serial('Late submission exception flow', () => {
         new Blob([env === 'TECHNICAL' ? TECHNICAL_FIXTURE : COMMERCIAL_FIXTURE], { type: 'text/plain' }),
         `${env.toLowerCase()}.txt`,
       );
-      const res = await fetch(`${API_BASE}/api/bids/${bid.id}/envelopes/${env}/documents`, {
+      const res = await fetch(`${API_BASE}/api/v1/bids/${bid.id}/envelopes/${env}/documents`, {
         method: 'POST',
         body: fd,
         headers: { Authorization: `Bearer ${vendorToken}` },
@@ -83,7 +83,7 @@ test.describe.serial('Late submission exception flow', () => {
     }
 
     // Submit should fail — past deadline, no exception.
-    const res = await fetch(`${API_BASE}/api/bids/${bid.id}/submit`, {
+    const res = await fetch(`${API_BASE}/api/v1/bids/${bid.id}/submit`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${vendorToken}`, 'Content-Type': 'application/json' },
       body: '{}',

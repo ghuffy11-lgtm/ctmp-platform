@@ -102,7 +102,7 @@ test.describe.serial('Multi-vendor competitive bidding', () => {
           new Blob([env === 'TECHNICAL' ? TECHNICAL_FIXTURE : COMMERCIAL_FIXTURE], { type: 'text/plain' }),
           `${v.label}-${env.toLowerCase()}.txt`,
         );
-        const res = await fetch(`${API_BASE}/api/bids/${bid.id}/envelopes/${env}/documents`, {
+        const res = await fetch(`${API_BASE}/api/v1/bids/${bid.id}/envelopes/${env}/documents`, {
           method: 'POST',
           body: fd,
           headers: { Authorization: `Bearer ${vendorToken}` },

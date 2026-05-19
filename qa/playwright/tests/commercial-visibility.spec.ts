@@ -66,7 +66,7 @@ test.describe.serial('Commercial visibility permission matrix', () => {
         new Blob([env === 'TECHNICAL' ? TECHNICAL_FIXTURE : COMMERCIAL_FIXTURE], { type: 'text/plain' }),
         `${env.toLowerCase()}.txt`,
       );
-      await fetch(`${API_BASE}/api/bids/${bidId}/envelopes/${env}/documents`, {
+      await fetch(`${API_BASE}/api/v1/bids/${bidId}/envelopes/${env}/documents`, {
         method: 'POST',
         body: fd,
         headers: { Authorization: `Bearer ${vendorToken}` },
@@ -127,7 +127,7 @@ test.describe.serial('Commercial visibility permission matrix', () => {
 
   test('admin WITHOUT commercial:view is rejected with 403', async () => {
     const token = signAdminTokenWithPermissions(adminUserId, ['tenders:list', 'tenders:read']);
-    const res = await fetch(`${API_BASE}/api/tenders/${tenderId}/commercial-comparison`, {
+    const res = await fetch(`${API_BASE}/api/v1/tenders/${tenderId}/commercial-comparison`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status, 'no commercial:view → 403').toBe(403);

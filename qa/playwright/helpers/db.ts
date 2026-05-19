@@ -89,7 +89,7 @@ export async function ensureAdminUser(args: {
     }
 
     await client.query(
-      `INSERT INTO user_departments (user_id, department_id, is_primary, joined_at)
+      `INSERT INTO user_departments (user_id, department_id, is_primary, assigned_at)
        VALUES ($1, $2, true, now()) ON CONFLICT DO NOTHING`,
       [userId, departmentId],
     );

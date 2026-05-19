@@ -74,7 +74,7 @@ export function signAdminTokenWithPermissions(userId: string, permissions: strin
 }
 
 export async function vendorLogin(email: string, password: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/vendor-auth/login`, {
+  const res = await fetch(`${API_BASE}/api/v1/vendor-auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),

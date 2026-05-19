@@ -19,7 +19,7 @@ test.describe.serial('Vendor email verification round-trip via MailHog', () => {
 
   test('register → email arrives → verify token clears email_verified_at NULL', async () => {
     // 1. Register the vendor through the public API.
-    const registerRes = await fetch(`${API_BASE}/api/vendor-auth/register`, {
+    const registerRes = await fetch(`${API_BASE}/api/v1/vendor-auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -57,7 +57,7 @@ test.describe.serial('Vendor email verification round-trip via MailHog', () => {
     expect(token, 'extracted token from email body').toMatch(/^[a-f0-9]{64}$/);
 
     // 3. Verify with the token.
-    const verifyRes = await fetch(`${API_BASE}/api/vendor-auth/verify-email`, {
+    const verifyRes = await fetch(`${API_BASE}/api/v1/vendor-auth/verify-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
