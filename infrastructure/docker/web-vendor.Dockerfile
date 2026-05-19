@@ -33,4 +33,4 @@ COPY --from=build /repo/apps/web-vendor/package.json /app/apps/web-vendor/packag
 COPY --from=build /repo/apps/web-vendor/next.config.ts /app/apps/web-vendor/next.config.ts
 WORKDIR /app/apps/web-vendor
 EXPOSE 4300
-CMD ["pnpm", "start"]
+CMD ["./node_modules/.bin/next", "start", "--port", "4300"]

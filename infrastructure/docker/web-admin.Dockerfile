@@ -33,4 +33,4 @@ COPY --from=build /repo/apps/web-admin/package.json /app/apps/web-admin/package.
 COPY --from=build /repo/apps/web-admin/next.config.ts /app/apps/web-admin/next.config.ts
 WORKDIR /app/apps/web-admin
 EXPOSE 4200
-CMD ["pnpm", "start"]
+CMD ["./node_modules/.bin/next", "start", "--port", "4200"]
