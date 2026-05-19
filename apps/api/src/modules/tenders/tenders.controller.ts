@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@ne
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { OptionalVendorOrUserGuard } from '../../common/guards/optional-vendor-or-user.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { TendersService } from './tenders.service';
@@ -17,8 +18,8 @@ export class TendersController {
   constructor(private readonly tendersService: TendersService) {}
 
   @Get()
-  @RequirePermissions('tender:view')
-  @ApiOperation({ operationId: 'listTenders', summary: 'List tenders with filters' })
+  @UseGuards(OptionalVendorOrUserGuard)
+  @ApiOperation({ operationId: 'listTenders', summary: 'List tenders with filters (accessible to vendors for published browsing)' })
   findAll(@Query() query: ListTendersDto) {
     return this.tendersService.findAll(query);
   }
@@ -31,8 +32,8 @@ export class TendersController {
   }
 
   @Get(':id')
-  @RequirePermissions('tender:view')
-  @ApiOperation({ operationId: 'getTender', summary: 'Get tender detail' })
+  @UseGuards(OptionalVendorOrUserGuard)
+  @ApiOperation({ operationId: 'getTender', summary: 'Get tender detail (accessible to vendors for published tenders)' })
   findOne(@Param('id') id: string) {
     return this.tendersService.findOne(id);
   }
