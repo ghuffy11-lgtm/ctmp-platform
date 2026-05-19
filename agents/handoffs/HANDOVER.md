@@ -6,6 +6,38 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-20 — Phase 8 QA & Security COMPLETE: 27/27 tests passing
+
+**Date/time:** 2026-05-20, 09:38 GMT+3
+**Agent/task:** Fix report-exports authorization test + confirm CI 27/27 pass.
+
+**Files changed:**
+- `qa/playwright/tests/report-exports.spec.ts` — line 181: added missing `await` on `signAdminToken(secondAdminId)` call (second admin token was Promise, not string).
+
+**Justification:**
+Report authorization test expected 403 Forbidden when a different user downloaded another user's report. Instead got 401 Unauthorized because the token was not awaited, causing the API to see an invalid token format (`Bearer [object Promise]`). Fix aligns with line 28 fix in same file.
+
+**Testing:**
+- ✓ CI run 26126511123 completed with **success** status.
+- ✓ All 27 e2e tests passing (confirmed 2026-05-20 09:38 GMT+3).
+- ✓ Committee session deduplication working.
+- ✓ Report generation (XLSX/PDF) working.
+- ✓ Vendor registration, bid submission, technical evaluation, commercial opening all passing.
+
+**Verification:**
+- Checked gh run status: `conclusion: "success", status: "completed"`.
+- Monitor task b3ydcctr7 completed: "Fix: Add missing await on second admin token in report authorization test → success".
+- All prior fixes confirmed working: committee dedup, report token (line 28), exceljs namespace import.
+
+**Open questions:** None.
+
+**Next recommended step:** 
+1. User runs WSL2 setup (PowerShell script → Ubuntu → Docker Desktop → bash startup script).
+2. Manual frontend testing against local stack (admin + vendor portals).
+3. Optional: Run golden-path locally via pnpm.
+
+---
+
 ## 2026-05-20 — Docker infrastructure setup + report-exports test fix (complete)
 
 **Date/time:** 2026-05-20, 08:15 GMT+3
