@@ -16,31 +16,31 @@ jobs:
       # ── Docker stack ────────────────────────────────────────────────────────
       - name: Create .env for docker compose
         run: |
-          cat > infrastructure/docker/.env << 'EOF'
-POSTGRES_USER=ctmp
-POSTGRES_PASSWORD=ctmp_ci
-POSTGRES_DB=ctmp
-POSTGRES_PORT=5432
-REDIS_PORT=6379
-NODE_ENV=production
-API_PORT=3000
-JWT_SECRET=ci-jwt-secret-for-testing-only-32chars
-JWT_REFRESH_SECRET=ci-jwt-refresh-secret-only-32chars
-VENDOR_JWT_SECRET=ci-vendor-jwt-secret-only-32chars
-VENDOR_JWT_REFRESH_SECRET=ci-vendor-jwt-refresh-only-32ch
-SMTP_HOST=mailhog
-SMTP_PORT=1025
-CAPTCHA_PROVIDER=none
-CAPTCHA_SECRET_KEY=
-AUDIT_VERIFY_ON_START=false
-STORAGE_DRIVER=local
-REPORT_WORKER_ENABLED=true
-REPORT_WORKER_CONCURRENCY=1
-WEB_ADMIN_PORT=4200
-WEB_VENDOR_PORT=4300
-MAILHOG_SMTP_PORT=1025
-MAILHOG_WEB_PORT=8025
-EOF
+          cat > infrastructure/docker/.env <<'EOF'
+          POSTGRES_USER=ctmp
+          POSTGRES_PASSWORD=ctmp_ci
+          POSTGRES_DB=ctmp
+          POSTGRES_PORT=5432
+          REDIS_PORT=6379
+          NODE_ENV=production
+          API_PORT=3000
+          JWT_SECRET=ci-jwt-secret-for-testing-only-32chars
+          JWT_REFRESH_SECRET=ci-jwt-refresh-secret-only-32chars
+          VENDOR_JWT_SECRET=ci-vendor-jwt-secret-only-32chars
+          VENDOR_JWT_REFRESH_SECRET=ci-vendor-jwt-refresh-only-32ch
+          SMTP_HOST=mailhog
+          SMTP_PORT=1025
+          CAPTCHA_PROVIDER=none
+          CAPTCHA_SECRET_KEY=
+          AUDIT_VERIFY_ON_START=false
+          STORAGE_DRIVER=local
+          REPORT_WORKER_ENABLED=true
+          REPORT_WORKER_CONCURRENCY=1
+          WEB_ADMIN_PORT=4200
+          WEB_VENDOR_PORT=4300
+          MAILHOG_SMTP_PORT=1025
+          MAILHOG_WEB_PORT=8025
+          EOF
 
       - name: Build and start stack
         run: |
