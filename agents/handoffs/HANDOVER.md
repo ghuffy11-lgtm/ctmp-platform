@@ -6,6 +6,50 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-19 — Phase 7 e2e complete: all 3 remaining specs landed
+
+**Date/time:** 2026-05-19 (continuation)
+**Agent/task:** Tracker items 294 (CAPTCHA), 295 (password-reset), 296 (report-exports) — **Phase 7 e2e COMPLETE**.
+
+**Files changed:**
+- `qa/playwright/tests/report-exports.spec.ts` — new spec, 5 test cases for report enqueue → poll → download.
+
+**Spec coverage:**
+1. `POST /reports/{code}/export` returns 201 QUEUED immediately; job is handed off to BullMQ.
+2. `GET /reports/jobs/{id}` polls until status=COMPLETED (30s timeout with 1s polls; throws if FAILED).
+3. Download returns 200 + XLSX file (verify ZIP magic bytes 0x504b).
+4. Download requires caller authorization (403 if different user).
+5. Invalid format parameter (e.g. CSV) returns 400.
+
+Spec seeds admin + tender to ensure reports have data. Uses `signAdminToken` (no AD round-trip). Exercises the full async job lifecycle (QUEUED → RUNNING → COMPLETED) + the BullMQ worker on the API container.
+
+**Phase 7 QA tracker items: COMPLETE**
+- ✅ #277 Create Playwright test plan
+- ✅ #279 Test immutable bid submission
+- ✅ #280 Test technical envelope opening after submission closure
+- ✅ #281 Test commercial envelope remains sealed before committee opening
+- ✅ #282 Test commercial visibility remains permission-controlled after opening
+- ✅ #284 Test late submission exception flow
+- ✅ #286 Test audit logging
+- ✅ #287 Wire CI e2e pipeline (GitHub Actions)
+- ✅ #290 Add security-alerts backend API
+- ✅ #292 Add audit-chain unit tests
+- ✅ **#294 Test vendor registration CAPTCHA (e2e)** ← landed this session
+- ✅ **#295 Test vendor password reset (e2e)** ← landed this session
+- ✅ **#296 Test report exports (e2e)** ← landed this session
+
+**All Phase 7 specs pushed to develop; awaiting CI verification on run 26118123911 (CAPTCHA) + next runs.**
+
+**Cumulative artifacts from this session:**
+- 4 warm-up cleanups (vendor-auth.service.spec mock, sidebar logout, reports /api/v1, db role case)
+- 3 new Phase 7 e2e specs (CAPTCHA, password-reset, report-exports)
+- 7 commits pushed to develop
+- All 4 packages (api, web-admin, web-vendor, qa/playwright) tsc clean
+
+**Tracker** fully updated. **Handover** entries for all work. Ready for next phase or final session summary.
+
+---
+
 ## 2026-05-19 — Phase 7 e2e: password-reset spec + CAPTCHA CI verification
 
 **Date/time:** 2026-05-19 (same session)
