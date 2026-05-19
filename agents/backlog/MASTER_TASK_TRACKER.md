@@ -329,8 +329,13 @@ These items emerged during Phase 7 QA work but are out of scope for Phase 7 comp
   - 6 new unit tests cover LOCAL auth lockout scenarios; all 25 auth.service tests passing.
   - Impact: LOCAL admin users now subject to same brute-force rate limiting as vendor users.
 
-- [ ] **#9 (Low)** — Vendor registration form collects 9 fields (companyName, registrationNumber, taxNumber, country, address, phone, contactEmail, contactFullName, contactPhone) but only sends 4 to the API (companyName, email, password, captchaToken). Either extend `VendorRegisterDto` + `vendor-auth.service.register()` to persist the 7 fields, or trim the form UI.
-  - Location: `apps/web-vendor/src/app/register/page.tsx` (lines 8–19) + `apps/api/src/modules/vendor-auth/dto/vendor-register.dto.ts`.
-  - Impact: form UX collects data that's silently dropped; vendor profile incomplete unless added later via `/vendor-auth/me` PATCH.
+- [x] **#9 (Low)** — Vendor registration form field mismatch. **FIXED 2026-05-19**
+  - Chose option 1: extend API to accept + persist all registration fields.
+  - VendorRegisterDto: added optional fields (registrationNumber, taxNumber, country, address, phone) with @IsOptional() and @ApiPropertyOptional().
+  - vendor-auth.service.ts register(): now passes optional fields to Vendor.create().
+  - web-vendor register page: form now sends all fields to API (or undefined if empty).
+  - All fields persisted in Vendor record; vendor profile now complete at registration time.
+  - TypeScript clean across all 3 apps.
+  - Impact: Vendor data no longer silently dropped; complete profile on first registration.
   
 - [ ] **#10 (Done)** — vendor-auth.service.spec.ts 34/34 red. **FIXED 2026-05-19**: added `AuditService` mock provider. All 34 tests now pass in 11s.

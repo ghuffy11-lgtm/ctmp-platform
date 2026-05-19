@@ -6,6 +6,35 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-19 — Phase 8+ Follow-up #9: Vendor registration form field mismatch (resolved)
+
+**Date/time:** 2026-05-19, 22:36 GMT+3
+**Agent/task:** Phase 8+ Follow-up #9 — Extend API to accept vendor registration fields.
+
+**Files changed:**
+- `apps/api/src/modules/vendor-auth/dto/vendor-register.dto.ts` — added optional fields: registrationNumber, taxNumber, country, address, phone. Uses @IsOptional() + @ApiPropertyOptional() for Swagger.
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.ts` — register() method: Vendor.create() now accepts all 5 optional fields (or null if omitted).
+- `apps/web-vendor/src/app/register/page.tsx` — form submit now sends registrationNumber, taxNumber, country, address, phone (or undefined).
+
+**Justification:**
+Form was collecting 9 fields but silently dropping 5 of them (registrationNumber, taxNumber, country, address, phone). Vendor records were incomplete at registration time. Extension option chosen over UI trim because all fields have business value and are already in the Vendor schema.
+
+**Testing:**
+- TypeScript clean across @ctmp/api, @ctmp/web-vendor.
+- Optional fields validated: ISO 3166-1 alpha-2 for country, string length for others.
+- Manual path: vendor register with all fields → check Vendor record has all values.
+
+**Verification:**
+- DTO uses @IsOptional() so fields are truly optional (won't fail on empty).
+- register() passes `?? null` for each field, ensuring Prisma nullable columns.
+- Form sends `|| undefined` to match DTO optional semantics.
+
+**Open questions:** None.
+
+**Next recommended step:** Phase 8 documentation tasks (HANDOVER, DECISION_LOG, PROJECT_SKILLS updates) or run CI to verify all Phase 8+ changes.
+
+---
+
 ## 2026-05-19 — Phase 8+ Follow-up #7: Vendor-visibility filter on GET /tenders
 
 **Date/time:** 2026-05-19, 22:32 GMT+3

@@ -1,11 +1,36 @@
-import { IsString, IsEmail, IsNotEmpty, MinLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsEmail, IsNotEmpty, MinLength, IsOptional, IsISO31661Alpha2 } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class VendorRegisterDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
   companyName: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  registrationNumber?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  taxNumber?: string;
+
+  @ApiPropertyOptional({ description: 'ISO 3166-1 alpha-2 country code' })
+  @IsISO31661Alpha2()
+  @IsOptional()
+  country?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  address?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  phone?: string;
 
   @ApiProperty()
   @IsEmail()

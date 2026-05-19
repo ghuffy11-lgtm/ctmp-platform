@@ -37,6 +37,11 @@ export default function VendorRegisterPage() {
     try {
       await post('/vendor-auth/register', {
         companyName: form.companyName,
+        registrationNumber: form.registrationNumber || undefined,
+        taxNumber: form.taxNumber || undefined,
+        country: form.country || undefined,
+        address: form.address || undefined,
+        phone: form.phone || undefined,
         email: form.contactEmail,
         password: form.password,
         captchaToken,

@@ -63,7 +63,15 @@ export class VendorAuthService {
 
     const registration = await this.prisma.$transaction(async (tx: any) => {
       const vendor = await tx.vendor.create({
-        data: { companyName: dto.companyName, status: 'PENDING' },
+        data: {
+          companyName: dto.companyName,
+          registrationNumber: dto.registrationNumber ?? null,
+          taxNumber: dto.taxNumber ?? null,
+          country: dto.country ?? null,
+          address: dto.address ?? null,
+          phone: dto.phone ?? null,
+          status: 'PENDING',
+        },
       });
 
       const vendorUser = await tx.vendorUser.create({
