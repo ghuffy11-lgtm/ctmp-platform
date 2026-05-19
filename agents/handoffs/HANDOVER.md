@@ -6,6 +6,71 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-19 — CI green path: 8 plumbing fixes, surfaced 3 backend gaps
+
+**Date/time:** 2026-05-19 (continued after heredoc fix)
+**Agent/task:** Drive `develop` CI from "fails at parse" through to "tests actually run". Eight successive runs, each cleared one blocker and revealed the next.
+
+**Files changed:**
+- `package.json` — added `"packageManager": "pnpm@10.15.0"`
+- `pnpm-workspace.yaml` — renamed `allowBuilds` (map) → `onlyBuiltDependencies` (array); dropped `msgpackr-extract` and `@scarf/scarf` entries that weren't lifecycle-script packages
+- `infrastructure/docker/api.Dockerfile` — runtime stage now copies `/repo/node_modules` + `/repo/packages` + `/repo/apps/api/node_modules` and `WORKDIR /app/apps/api`
+- `infrastructure/docker/web-admin.Dockerfile` + `web-vendor.Dockerfile` — same layout fix; `CMD` switched from `pnpm start` (pnpm not in runtime image PATH) to `./node_modules/.bin/next start --port <port>`
+- `apps/web-admin/public/.gitkeep`, `apps/web-vendor/public/.gitkeep` — make `public/` exist for `COPY` step
+- `infrastructure/docker/docker-compose.yml` — healthcheck URL `/api/health` → `/api/v1/health`
+- `apps/api/src/config/jwt.config.ts` — accept `VENDOR_JWT_SECRET` (compose contract) with `JWT_VENDOR_SECRET` fallback; expose `vendorRefreshSecret`/`vendorRefreshExpiresIn`
+- `.github/workflows/e2e.yml` — drop `pnpm/action-setup` `version: 9` override (conflicted with packageManager pin); change healthcheck URL to `/api/v1/health`; `CAPTCHA_PROVIDER=none` → `stub` (the API only special-cases 'stub'; everything else falls into the unimplemented hCaptcha branch)
+- `qa/playwright/helpers/db.ts` — `user_departments(joined_at)` → `assigned_at` (matches migration 001 + Prisma model)
+- `qa/playwright/helpers/api.ts` — `authFetch` builds `${API_BASE}/api/v1${path}` (was `/api${path}`)
+- `qa/playwright/tests/{commercial-visibility,email-verification,late-submission,multi-vendor}.spec.ts` — direct `fetch` URLs prefixed with `/v1`
+- `qa/playwright/tests/email-verification.spec.ts` — register body matches `VendorRegisterDto` (companyName, email, password, captchaToken — no contactFullName/contactEmail)
+
+**Root causes (chained):**
+1. Corepack on `node:20-alpine` activated **pnpm 11.1.3 (latest)** because `package.json` had no `packageManager` pin. pnpm 11 requires `node:sqlite`, a Node ≥ 22.5 builtin. → `ERR_UNKNOWN_BUILTIN_MODULE` on every `pnpm install`.
+2. Once pnpm 10 ran, builds tripped on `apps/web-vendor/public` and `apps/web-admin/public` not existing in the git index — `docker compose build` cannot `COPY` a missing path even from the build stage.
+3. Runtime image inherited `FROM node:20-alpine`, not `FROM base`, so corepack/pnpm weren't on PATH. The Next CMD `pnpm start` crashed with `Cannot find module '/app/apps/web-admin/pnpm'`.
+4. **pnpm symlink layout broken in runtime:** copying only `apps/<app>/node_modules` left every dependency symlink dangling (they point relative `../../node_modules/.pnpm/...`). API container looped on `Cannot find module '@nestjs/core'`. Fix mirrors the full repo layout into `/app`.
+5. **Native builds skipped:** pnpm-workspace.yaml used `allowBuilds:` map syntax, which pnpm 10 silently ignores. Correct key is `onlyBuiltDependencies:` (array). Without it, bcrypt's `node-gyp` step never ran and the API crashed on `bcrypt_lib.node`.
+6. **Env-var name drift:** compose sets `VENDOR_JWT_SECRET` but `jwt.config.ts` read `JWT_VENDOR_SECRET`. NestFactory threw `JwtStrategy requires a secret or key` before the HTTP server bound.
+7. **API versioning ignored in healthcheck and tests:** `main.ts` enables URI versioning with `defaultVersion: '1'` on top of the `api` global prefix → real routes are `/api/v1/...`. Compose healthcheck, the CI step's `curl`, and 8 direct `fetch` URLs in QA specs were probing `/api/...` and 404ing.
+8. **pnpm version conflict in workflow:** `pnpm/action-setup@v4` had `version: 9` while package.json pinned 10.15.0 → `ERR_PNPM_BAD_PM_VERSION`. Removed the override.
+9. **CAPTCHA provider:** CI `.env` set `CAPTCHA_PROVIDER=none`, but `CaptchaService.callProvider` only treats `'stub'` as the dev bypass; anything else falls into the unimplemented hCaptcha branch and returns `false`, so register POST returned 400.
+
+**Progress trail:**
+- Run `26099724544`: `node:sqlite` ERR_UNKNOWN_BUILTIN_MODULE in `pnpm install` (fix #1)
+- Run `26099990413`: web-vendor build fails on missing `public/` (fix #2)
+- Run `26100226303`: API runtime `Cannot find module '@nestjs/core'` (fix #4)
+- Run `26100712717`: API runtime `Cannot find module 'bcrypt_lib.node'` (fix #5)
+- Run `26101189193`: NestFactory `JwtStrategy requires a secret or key` (fix #6)
+- Run `26101688122`: API booted; healthcheck 404 on `/api/health` (fix #7)
+- Run `26102185073`: web-admin runtime `Cannot find module 'pnpm'` (fix #3)
+- Run `26102666384`: pnpm version conflict in action-setup (fix #8)
+- Run `26102910083`: tests actually ran; 5 failed with schema/route mismatches (fix #7 in specs + fix #9 captcha)
+- Run `26103471748`: 5 failed → 5 failed but on real backend feature gaps
+- Run `26103972028`: **2 passed, 5 failed** — failures are now feature gaps, not plumbing.
+
+**Surfaced backend gaps (NOT fixed in this session — Phase 5/6 work):**
+
+| Failing test | Root cause | Fix scope |
+|--------------|-----------|-----------|
+| `email-verification.spec.ts` register → 500 | `NotificationsService.sendEmail` throws `Error('Not implemented')` at `apps/api/src/modules/notifications/notifications.service.ts:19`. The DB transaction succeeds, then the email send blows up before the controller can return. Requires: seed `vendor-verify-email` notification template, implement nodemailer-based send using `SMTP_HOST`/`SMTP_PORT`, write a `NotificationLog` row. | Backend feature — Phase 5 notifications |
+| `golden-path.spec.ts` `vendor registers via portal` → locator timeout 15s | Vendor portal `/register` page does not render labels matching `Company Name` / `Contact Full Name` / `Contact Email` / `Password`. Either the page wasn't built or label text differs. | Frontend vendor portal — Phase 5 |
+| `commercial-visibility:110`, `late-submission:96`, `multi-vendor:124` — `POST /tenders/{id}/close-submissions` → **403 Forbidden** | Admin user signed via `signAdminToken` gets only the permissions linked through `user_roles → role_permissions`. The default `SYSTEM_ADMIN` role in `database/seeds/001_baseline_roles_permissions.sql` does not include `tender_workflow:close_submissions` (or equivalent). Late-exception POST same problem. | DB seed gap — list of permissions to add depends on the controllers' `@RequirePermissions(...)` decorators |
+
+**Verification:**
+- Each fix in this chain shifted the failing step further down the workflow (pnpm install → docker build → API boot → healthcheck → tests run → individual test cases). Final run reaches the `Run e2e tests` step and produces real Playwright test results, with 2/7+ specs already green.
+
+**Open questions:**
+- Should we add a `'none'` arm to `CaptchaService.callProvider` returning `true`, so prod CAPTCHA can be disabled deterministically (currently 'none' is silently insecure-ish — falls into hCaptcha branch and rejects all)? Stub works in CI but the name 'none' is misleading.
+- For NotificationsService.sendEmail: implement now (so register/verify e2e passes), or stub at the `register` call site with a feature flag? The spec mandates email verification — production needs real send.
+
+**Next recommended step:**
+1. Implement `NotificationsService.sendEmail` with nodemailer + seeded `vendor-verify-email` template. This unblocks `email-verification.spec.ts`.
+2. Audit `@RequirePermissions(...)` decorators on tender workflow controllers (close-submissions, technical-opening, finalize-technical-results, committee-sessions, late-submission-exceptions, award-recommendations) and add the corresponding permission codes to the `SYSTEM_ADMIN` row in `database/seeds/001_baseline_roles_permissions.sql`.
+3. Rebuild vendor portal register page to expose `<label>` text matching `Company Name / Contact Full Name / Contact Email / Password / CAPTCHA` (or update spec to match the actual rendered labels — but the spec text already reflects what the form was supposed to look like per the implementation spec).
+
+---
+
 ## 2026-05-19 — CI workflow YAML fix (heredoc indent inside block scalar)
 
 **Date/time:** 2026-05-19  
