@@ -55,3 +55,7 @@ database/dumps/
 # Package manager locks — keep one (pnpm preferred)
 package-lock.json
 yarn.lock
+
+# TypeScript / Next.js incremental build artifacts
+*.tsbuildinfo
+next-env.d.ts
