@@ -2,26 +2,146 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 
-body {
-  font-family: 'Inter', system-ui, sans-serif;
-  background-color: #F8FAFC;
-  color: #0F172A;
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%);
+    background-attachment: fixed;
+    color: #0F172A;
+    min-height: 100vh;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: rgba(15, 23, 42, 0.35);
+  }
 }
 
-.material-symbols-outlined {
-  font-family: 'Material Symbols Outlined';
-  font-weight: normal;
-  font-style: normal;
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
-  display: inline-block;
-  white-space: nowrap;
-  word-wrap: normal;
-  direction: ltr;
-  -webkit-font-smoothing: antialiased;
+@layer components {
+  .heading-font {
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+  }
+
+  .glass {
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    box-shadow: 0 4px 20px -8px rgba(15, 23, 42, 0.08);
+  }
+
+  .glass-strong {
+    background: #FFFFFF;
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 6px 24px -8px rgba(15, 23, 42, 0.1);
+  }
+
+  .glass-subtle {
+    background: rgba(15, 23, 42, 0.03);
+    border: 1px solid rgba(15, 23, 42, 0.06);
+  }
+
+  .nav-link {
+    position: relative;
+    transition: color 0.3s;
+    color: rgba(15, 23, 42, 0.7);
+  }
+  .nav-link:hover {
+    color: #0F172A;
+  }
+  .nav-link::after {
+    content: '';
+    position: absolute;
+    width: 0;
+    height: 3px;
+    bottom: -6px;
+    left: 0;
+    background: #00B4FF;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .nav-link.active,
+  .nav-link.active:hover {
+    color: #0F172A;
+  }
+  .nav-link.active::after,
+  .nav-link:hover::after {
+    width: 100%;
+  }
+
+  .card-hover {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .card-hover:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 25px 50px -12px rgba(0, 180, 255, 0.15);
+  }
+
+  .input-field {
+    background: #FFFFFF;
+    border: 1px solid rgba(15, 23, 42, 0.15);
+    color: #0F172A;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .input-field:focus {
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(0, 180, 255, 0.25);
+    border-color: #00B4FF;
+  }
+  .input-field:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-electric {
+    background: linear-gradient(90deg, #00B4FF, #00F0FF);
+    color: #0A1428;
+    font-weight: 600;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .btn-electric:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 15px 35px -10px rgba(0, 180, 255, 0.35);
+  }
+  .btn-electric:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-ghost {
+    border: 1px solid rgba(15, 23, 42, 0.15);
+    color: #0F172A;
+    background: #FFFFFF;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: rgba(15, 23, 42, 0.04);
+    border-color: rgba(15, 23, 42, 0.3);
+  }
+  .btn-ghost:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+@layer utilities {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(15, 23, 42, 0.15);
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 180, 255, 0.4);
+  }
 }

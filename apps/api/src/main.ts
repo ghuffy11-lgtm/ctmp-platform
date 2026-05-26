@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
@@ -7,11 +8,17 @@ import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   const config = app.get(ConfigService);
   const port = config.get<number>('app.port', 3000);
   const apiPrefix = config.get<string>('app.apiPrefix', 'api');
+
+  // Trust the single upstream nginx hop so req.ip resolves to the real
+  // client IP (leftmost entry in X-Forwarded-For) rather than the
+  // loopback / docker-bridge address. Adjust if more proxy hops are
+  // ever introduced.
+  app.set('trust proxy', 1);
 
   app.use(helmet());
   app.enableCors({

@@ -1,9 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Package } from 'lucide-react';
 import { get } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { GlassCard } from '@/components/ui/GlassCard';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Loading, Empty, ErrorBanner } from '@/components/ui/Empty';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 
 interface MyBidSummary {
@@ -46,117 +50,122 @@ export default function VendorBidsPage() {
     load();
   }, []);
 
-  const drafts = bids.filter(b => b.status === 'DRAFT').length;
+  const drafts    = bids.filter(b => b.status === 'DRAFT').length;
   const submitted = bids.filter(b => b.status === 'SUBMITTED' || b.status === 'LATE_SUBMITTED').length;
   const evaluated = bids.filter(b => b.status === 'EVALUATED').length;
-  const awarded = bids.filter(b => b.status === 'AWARDED').length;
+  const awarded   = bids.filter(b => b.status === 'AWARDED').length;
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary tracking-tight">My Bids</h1>
-        <p className="text-sm text-text-secondary mt-0.5">Draft, submitted, and historical bids across all tenders.</p>
+    <div className="space-y-10">
+      <PageHeader
+        title="My Bids"
+        subtitle="Draft, submitted, and historical bids across all tenders."
+      />
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <BidStat label="Drafts"     value={drafts}    accent="text-amber-600"   loading={loading} />
+        <BidStat label="Submitted"  value={submitted} accent="text-electric-500" loading={loading} />
+        <BidStat label="Evaluated"  value={evaluated} accent="text-violet-600"   loading={loading} />
+        <BidStat label="Awarded"    value={awarded}   accent="text-emerald-600"  loading={loading} />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Stat label="Drafts" value={drafts} icon="edit_note" color="text-warning" />
-        <Stat label="Submitted" value={submitted} icon="send" color="text-accent" />
-        <Stat label="Evaluated" value={evaluated} icon="fact_check" color="text-text-primary" />
-        <Stat label="Won" value={awarded} icon="workspace_premium" color="text-success" />
-      </div>
+      {error && <ErrorBanner message={error} />}
 
-      {error && (
-        <div className="bg-danger/10 border border-danger/30 rounded-lg p-3 text-sm text-danger">{error}</div>
-      )}
-
-      <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="p-8 text-center text-sm text-text-secondary">Loading…</div>
-        ) : bids.length === 0 ? (
-          <div className="p-8 text-center">
-            <span className="material-symbols-outlined text-[48px] text-text-secondary/20 block mb-2">inventory_2</span>
-            <p className="text-sm text-text-secondary mb-3">You have no bids yet.</p>
-            <Link href="/tenders" className="inline-block px-4 py-2 bg-accent text-white rounded-lg font-bold text-sm">
-              Browse tenders
+      {loading ? (
+        <Loading />
+      ) : bids.length === 0 ? (
+        <Empty
+          icon={Package}
+          title="You have no bids yet"
+          description="Browse available tenders and start your first bid."
+          action={
+            <Link href="/tenders" className="btn-electric inline-block px-8 py-4 rounded-3xl text-sm">
+              Browse Tenders
             </Link>
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-bg border-b border-border">
-              <tr>
-                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-text-secondary">Tender</th>
-                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-text-secondary">Bid Status</th>
-                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-text-secondary">Technical</th>
-                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-text-secondary">Deadline</th>
-                <th className="px-5 py-3 text-right text-[10px] font-bold uppercase tracking-wider text-text-secondary">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {bids.map(b => (
-                <tr key={b.id} className="hover:bg-bg/40">
-                  <td className="px-5 py-3">
-                    <Link href={`/bids/${b.id}`} className="font-mono text-xs font-bold text-accent hover:underline">
-                      {b.tenderReference}
-                    </Link>
-                    <p className="text-sm font-semibold text-text-primary mt-0.5">{b.tenderTitle}</p>
-                    <div className="mt-1">
-                      <StatusBadge status={b.tenderStatus} />
-                    </div>
-                  </td>
-                  <td className="px-5 py-3">
-                    <StatusBadge status={b.status} />
-                    {b.receiptNumber && (
-                      <p className="text-[10px] font-mono text-text-secondary mt-1">{b.receiptNumber}</p>
-                    )}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className={`text-xs font-bold ${
-                      b.technicalResult === 'PASS' ? 'text-success' :
-                      b.technicalResult === 'FAIL' ? 'text-danger' : 'text-text-secondary'
-                    }`}>
-                      {b.technicalResult ?? 'PENDING'}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-text-secondary text-xs">
-                    {b.submissionDeadline
-                      ? new Date(b.submissionDeadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-                      : '—'}
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    {b.status === 'DRAFT' ? (
-                      <Link
-                        href={`/bids/wizard/${b.tenderId}`}
-                        className="px-3 py-1.5 bg-accent text-white text-xs font-bold rounded-lg hover:opacity-90"
-                      >
-                        Continue
-                      </Link>
-                    ) : (
-                      <Link
-                        href={`/bids/${b.id}`}
-                        className="px-3 py-1.5 border border-border text-xs font-bold rounded-lg hover:bg-bg"
-                      >
-                        View
-                      </Link>
-                    )}
-                  </td>
+          }
+        />
+      ) : (
+        <GlassCard padding="none" className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[800px]">
+              <thead>
+                <tr className="text-slate-900/55 text-[11px] uppercase tracking-[0.15em] border-b border-slate-900/10">
+                  <th className="py-5 px-8 text-left font-medium">Tender</th>
+                  <th className="py-5 px-8 text-left font-medium">Status</th>
+                  <th className="py-5 px-8 text-left font-medium">Technical</th>
+                  <th className="py-5 px-8 text-left font-medium">Deadline</th>
+                  <th className="py-5 px-8 text-right font-medium">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+              </thead>
+              <tbody>
+                {bids.map(b => (
+                  <tr key={b.id} className="border-b border-slate-900/5 hover:bg-slate-900/5 transition-colors">
+                    <td className="py-5 px-8">
+                      <Link href={`/bids/${b.id}`} className="font-mono text-xs text-electric-500 hover:underline">
+                        {b.tenderReference}
+                      </Link>
+                      <div className="text-sm font-medium mt-1 line-clamp-1">{b.tenderTitle}</div>
+                      <div className="mt-2">
+                        <StatusBadge status={b.tenderStatus} />
+                      </div>
+                    </td>
+                    <td className="py-5 px-8 align-top">
+                      <StatusBadge status={b.status} />
+                      {b.receiptNumber && (
+                        <div className="text-[10px] font-mono text-slate-900/50 mt-2">{b.receiptNumber}</div>
+                      )}
+                    </td>
+                    <td className="py-5 px-8 align-top">
+                      <StatusBadge status={b.technicalResult ?? 'PENDING'} />
+                    </td>
+                    <td className="py-5 px-8 align-top text-slate-900/65">
+                      {b.submissionDeadline
+                        ? new Date(b.submissionDeadline).toLocaleDateString('en-GB', {
+                            day: 'numeric', month: 'short', year: 'numeric',
+                          })
+                        : '—'}
+                    </td>
+                    <td className="py-5 px-8 align-top text-right">
+                      {b.status === 'DRAFT' ? (
+                        <Link
+                          href={`/bids/wizard/${b.tenderId}`}
+                          className="btn-electric inline-block px-5 py-2.5 rounded-2xl text-xs"
+                        >
+                          Continue
+                        </Link>
+                      ) : (
+                        <Link
+                          href={`/bids/${b.id}`}
+                          className="btn-ghost inline-block px-5 py-2.5 rounded-2xl text-xs"
+                        >
+                          View
+                        </Link>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </GlassCard>
+      )}
     </div>
   );
 }
 
-function Stat({ label, value, icon, color }: { label: string; value: number; icon: string; color: string }) {
+function BidStat({
+  label, value, accent, loading,
+}: {
+  label: string; value: number; accent: string; loading: boolean;
+}) {
   return (
-    <div className="bg-card rounded-xl border border-border p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-bold uppercase text-text-secondary">{label}</span>
-        <span className={`material-symbols-outlined text-[20px] ${color}`}>{icon}</span>
+    <GlassCard hover padding="lg">
+      <div className={`text-xs font-semibold tracking-[0.18em] uppercase mb-2 ${accent}`}>
+        {label}
       </div>
-      <p className={`text-2xl font-bold ${color}`}>{value}</p>
-    </div>
+      <div className="text-5xl heading-font font-semibold tracking-tighter">
+        {loading ? '—' : value}
+      </div>
+    </GlassCard>
   );
 }

@@ -2,31 +2,43 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { getAccessToken, clearTokens, hasPermission } from '@/lib/auth';
+import { usePathname } from 'next/navigation';
+import { getAccessToken, hasPermission } from '@/lib/auth';
 import { get } from '@/lib/api';
+import {
+  LayoutDashboard,
+  Gavel,
+  CheckCircle2,
+  MessageSquare,
+  BarChart3,
+  Scale,
+  ArrowLeftRight,
+  Building2,
+  FileText,
+  History,
+  ShieldCheck,
+  Settings,
+} from 'lucide-react';
 
 const POLL_MS = 60_000;
 
 const navItems = [
-  { href: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { href: '/tenders', label: 'Tenders', icon: 'gavel' },
-  { href: '/approvals', label: 'Approval Queue', icon: 'approval' },
-  { href: '/clarifications', label: 'Clarifications', icon: 'forum' },
-  { href: '/technical-evaluation', label: 'Technical Evaluation', icon: 'fact_check' },
-  { href: '/committee-opening', label: 'Commercial Opening', icon: 'lock_open' },
-  // commercial:view permission required — gate applied in the page itself
-  { href: '/commercial-comparison', label: 'Commercial Comparison', icon: 'compare', permission: 'commercial:view' },
-  { href: '/vendors', label: 'Vendors', icon: 'storefront' },
-  { href: '/reports', label: 'Reports', icon: 'assessment' },
-  { href: '/audit-log', label: 'Audit Log', icon: 'policy' },
-  { href: '/security-alerts', label: 'Security Alerts', icon: 'security', permission: 'audit:view' },
-  { href: '/settings', label: 'Settings', icon: 'settings' },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/tenders', label: 'Tenders', icon: Gavel },
+  { href: '/approvals', label: 'Approvals', icon: CheckCircle2 },
+  { href: '/clarifications', label: 'Clarifications', icon: MessageSquare },
+  { href: '/technical-evaluation', label: 'Technical Evaluation', icon: BarChart3 },
+  { href: '/committee-opening', label: 'Committee & Commercial', icon: Scale },
+  { href: '/commercial-comparison', label: 'Commercial Comparison', icon: ArrowLeftRight, permission: 'commercial:view' },
+  { href: '/vendors', label: 'Vendor Management', icon: Building2 },
+  { href: '/reports', label: 'Reports', icon: FileText },
+  { href: '/audit-log', label: 'Audit Log', icon: History },
+  { href: '/security-alerts', label: 'Security Alerts', icon: ShieldCheck, permission: 'audit:view' },
+  { href: '/settings', label: 'System Configuration', icon: Settings },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const token = getAccessToken();
   const [unackCount, setUnackCount] = useState(0);
 
@@ -34,7 +46,6 @@ export function Sidebar() {
 
   useEffect(() => {
     if (!canViewAudit || !token) return;
-
     let cancelled = false;
     async function poll() {
       try {
@@ -44,7 +55,7 @@ export function Sidebar() {
         );
         if (!cancelled) setUnackCount(res.total ?? 0);
       } catch {
-        // Silent: badge is non-critical UX.
+        // silent
       }
     }
     poll();
@@ -59,47 +70,37 @@ export function Sidebar() {
     (item) => !item.permission || (token && hasPermission(token, item.permission)),
   );
 
-  async function handleLogout() {
-    try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}/api/v1/auth/logout`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-    } finally {
-      clearTokens();
-      router.push('/login');
-    }
-  }
-
   return (
-    <aside className="fixed top-0 left-0 h-full w-[260px] bg-[#0F172A] text-white flex flex-col z-40">
-      <div className="px-6 py-5 border-b border-white/10">
-        <p className="text-xs font-medium tracking-widest text-blue-300 uppercase">CTMP</p>
-        <p className="text-sm text-white/70 mt-0.5">Admin Portal</p>
+    <aside className="w-[260px] h-screen fixed left-0 top-0 bg-white border-r border-slate-200 flex flex-col z-50">
+      <div className="p-6 border-b border-slate-100 flex items-center gap-3">
+        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+          C
+        </div>
+        <div>
+          <h1 className="font-bold text-slate-900 text-sm leading-none">CTMP Admin</h1>
+          <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider">Procurement Authority</p>
+        </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-4 px-3">
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {visibleItems.map((item) => {
-          const active = pathname.startsWith(item.href);
+          const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
           const showBadge = item.href === '/security-alerts' && unackCount > 0;
+          const Icon = item.icon;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-0.5 transition-colors ${
+              className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all duration-150 text-sm ${
                 active
-                  ? 'bg-white/15 text-white'
-                  : 'text-white/70 hover:bg-white/10 hover:text-white'
+                  ? 'bg-slate-100 text-slate-900 font-semibold shadow-sm'
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
               }`}
             >
-              <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
+              <Icon className={`w-5 h-5 flex-shrink-0 ${active ? 'text-blue-600' : ''}`} />
               <span className="flex-1">{item.label}</span>
               {showBadge && (
-                <span
-                  className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-semibold flex items-center justify-center"
-                  aria-label={`${unackCount} unacknowledged security alerts`}
-                >
+                <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-semibold flex items-center justify-center">
                   {unackCount > 99 ? '99+' : unackCount}
                 </span>
               )}
@@ -108,14 +109,8 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="px-3 py-4 border-t border-white/10">
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors"
-        >
-          <span className="material-symbols-outlined text-[20px]">logout</span>
-          Sign Out
-        </button>
+      <div className="p-4 border-t border-slate-100">
+        <p className="text-[10px] text-slate-400 text-center uppercase tracking-wider">CTMP v1.0 · Enterprise</p>
       </div>
     </aside>
   );

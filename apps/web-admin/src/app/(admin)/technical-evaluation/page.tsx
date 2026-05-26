@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { AlertTriangle, ClipboardList, Package, ChevronRight, Eye, Save, PenLine, Lock } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -125,6 +126,7 @@ export default function TechnicalEvaluationPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
+  const [viewingProposal, setViewingProposal] = useState(false);
 
   // ─── Fetch tenders in evaluation phase ──────────────────────────────────────
   useEffect(() => {
@@ -217,23 +219,55 @@ export default function TechnicalEvaluationPage() {
     setCriteria(prev => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
   }
 
+  async function handleViewProposal() {
+    if (!selectedBid) return;
+    setViewingProposal(true);
+    try {
+      const token = getAccessToken();
+      const list = await get<{ documents: Array<{ id: string; filename: string }> }>(
+        `/bids/${selectedBid.id}/envelopes/TECHNICAL/documents`,
+        token,
+      );
+      const docs = list.documents ?? [];
+      if (docs.length === 0) {
+        alert('No technical documents uploaded for this bid.');
+        return;
+      }
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const res = await fetch(`${apiBase}/api/v1/bids/${selectedBid.id}/documents/${docs[0].id}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to open proposal');
+    } finally {
+      setViewingProposal(false);
+    }
+  }
+
   async function handleSaveEvaluation() {
     if (!selectedBid) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
       const token = getAccessToken();
+      const criteriaBreakdown = criteria
+        .map(c => `${c.criterion}: ${typeof c.score === 'number' ? c.score : 0}/${c.maxScore}`)
+        .join(' · ');
+      const fullNotes = [
+        `Recommendation: ${recommendation}`,
+        `Criteria breakdown — ${criteriaBreakdown}`,
+        notes ? `Evaluator notes: ${notes}` : '',
+      ].filter(Boolean).join('\n');
       await post(
         `/bids/${selectedBid.id}/technical-evaluations`,
         {
-          result: recommendation,
           score: totalScore,
-          comments: notes,
-          scores: criteria.map(c => ({
-            criterion: c.criterion,
-            score: typeof c.score === 'number' ? c.score : 0,
-            comments: '',
-          })),
+          notes: fullNotes,
         },
         token,
       );
@@ -265,7 +299,7 @@ export default function TechnicalEvaluationPage() {
     <div className="flex flex-col h-full overflow-hidden -m-8">
       {/* Compliance banner */}
       <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 flex items-center gap-3 flex-shrink-0">
-        <span className="material-symbols-outlined text-[20px] text-amber-700">warning</span>
+        <AlertTriangle className="w-5 h-5 text-amber-700" />
         <span className="text-sm font-semibold text-amber-900">
           Commercial envelopes remain sealed. Do not request or reference commercial information at this stage.
         </span>
@@ -287,9 +321,7 @@ export default function TechnicalEvaluationPage() {
               Array.from({ length: 3 }).map((_, i) => <ListSkeleton key={i} />)
             ) : tenders.length === 0 ? (
               <div className="p-6 text-center">
-                <span className="material-symbols-outlined text-[40px] text-text-secondary/20 block mb-2">
-                  fact_check
-                </span>
+                <ClipboardList className="w-10 h-10 text-text-secondary/20 mx-auto mb-2" />
                 <p className="text-xs text-text-secondary">
                   No tenders in technical evaluation phase.
                 </p>
@@ -340,9 +372,7 @@ export default function TechnicalEvaluationPage() {
               Array.from({ length: 3 }).map((_, i) => <ListSkeleton key={i} />)
             ) : bids.length === 0 ? (
               <div className="p-6 text-center">
-                <span className="material-symbols-outlined text-[40px] text-text-secondary/20 block mb-2">
-                  inventory_2
-                </span>
+                <Package className="w-10 h-10 text-text-secondary/20 mx-auto mb-2" />
                 <p className="text-xs text-text-secondary">
                   {selectedTender ? 'No bids found.' : 'Select a tender.'}
                 </p>
@@ -410,9 +440,7 @@ export default function TechnicalEvaluationPage() {
         <div className="flex-1 min-w-0 overflow-y-auto bg-bg">
           {!selectedTender || !selectedBid ? (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-8">
-              <span className="material-symbols-outlined text-[56px] text-text-secondary/20">
-                fact_check
-              </span>
+              <ClipboardList className="w-14 h-14 text-text-secondary/20" />
               <p className="text-sm font-semibold text-text-secondary">
                 {!selectedTender
                   ? 'Select a tender to begin evaluation.'
@@ -424,11 +452,11 @@ export default function TechnicalEvaluationPage() {
               {/* Breadcrumb */}
               <nav className="flex items-center gap-1 text-xs text-text-secondary mb-3">
                 <Link href="/tenders" className="hover:text-accent transition-colors">Tenders</Link>
-                <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+                <ChevronRight className="w-3.5 h-3.5" />
                 <Link href={`/tenders/${selectedTender.id}`} className="hover:text-accent transition-colors">
                   {selectedTender.referenceNumber}
                 </Link>
-                <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+                <ChevronRight className="w-3.5 h-3.5" />
                 <span className="text-text-primary font-medium">Technical Evaluation</span>
               </nav>
 
@@ -442,11 +470,13 @@ export default function TechnicalEvaluationPage() {
                   </p>
                 </div>
                 <button
-                  className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card transition-colors flex items-center gap-2"
+                  onClick={() => handleViewProposal()}
+                  disabled={viewingProposal}
+                  className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   title="View full proposal"
                 >
-                  <span className="material-symbols-outlined text-[18px]">visibility</span>
-                  View Full Proposal
+                  <Eye className="w-[18px] h-[18px]" />
+                  {viewingProposal ? 'Opening…' : 'View Full Proposal'}
                 </button>
               </div>
 
@@ -567,9 +597,9 @@ export default function TechnicalEvaluationPage() {
                 <button
                   onClick={handleSaveEvaluation}
                   disabled={submitting}
-                  className="bg-accent hover:bg-accent-hover text-white rounded-xl shadow-md font-bold text-base transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="bg-accent hover:bg-accent-hover text-white rounded-xl shadow-md font-bold text-base px-6 py-4 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  <span className="material-symbols-outlined">save</span>
+                  <Save className="w-5 h-5" />
                   {submitting ? 'Saving…' : 'Save Evaluation'}
                 </button>
               </div>
@@ -581,7 +611,7 @@ export default function TechnicalEvaluationPage() {
               {/* Evaluator notes */}
               <div className="bg-card rounded-xl border border-dashed border-border p-5 mb-6">
                 <h4 className="text-sm font-bold text-text-primary mb-2 flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[18px] text-accent">edit_note</span>
+                  <PenLine className="w-[18px] h-[18px] text-accent" />
                   Evaluator Notes (Internal Only)
                 </h4>
                 <textarea
@@ -609,7 +639,7 @@ export default function TechnicalEvaluationPage() {
                   disabled={finalizing || evaluations.length === 0}
                   className="px-5 py-2.5 bg-text-primary text-white rounded-lg text-sm font-bold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  <span className="material-symbols-outlined text-[18px]">lock</span>
+                  <Lock className="w-[18px] h-[18px]" />
                   {finalizing ? 'Finalizing…' : 'Finalize'}
                 </button>
               </div>

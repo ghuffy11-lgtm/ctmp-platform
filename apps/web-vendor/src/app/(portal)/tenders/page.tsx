@@ -1,9 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { Gavel, Search } from 'lucide-react';
 import { get } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { GlassCard } from '@/components/ui/GlassCard';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Loading, Empty } from '@/components/ui/Empty';
+import { StatusBadge, Chip } from '@/components/ui/StatusBadge';
 
 interface TenderSummary {
   id: string;
@@ -12,6 +17,8 @@ interface TenderSummary {
   status: string;
   submissionDeadline: string | null;
   departmentName?: string;
+  category?: string;
+  estimatedBudget?: string | number | null;
 }
 
 interface PaginatedTenders {
@@ -39,76 +46,88 @@ export default function VendorTendersPage() {
     load();
   }, []);
 
-  const filtered = search
-    ? tenders.filter(t =>
-        t.title.toLowerCase().includes(search.toLowerCase()) ||
-        t.referenceNumber.toLowerCase().includes(search.toLowerCase()),
-      )
-    : tenders;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return tenders;
+    return tenders.filter(t =>
+      t.title.toLowerCase().includes(q) ||
+      t.referenceNumber.toLowerCase().includes(q) ||
+      (t.departmentName?.toLowerCase().includes(q) ?? false),
+    );
+  }, [tenders, search]);
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary tracking-tight">Available Tenders</h1>
-        <p className="text-sm text-text-secondary mt-0.5">Browse open tenders and submit bids.</p>
-      </div>
-
-      <input
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder="Search by reference or title…"
-        className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent bg-card max-w-md"
+    <div className="space-y-10">
+      <PageHeader
+        title="Public Tenders"
+        subtitle={`${tenders.length} ${tenders.length === 1 ? 'opportunity' : 'opportunities'} available`}
+        actions={
+          <div className="relative w-full md:w-96">
+            <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-900/50 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search tenders..."
+              className="input-field w-full rounded-3xl pl-12 pr-6 py-4 text-sm"
+            />
+          </div>
+        }
       />
 
-      <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="p-8 text-center text-sm text-text-secondary">Loading…</div>
-        ) : filtered.length === 0 ? (
-          <div className="p-8 text-center">
-            <span className="material-symbols-outlined text-[48px] text-text-secondary/20 block mb-2">gavel</span>
-            <p className="text-sm text-text-secondary">No matching tenders.</p>
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-bg border-b border-border">
-              <tr>
-                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Reference</th>
-                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Title</th>
-                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Department</th>
-                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Status</th>
-                <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Deadline</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map(t => (
-                <tr key={t.id} className="hover:bg-bg/60">
-                  <td className="px-5 py-3">
-                    <Link href={`/tenders/${t.id}`} className="font-mono text-xs font-bold text-accent hover:underline">
-                      {t.referenceNumber}
-                    </Link>
-                  </td>
-                  <td className="px-5 py-3">
-                    <Link href={`/tenders/${t.id}`} className="font-semibold text-text-primary hover:text-accent">
-                      {t.title}
-                    </Link>
-                  </td>
-                  <td className="px-5 py-3 text-text-secondary">{t.departmentName ?? '—'}</td>
-                  <td className="px-5 py-3">
-                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-success/10 text-success">
-                      {t.status}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-text-secondary text-xs">
-                    {t.submissionDeadline
-                      ? new Date(t.submissionDeadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-                      : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {loading ? (
+        <Loading />
+      ) : filtered.length === 0 ? (
+        <Empty
+          icon={Gavel}
+          title={search ? 'No matching tenders' : 'No tenders available'}
+          description={
+            search
+              ? 'Try a different search term or clear the filter.'
+              : 'There are no open tenders right now. Check back soon.'
+          }
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {filtered.map(t => (
+            <Link key={t.id} href={`/tenders/${t.id}`}>
+              <GlassCard hover className="cursor-pointer h-full flex flex-col">
+                <div className="font-mono text-xs text-slate-900/55">{t.referenceNumber}</div>
+                <h3 className="heading-font text-2xl font-medium mt-3 leading-tight line-clamp-2">
+                  {t.title}
+                </h3>
+                <div className="flex flex-wrap gap-2 mt-6">
+                  {t.departmentName && <Chip tone="neutral">{t.departmentName}</Chip>}
+                  {t.category && <Chip tone="electric">{t.category}</Chip>}
+                  <StatusBadge status={t.status} />
+                </div>
+                <div className="mt-auto pt-8 flex items-end justify-between">
+                  <div>
+                    <div className="text-xs text-slate-900/65">
+                      {t.submissionDeadline ? 'Closes in' : 'Deadline'}
+                    </div>
+                    {t.submissionDeadline ? (
+                      <CountdownLarge iso={t.submissionDeadline} />
+                    ) : (
+                      <div className="text-lg font-semibold text-slate-900/65">Not set</div>
+                    )}
+                  </div>
+                  <span className="px-6 py-3 btn-electric rounded-3xl text-xs">VIEW DETAILS</span>
+                </div>
+              </GlassCard>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+
+function CountdownLarge({ iso }: { iso: string }) {
+  const ms = new Date(iso).getTime() - Date.now();
+  const days = Math.ceil(ms / 86_400_000);
+  if (days < 0) return <div className="text-2xl font-semibold text-slate-900/50">Closed</div>;
+  if (days === 0) return <div className="text-2xl font-semibold text-rose-600">Today</div>;
+  const tone = days <= 3 ? 'text-rose-600' : days <= 7 ? 'text-amber-600' : 'text-emerald-600';
+  return <div className={`text-2xl font-semibold ${tone}`}>{days} day{days !== 1 && 's'}</div>;
 }

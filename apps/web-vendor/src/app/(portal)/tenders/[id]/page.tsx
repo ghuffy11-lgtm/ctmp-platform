@@ -1,9 +1,12 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { ArrowLeft, Check, FileText, Download } from 'lucide-react';
 import { get } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { GlassCard } from '@/components/ui/GlassCard';
+import { Loading, ErrorBanner } from '@/components/ui/Empty';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 
 interface TenderDetail {
@@ -15,6 +18,9 @@ interface TenderDetail {
   submissionDeadline: string | null;
   clarificationDeadline?: string | null;
   departmentName?: string;
+  category?: string;
+  estimatedBudget?: string | number | null;
+  requirements?: string[];
   documents?: Array<{
     id: string;
     filename: string;
@@ -48,12 +54,14 @@ export default function VendorTenderDetailPage({ params }: { params: Promise<{ i
     load();
   }, [id]);
 
-  if (loading) return <div className="p-8 text-center text-sm text-text-secondary">Loading…</div>;
+  if (loading) return <Loading />;
   if (error || !tender) {
     return (
-      <div className="p-8 max-w-md mx-auto bg-card border border-danger/30 rounded-xl text-center">
-        <p className="text-sm text-danger">{error ?? 'Tender not found'}</p>
-        <Link href="/tenders" className="inline-block mt-3 text-sm text-accent hover:underline">Back to tenders</Link>
+      <div className="max-w-2xl mx-auto space-y-4">
+        <ErrorBanner message={error ?? 'Tender not found'} />
+        <Link href="/tenders" className="inline-flex items-center gap-2 text-electric-500 hover:underline text-sm">
+          <ArrowLeft className="w-4 h-4" /> Back to Tenders
+        </Link>
       </div>
     );
   }
@@ -61,99 +69,121 @@ export default function VendorTenderDetailPage({ params }: { params: Promise<{ i
   const canBid = BID_ELIGIBLE_STATUSES.has(tender.status);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-5">
-      <nav className="text-xs text-text-secondary flex items-center gap-1">
-        <Link href="/tenders" className="hover:text-accent">Tenders</Link>
-        <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-        <span className="text-text-primary font-medium">{tender.referenceNumber}</span>
-      </nav>
+    <div className="max-w-6xl mx-auto space-y-6">
+      <Link
+        href="/tenders"
+        className="inline-flex items-center gap-2 text-electric-500 hover:text-electric-600 hover:underline text-sm"
+      >
+        <ArrowLeft className="w-4 h-4" /> Back to Tenders
+      </Link>
 
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary tracking-tight">{tender.title}</h1>
-          <p className="text-sm text-text-secondary mt-0.5 font-mono">{tender.referenceNumber}</p>
-        </div>
-        <StatusBadge status={tender.status} />
-      </div>
-
-      {tender.description && (
-        <div className="bg-card border border-border rounded-xl p-5">
-          <h2 className="text-sm font-bold text-text-primary mb-2">Description</h2>
-          <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">{tender.description}</p>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {tender.submissionDeadline && (
-          <DeadlineCard label="Submission Deadline" iso={tender.submissionDeadline} />
-        )}
-        {tender.clarificationDeadline && (
-          <DeadlineCard label="Clarification Deadline" iso={tender.clarificationDeadline} />
-        )}
-        {tender.departmentName && (
-          <Card label="Department" value={tender.departmentName} />
-        )}
-      </div>
-
-      {tender.documents && tender.documents.length > 0 && (
-        <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-border bg-bg">
-            <p className="text-sm font-bold text-text-primary">Tender Documents</p>
+      <GlassCard padding="xl">
+        <div className="flex flex-wrap items-start justify-between gap-6">
+          <div className="min-w-0 flex-1">
+            <div className="font-mono text-sm text-slate-900/55">{tender.referenceNumber}</div>
+            <h1 className="heading-font text-3xl md:text-4xl font-semibold mt-2 tracking-tighter">
+              {tender.title}
+            </h1>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <StatusBadge status={tender.status} />
+              {tender.departmentName && (
+                <span className="text-sm text-slate-900/65">{tender.departmentName}</span>
+              )}
+              {tender.category && (
+                <span className="text-sm text-electric-600">· {tender.category}</span>
+              )}
+            </div>
           </div>
-          <table className="w-full text-sm">
-            <thead className="bg-bg/40">
-              <tr>
-                <th className="px-5 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-text-secondary">Filename</th>
-                <th className="px-5 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-text-secondary">Size</th>
-                <th className="px-5 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-text-secondary">Uploaded</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {tender.documents.map(d => (
-                <tr key={d.id} className="hover:bg-bg/40">
-                  <td className="px-5 py-2.5 text-text-primary font-semibold">{d.filename}</td>
-                  <td className="px-5 py-2.5 text-text-secondary">{Math.round(d.fileSize / 1024)} KB</td>
-                  <td className="px-5 py-2.5 text-text-secondary text-xs">
-                    {new Date(d.uploadedAt).toLocaleDateString('en-GB')}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {tender.estimatedBudget != null && (
+            <div className="text-right">
+              <div className="text-xs uppercase tracking-[0.18em] text-slate-900/55">Estimated Budget</div>
+              <div className="text-3xl md:text-4xl font-semibold text-emerald-600 mt-1">
+                {formatBudget(tender.estimatedBudget)}
+              </div>
+            </div>
+          )}
         </div>
-      )}
 
-      {canBid && (
-        <div className="bg-accent/5 border border-accent rounded-xl p-5 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-bold text-accent">Ready to bid?</p>
-            <p className="text-xs text-text-secondary mt-1">
-              Start the bid wizard to upload your technical and commercial envelopes.
-            </p>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 mt-12">
+          <div className="lg:col-span-2 space-y-10">
+            {tender.description && (
+              <section>
+                <h3 className="heading-font text-lg font-semibold mb-3">Description</h3>
+                <p className="text-slate-900/80 leading-relaxed whitespace-pre-wrap">{tender.description}</p>
+              </section>
+            )}
+
+            {tender.requirements && tender.requirements.length > 0 && (
+              <section>
+                <h3 className="heading-font text-lg font-semibold mb-4">Key Requirements</h3>
+                <ul className="space-y-3">
+                  {tender.requirements.map((req, i) => (
+                    <li key={i} className="flex gap-3 text-slate-900/80">
+                      <Check className="w-5 h-5 text-electric-500 shrink-0 mt-0.5" />
+                      <span>{req}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {tender.documents && tender.documents.length > 0 && (
+              <section>
+                <h3 className="heading-font text-lg font-semibold mb-4">Tender Documents</h3>
+                <div className="space-y-2">
+                  {tender.documents.map(d => (
+                    <div
+                      key={d.id}
+                      className="flex items-center justify-between gap-4 rounded-2xl bg-slate-900/5 border border-slate-900/10 px-5 py-3"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <FileText className="w-5 h-5 text-electric-500 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">{d.filename}</div>
+                          <div className="text-xs text-slate-900/55">
+                            {(d.fileSize / 1024).toFixed(0)} KB · Uploaded {formatDate(d.uploadedAt)}
+                          </div>
+                        </div>
+                      </div>
+                      <button className="btn-ghost px-4 py-2 rounded-2xl text-xs flex items-center gap-2">
+                        <Download className="w-4 h-4" /> Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
-          <Link
-            href={`/bids/wizard/${tender.id}`}
-            className="px-5 py-2 bg-accent text-white rounded-lg font-bold hover:opacity-90"
-          >
-            Start Bid →
-          </Link>
-        </div>
-      )}
-      {!canBid && (
-        <div className="bg-bg border border-border rounded-xl p-4 text-sm text-text-secondary">
-          Bidding is only available while the tender is in <code>Published</code> or <code>Clarification Period</code>.
-          Current status: <strong>{tender.status}</strong>.
-        </div>
-      )}
-    </div>
-  );
-}
 
-function Card({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-card border border-border rounded-xl p-4">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">{label}</p>
-      <p className="text-sm font-bold text-text-primary mt-1">{value}</p>
+          <aside className="space-y-4">
+            {tender.submissionDeadline && (
+              <DeadlineCard label="Submission Deadline" iso={tender.submissionDeadline} />
+            )}
+            {tender.clarificationDeadline && (
+              <DeadlineCard label="Clarification Deadline" iso={tender.clarificationDeadline} />
+            )}
+
+            {canBid ? (
+              <Link
+                href={`/bids/wizard/${tender.id}`}
+                className="btn-electric block text-center rounded-3xl py-5 text-base font-semibold tracking-wide"
+              >
+                START BID
+              </Link>
+            ) : (
+              <div className="rounded-3xl border border-slate-900/10 bg-slate-900/5 p-5 text-sm text-slate-900/70 leading-relaxed">
+                Bidding is only available during <strong className="text-slate-900">Published</strong>{' '}
+                or <strong className="text-slate-900">Clarification Period</strong>.
+              </div>
+            )}
+            {tender.documents && tender.documents.length > 0 && (
+              <button className="btn-ghost w-full rounded-3xl py-4 text-sm">
+                Download All Documents
+              </button>
+            )}
+          </aside>
+        </div>
+      </GlassCard>
     </div>
   );
 }
@@ -162,15 +192,30 @@ function DeadlineCard({ label, iso }: { label: string; iso: string }) {
   const date = new Date(iso);
   const ms = date.getTime() - Date.now();
   const days = Math.ceil(ms / 86_400_000);
+  const tone = days <= 3 ? 'text-rose-600' : days <= 7 ? 'text-amber-600' : 'text-emerald-600';
   return (
-    <div className="bg-card border border-border rounded-xl p-4">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">{label}</p>
-      <p className="text-sm font-bold text-text-primary mt-1">
+    <div className="glass rounded-3xl p-6">
+      <div className="text-xs uppercase tracking-[0.18em] text-slate-900/55">{label}</div>
+      <div className="heading-font text-2xl font-semibold mt-2 tracking-tighter">
         {date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-      </p>
-      <p className={`text-xs mt-0.5 ${days <= 3 ? 'text-danger' : 'text-text-secondary'}`}>
+      </div>
+      <div className={`text-sm mt-1 ${tone}`}>
         {days > 0 ? `${days} day${days !== 1 ? 's' : ''} remaining` : days === 0 ? 'Today' : 'Passed'}
-      </p>
+      </div>
     </div>
   );
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatBudget(value: string | number) {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'KWD',
+    maximumFractionDigits: 0,
+  }).format(n);
 }

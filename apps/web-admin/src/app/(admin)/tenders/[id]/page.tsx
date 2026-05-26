@@ -6,6 +6,25 @@ import { useParams } from 'next/navigation';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import {
+  AlertCircle,
+  ChevronRight,
+  Loader2,
+  Send,
+  Globe,
+  Pencil,
+  Info,
+  Building2,
+  FolderOpen,
+  Upload,
+  Download,
+  Check,
+  FileText,
+  Table2,
+  Paperclip,
+  MessageSquare,
+  Shield,
+} from 'lucide-react';
 
 interface TenderDocument {
   id: string;
@@ -35,12 +54,19 @@ interface TenderDetail {
 
 type TabId = 'overview' | 'clarifications' | 'bids' | 'audit';
 
-const TABS: { id: TabId; label: string; icon: string }[] = [
-  { id: 'overview', label: 'Overview', icon: 'info' },
-  { id: 'clarifications', label: 'Clarifications', icon: 'forum' },
-  { id: 'bids', label: 'Bids', icon: 'description' },
-  { id: 'audit', label: 'Audit Trail', icon: 'policy' },
+const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: 'overview', label: 'Overview', icon: <Info className="w-4 h-4" /> },
+  { id: 'clarifications', label: 'Clarifications', icon: <MessageSquare className="w-4 h-4" /> },
+  { id: 'bids', label: 'Bids', icon: <FileText className="w-4 h-4" /> },
+  { id: 'audit', label: 'Audit Trail', icon: <Shield className="w-4 h-4" /> },
 ];
+
+const TAB_STUB_ICONS: Record<TabId, React.ReactNode> = {
+  overview: <Info className="w-12 h-12 text-text-secondary/20" />,
+  clarifications: <MessageSquare className="w-12 h-12 text-text-secondary/20" />,
+  bids: <FileText className="w-12 h-12 text-text-secondary/20" />,
+  audit: <Shield className="w-12 h-12 text-text-secondary/20" />,
+};
 
 const LIFECYCLE_STAGES = [
   { label: 'Draft', key: 'Draft' },
@@ -49,11 +75,14 @@ const LIFECYCLE_STAGES = [
   { label: 'Published', key: 'Published' },
   { label: 'Clarification Period', key: 'Clarification Period' },
   { label: 'Submission Closed', key: 'Submission Closed' },
+  { label: 'Technical Opening', key: 'Technical Opening' },
   { label: 'Technical Evaluation', key: 'Technical Evaluation' },
+  { label: 'Commercial Sealed', key: 'Commercial Sealed' },
   { label: 'Comm. Opening', key: 'Committee Commercial Opening' },
   { label: 'Commercial Eval.', key: 'Commercial Evaluation / Comparison' },
   { label: 'Award Recommendation', key: 'Award Recommendation' },
   { label: 'Awarded', key: 'Awarded' },
+  { label: 'Tender Closed', key: 'Tender Closed' },
 ];
 
 function formatFileSize(bytes: number): string {
@@ -62,11 +91,11 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function getFileIcon(fileType: string): string {
-  if (fileType.includes('pdf')) return 'picture_as_pdf';
-  if (fileType.includes('word') || fileType.includes('doc')) return 'description';
-  if (fileType.includes('sheet') || fileType.includes('excel') || fileType.includes('xls')) return 'table_chart';
-  return 'attachment';
+function getFileIcon(fileType: string): React.ReactNode {
+  if (fileType.includes('pdf')) return <FileText className="w-5 h-5 text-text-secondary" />;
+  if (fileType.includes('word') || fileType.includes('doc')) return <FileText className="w-5 h-5 text-text-secondary" />;
+  if (fileType.includes('sheet') || fileType.includes('excel') || fileType.includes('xls')) return <Table2 className="w-5 h-5 text-text-secondary" />;
+  return <Paperclip className="w-5 h-5 text-text-secondary" />;
 }
 
 const EDITABLE_STATUSES = ['Draft', 'Internal Review', 'Approved'];
@@ -123,7 +152,7 @@ export default function TenderDetailPage() {
   if (error || !tender) {
     return (
       <div className="p-8 max-w-[1400px] mx-auto flex flex-col items-center gap-3 py-24">
-        <span className="material-symbols-outlined text-[48px] text-danger">error_outline</span>
+        <AlertCircle className="w-12 h-12 text-danger" />
         <p className="text-sm text-text-secondary">{error ?? 'Tender not found'}</p>
         <Link href="/tenders" className="text-sm text-accent hover:underline font-semibold">
           Back to Tenders
@@ -139,7 +168,7 @@ export default function TenderDetailPage() {
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-xs text-text-secondary mb-6">
         <Link href="/tenders" className="hover:text-accent transition-colors">Tenders</Link>
-        <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+        <ChevronRight className="w-3.5 h-3.5" />
         <span className="text-text-primary font-semibold">{tender.referenceNumber}</span>
       </nav>
 
@@ -169,12 +198,12 @@ export default function TenderDetailPage() {
             >
               {actionLoading === 'submit-for-approval' ? (
                 <>
-                  <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   Submitting…
                 </>
               ) : (
                 <>
-                  <span className="material-symbols-outlined text-[16px]">send</span>
+                  <Send className="w-4 h-4" />
                   Submit for Approval
                 </>
               )}
@@ -186,7 +215,7 @@ export default function TenderDetailPage() {
               disabled={actionLoading !== null}
               className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
             >
-              <span className="material-symbols-outlined text-[16px]">publish</span>
+              <Globe className="w-4 h-4" />
               {actionLoading === 'publish' ? 'Publishing…' : 'Publish'}
             </button>
           )}
@@ -199,12 +228,36 @@ export default function TenderDetailPage() {
               {actionLoading === 'close-submissions' ? 'Closing…' : 'Close Submissions'}
             </button>
           )}
+          {tender.status === 'Submission Closed' && (
+            <button
+              onClick={() => handleAction('technical-opening')}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
+            >
+              <FolderOpen className="w-4 h-4" />
+              {actionLoading === 'technical-opening' ? 'Opening…' : 'Open Technical Envelopes'}
+            </button>
+          )}
+          {tender.status === 'Awarded' && (
+            <button
+              onClick={() => {
+                if (confirm('Issue formal award? This closes the tender and notifies the winning vendor.')) {
+                  handleAction('award');
+                }
+              }}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
+            >
+              <Check className="w-4 h-4" />
+              {actionLoading === 'award' ? 'Issuing…' : 'Issue Award'}
+            </button>
+          )}
           {EDITABLE_STATUSES.includes(tender.status) && (
             <Link
               href={`/tenders/${tender.id}/edit`}
               className="px-4 py-2 border border-border text-text-secondary text-sm font-semibold rounded-lg hover:bg-bg transition-colors flex items-center gap-1.5"
             >
-              <span className="material-symbols-outlined text-[16px]">edit</span>
+              <Pencil className="w-4 h-4" />
               Edit
             </Link>
           )}
@@ -237,7 +290,7 @@ export default function TenderDetailPage() {
                   : 'border-transparent text-text-secondary hover:text-text-primary'
               }`}
             >
-              <span className="material-symbols-outlined text-[16px]">{t.icon}</span>
+              {t.icon}
               {t.label}
             </button>
           ))}
@@ -252,7 +305,7 @@ export default function TenderDetailPage() {
             {/* Description Card */}
             <div className="bg-card rounded-xl border border-border shadow-[0_1px_4px_rgba(0,0,0,0.04)] p-6">
               <div className="flex items-center gap-2 mb-5">
-                <span className="material-symbols-outlined text-[20px] text-accent">info</span>
+                <Info className="w-5 h-5 text-accent" />
                 <h3 className="text-base font-semibold text-text-primary">Project Description</h3>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -266,7 +319,7 @@ export default function TenderDetailPage() {
                     </p>
                     <div className="flex items-center gap-3 bg-bg p-3 rounded-lg border border-border">
                       <div className="w-9 h-9 bg-accent/10 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <span className="material-symbols-outlined text-[18px] text-accent">business</span>
+                        <Building2 className="w-4.5 h-4.5 text-accent" />
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-text-primary">{tender.departmentName}</p>
@@ -320,7 +373,7 @@ export default function TenderDetailPage() {
             <div className="bg-card rounded-xl border border-border shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
               <div className="px-6 py-4 border-b border-border flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[20px] text-accent">folder_open</span>
+                  <FolderOpen className="w-5 h-5 text-accent" />
                   <h3 className="text-base font-semibold text-text-primary">Tender Documents</h3>
                   <span className="ml-1 text-xs font-semibold bg-bg border border-border text-text-secondary px-2 py-0.5 rounded-full">
                     {tender.documents.length}
@@ -328,16 +381,14 @@ export default function TenderDetailPage() {
                 </div>
                 {EDITABLE_STATUSES.includes(tender.status) && (
                   <button className="flex items-center gap-1.5 text-sm text-accent hover:underline font-semibold">
-                    <span className="material-symbols-outlined text-[16px]">upload</span>
+                    <Upload className="w-4 h-4" />
                     Upload
                   </button>
                 )}
               </div>
               {tender.documents.length === 0 ? (
                 <div className="py-10 text-center">
-                  <span className="material-symbols-outlined text-[40px] text-text-secondary/30 block mb-2">
-                    folder_open
-                  </span>
+                  <FolderOpen className="w-10 h-10 text-text-secondary/30 mx-auto mb-2" />
                   <p className="text-sm text-text-secondary">No documents attached yet.</p>
                 </div>
               ) : (
@@ -357,9 +408,7 @@ export default function TenderDetailPage() {
                       <tr key={doc.id} className="hover:bg-bg/60 transition-colors">
                         <td className="px-6 py-3.5">
                           <div className="flex items-center gap-3">
-                            <span className="material-symbols-outlined text-[20px] text-text-secondary">
-                              {getFileIcon(doc.fileType)}
-                            </span>
+                            {getFileIcon(doc.fileType)}
                             <span className="text-sm text-text-primary">{doc.fileName}</span>
                           </div>
                         </td>
@@ -374,7 +423,7 @@ export default function TenderDetailPage() {
                             className="p-1.5 hover:bg-bg rounded-lg text-text-secondary hover:text-accent transition-colors"
                             title="Download"
                           >
-                            <span className="material-symbols-outlined text-[18px]">download</span>
+                            <Download className="w-4.5 h-4.5" />
                           </button>
                         </td>
                       </tr>
@@ -389,9 +438,9 @@ export default function TenderDetailPage() {
           <div className="col-span-12 lg:col-span-4 space-y-5">
             {/* Stats Bento */}
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-sidebar text-white p-5 rounded-xl">
-                <p className="text-xs font-semibold tracking-widest text-white/50 uppercase mb-2">Days Left</p>
-                <p className="text-4xl font-bold leading-none">
+              <div className="bg-card border border-border p-5 rounded-xl">
+                <p className="text-xs font-semibold tracking-widest text-text-secondary uppercase mb-2">Days Left</p>
+                <p className="text-4xl font-bold text-text-primary leading-none">
                   {tender.daysLeft != null && tender.daysLeft >= 0 ? tender.daysLeft : '—'}
                 </p>
               </div>
@@ -423,7 +472,7 @@ export default function TenderDetailPage() {
                         }`}
                       >
                         {done ? (
-                          <span className="material-symbols-outlined text-[11px]">check</span>
+                          <Check className="w-3 h-3" />
                         ) : (
                           i + 1
                         )}
@@ -456,9 +505,9 @@ export default function TenderDetailPage() {
       {/* Stub tabs */}
       {tab !== 'overview' && (
         <div className="bg-card rounded-xl border border-border p-16 text-center">
-          <span className="material-symbols-outlined text-[48px] text-text-secondary/20 block mb-4">
-            {TABS.find(t => t.id === tab)?.icon}
-          </span>
+          <div className="flex justify-center mb-4">
+            {TAB_STUB_ICONS[tab]}
+          </div>
           <p className="text-sm font-semibold text-text-primary mb-1">
             {tab === 'clarifications' && 'Clarification Center'}
             {tab === 'bids' && 'Submitted Bids'}

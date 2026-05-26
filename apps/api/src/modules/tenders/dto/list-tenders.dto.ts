@@ -25,5 +25,5 @@ export class ListTendersDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  limit?: number = 20;
+  pageSize?: number = 20;
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { get } from '@/lib/api';
 import { getAccessToken, hasPermission } from '@/lib/auth';
+import { Shield, RefreshCw, Search, ChevronDown } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ export default function AuditLogPage() {
   if (!canView) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 gap-4 text-center max-w-md mx-auto">
-        <span className="material-symbols-outlined text-[72px] text-text-secondary/30">policy</span>
+        <Shield className="text-text-secondary/30" style={{ width: 72, height: 72 }} />
         <h1 className="text-xl font-bold text-text-primary">Audit Access Required</h1>
         <p className="text-sm text-text-secondary">
           Viewing audit logs requires the <code className="bg-bg px-1.5 py-0.5 rounded text-xs">audit:view</code> permission.
@@ -122,15 +123,12 @@ export default function AuditLogPage() {
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-text-primary tracking-tight">Audit Log Viewer</h1>
-          <p className="text-sm text-text-secondary mt-0.5">
-            Append-only event log. Hash-chained, immutable. Every entry was written by the database, not the application.
-          </p>
         </div>
         <button
           onClick={fetchLogs}
           className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card flex items-center gap-2"
         >
-          <span className="material-symbols-outlined text-[16px]">refresh</span>
+          <RefreshCw className="w-4 h-4" />
           Refresh
         </button>
       </div>
@@ -138,7 +136,7 @@ export default function AuditLogPage() {
       {/* Filter bar */}
       <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-[200px]">
-          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-text-secondary">search</span>
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -271,9 +269,7 @@ function FragmentRow({ log, isExpanded, onToggle }: { log: AuditLog; isExpanded:
           )}
         </td>
         <td className="px-4 py-3">
-          <span className={`material-symbols-outlined text-[18px] text-text-secondary transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
-            expand_more
-          </span>
+          <ChevronDown className={`w-5 h-5 text-text-secondary transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
         </td>
       </tr>
       {isExpanded && (

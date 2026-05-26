@@ -1,9 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { get, patch } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { GlassCard } from '@/components/ui/GlassCard';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Input, Textarea, ReadOnlyField } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { Loading, ErrorBanner, SuccessBanner } from '@/components/ui/Empty';
 
 interface ProfileResponse {
   vendor: {
@@ -44,6 +49,14 @@ type Editable = {
 const EMPTY: Editable = {
   companyName: '', taxNumber: '', country: '', address: '',
   phone: '', website: '', contactFullName: '', contactPhone: '',
+};
+
+const VENDOR_STATUS_LABEL: Record<string, string> = {
+  PENDING: 'Internal Review',
+  APPROVED: 'Approved',
+  REJECTED: 'Cancelled',
+  SUSPENDED: 'Suspended',
+  BLACKLISTED: 'Cancelled',
 };
 
 export default function VendorProfilePage() {
@@ -112,101 +125,140 @@ export default function VendorProfilePage() {
     }
   }
 
-  if (loading) return <div className="p-8 text-center text-sm text-text-secondary">Loading…</div>;
+  if (loading) return <Loading />;
   if (!profile) {
     return (
-      <div className="p-8 max-w-md mx-auto bg-card border border-danger/30 rounded-xl text-center">
-        <p className="text-sm text-danger">{error ?? 'Profile not available'}</p>
+      <div className="max-w-2xl mx-auto">
+        <ErrorBanner message={error ?? 'Profile not available'} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-5 max-w-3xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary tracking-tight">Company Profile</h1>
-        <p className="text-sm text-text-secondary mt-0.5">Update non-sensitive fields. Email changes require admin support.</p>
-      </div>
+    <div className="max-w-4xl mx-auto space-y-8">
+      <PageHeader
+        title="Company Profile"
+        subtitle="Update non-sensitive fields. Email changes require admin support."
+      />
 
-      <div className="bg-card border border-border rounded-xl p-5 flex items-center justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-text-secondary">Registration Status</p>
-          <div className="mt-1 flex items-center gap-2">
-            <StatusBadge status={
-              profile.vendor.status === 'PENDING' ? 'Internal Review' :
-              profile.vendor.status === 'APPROVED' ? 'Approved' :
-              profile.vendor.status === 'REJECTED' ? 'Cancelled' :
-              profile.vendor.status === 'SUSPENDED' ? 'Suspended' :
-              profile.vendor.status === 'BLACKLISTED' ? 'Cancelled' :
-              'Draft'
-            } />
-            <span className="text-xs text-text-secondary">{profile.vendor.status}</span>
+      <GlassCard>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-900/55">
+              Registration Status
+            </p>
+            <div className="mt-2 flex items-center gap-3">
+              <StatusBadge status={VENDOR_STATUS_LABEL[profile.vendor.status] ?? 'Draft'} />
+              <span className="text-xs text-slate-900/55">{profile.vendor.status}</span>
+            </div>
+          </div>
+          <div className="text-right text-sm text-slate-900/65">
+            <p>Registered {new Date(profile.vendor.registeredAt).toLocaleDateString('en-GB')}</p>
+            {profile.vendor.approvedAt && (
+              <p className="text-emerald-600">
+                Approved {new Date(profile.vendor.approvedAt).toLocaleDateString('en-GB')}
+              </p>
+            )}
           </div>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-text-secondary">Registered {new Date(profile.vendor.registeredAt).toLocaleDateString('en-GB')}</p>
-          {profile.vendor.approvedAt && (
-            <p className="text-xs text-success">Approved {new Date(profile.vendor.approvedAt).toLocaleDateString('en-GB')}</p>
-          )}
-        </div>
-      </div>
+      </GlassCard>
 
-      {error && (
-        <div className="bg-danger/10 border border-danger/30 rounded-lg p-3 text-sm text-danger">{error}</div>
-      )}
-      {success && (
-        <div className="bg-success/10 border border-success/30 rounded-lg p-3 text-sm text-success">Profile saved.</div>
-      )}
+      {error && <ErrorBanner message={error} />}
+      {success && <SuccessBanner message="Profile saved." />}
 
-      <form onSubmit={handleSave} className="bg-card border border-border rounded-xl p-5 space-y-5">
-        <Section title="Company">
-          <Field label="Company Name" value={form.companyName} onChange={v => update('companyName', v)} required />
-          <Field label="Tax Number" value={form.taxNumber} onChange={v => update('taxNumber', v)} />
-          <Field label="Country (ISO-3166)" value={form.country} onChange={v => update('country', v)} maxLength={2} placeholder="US" />
-          <Field label="Phone" value={form.phone} onChange={v => update('phone', v)} />
-          <Field label="Website" value={form.website} onChange={v => update('website', v)} colspan />
-          <Field label="Address" value={form.address} onChange={v => update('address', v)} colspan multiline />
+      <GlassCard padding="xl">
+        <form onSubmit={handleSave} className="space-y-10">
+          <Section title="Company">
+            <Input
+              label="Company Name"
+              value={form.companyName}
+              onChange={e => update('companyName', e.target.value)}
+              required
+            />
+            <Input
+              label="Tax Number"
+              value={form.taxNumber}
+              onChange={e => update('taxNumber', e.target.value)}
+            />
+            <Input
+              label="Country (ISO-3166)"
+              value={form.country}
+              onChange={e => update('country', e.target.value)}
+              maxLength={2}
+              placeholder="KW"
+            />
+            <Input
+              label="Phone"
+              value={form.phone}
+              onChange={e => update('phone', e.target.value)}
+            />
+            <Input
+              label="Website"
+              value={form.website}
+              onChange={e => update('website', e.target.value)}
+              className="md:col-span-2"
+            />
+            <Textarea
+              label="Address"
+              value={form.address}
+              onChange={e => update('address', e.target.value)}
+              className="md:col-span-2"
+              rows={3}
+            />
+            <ReadOnlyField
+              label="Registration Number"
+              value={profile.vendor.registrationNumber ?? '—'}
+              hint="Cannot be changed after registration."
+              className="md:col-span-2"
+            />
+          </Section>
 
-          <ReadOnlyField
-            label="Registration Number"
-            value={profile.vendor.registrationNumber ?? '—'}
-            note="Cannot be changed after registration."
-          />
-        </Section>
+          <Section title="Primary Contact">
+            <Input
+              label="Full Name"
+              value={form.contactFullName}
+              onChange={e => update('contactFullName', e.target.value)}
+              required
+            />
+            <Input
+              label="Phone"
+              value={form.contactPhone}
+              onChange={e => update('contactPhone', e.target.value)}
+            />
+            <ReadOnlyField
+              label="Email"
+              value={profile.primaryContact?.email ?? '—'}
+              hint="Email change requires re-verification — contact admin support."
+              className="md:col-span-2"
+            />
+            <ReadOnlyField
+              label="MFA"
+              value={profile.primaryContact?.mfaEnabled ? 'Enabled' : 'Disabled'}
+              hint="Configure MFA via your authenticator app and admin support."
+              className="md:col-span-2"
+            />
+          </Section>
 
-        <Section title="Primary Contact">
-          <Field label="Full Name" value={form.contactFullName} onChange={v => update('contactFullName', v)} required />
-          <Field label="Phone" value={form.contactPhone} onChange={v => update('contactPhone', v)} />
-          <ReadOnlyField
-            label="Email"
-            value={profile.primaryContact?.email ?? '—'}
-            note="Email change requires re-verification — contact admin support."
-          />
-          <ReadOnlyField
-            label="MFA"
-            value={profile.primaryContact?.mfaEnabled ? 'Enabled' : 'Disabled'}
-            note="Configure MFA via your authenticator app and admin support."
-          />
-        </Section>
-
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          <button
-            type="button"
-            onClick={() => setForm(original)}
-            disabled={!dirty || saving}
-            className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-bg disabled:opacity-40"
-          >
-            Discard
-          </button>
-          <button
-            type="submit"
-            disabled={!dirty || saving}
-            className="px-5 py-2 bg-accent text-white rounded-lg font-bold disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
-        </div>
-      </form>
+          <div className="flex justify-end gap-3 border-t border-slate-900/10 pt-6">
+            <Button
+              type="button"
+              variant="ghost"
+              size="md"
+              onClick={() => setForm(original)}
+              disabled={!dirty || saving}
+            >
+              Discard
+            </Button>
+            <Button
+              type="submit"
+              size="md"
+              disabled={!dirty || saving}
+            >
+              {saving ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </div>
+        </form>
+      </GlassCard>
     </div>
   );
 }
@@ -214,63 +266,10 @@ export default function VendorProfilePage() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-3">{title}</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label, value, onChange, required, maxLength, placeholder, colspan, multiline,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  required?: boolean;
-  maxLength?: number;
-  placeholder?: string;
-  colspan?: boolean;
-  multiline?: boolean;
-}) {
-  return (
-    <div className={colspan ? 'md:col-span-2' : ''}>
-      <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">
-        {label}{required && ' *'}
-      </label>
-      {multiline ? (
-        <textarea
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          rows={3}
-          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-accent bg-bg resize-none"
-        />
-      ) : (
-        <input
-          type="text"
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          required={required}
-          maxLength={maxLength}
-          placeholder={placeholder}
-          className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-accent"
-        />
-      )}
-    </div>
-  );
-}
-
-function ReadOnlyField({ label, value, note }: { label: string; value: string; note?: string }) {
-  return (
-    <div>
-      <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">
-        {label} <span className="text-text-secondary/60 font-normal italic">(read-only)</span>
-      </label>
-      <div className="px-3 py-2 border border-border rounded-lg text-sm bg-bg/50 text-text-secondary cursor-not-allowed">
-        {value}
-      </div>
-      {note && <p className="text-[10px] text-text-secondary/70 italic mt-1">{note}</p>}
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-900/55 mb-6">
+        {title}
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">{children}</div>
     </div>
   );
 }

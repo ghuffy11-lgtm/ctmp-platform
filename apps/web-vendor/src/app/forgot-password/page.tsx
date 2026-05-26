@@ -2,7 +2,11 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { MailCheck } from 'lucide-react';
 import { post } from '@/lib/api';
+import { AuthShell } from '@/components/layout/AuthShell';
+import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -23,43 +27,44 @@ export default function ForgotPasswordPage() {
 
   if (submitted) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-bg">
-        <div className="bg-card rounded-2xl shadow-xl border border-border p-8 max-w-md text-center">
-          <span className="material-symbols-outlined text-[48px] text-success mb-4 inline-block">mark_email_read</span>
-          <h1 className="text-xl font-bold text-text-primary mb-2">Check your email</h1>
-          <p className="text-sm text-text-secondary mb-4">
+      <AuthShell title="Check your email" subtitle="Reset instructions are on the way.">
+        <div className="text-center">
+          <div className="inline-flex w-16 h-16 items-center justify-center rounded-3xl bg-emerald-100 border border-emerald-300 mb-5">
+            <MailCheck className="w-8 h-8 text-emerald-600" strokeWidth={1.5} />
+          </div>
+          <p className="text-sm text-slate-900/70 mb-6">
             If an account exists for that email, we have sent reset instructions.
           </p>
-          <Link href="/login" className="inline-block px-4 py-2 bg-accent text-white rounded-lg font-bold">
-            Back to sign in
+          <Link href="/login">
+            <Button size="lg" fullWidth>Back to Sign In</Button>
           </Link>
         </div>
-      </div>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-bg">
-      <form onSubmit={handleSubmit} className="bg-card rounded-2xl shadow-xl border border-border p-8 w-full max-w-md space-y-4">
-        <h1 className="text-2xl font-bold text-text-primary">Reset Password</h1>
-        <p className="text-sm text-text-secondary">Enter your account email. We will send reset instructions.</p>
-        <input
+    <AuthShell title="Reset Password" subtitle="Enter your account email and we'll send instructions.">
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <Input
+          label="Email"
           type="email"
           value={email}
           onChange={e => setEmail(e.target.value)}
           required
-          className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent"
           placeholder="you@company.com"
+          autoComplete="email"
         />
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full py-2.5 bg-accent text-white rounded-lg font-bold disabled:opacity-50"
-        >
+        <Button type="submit" size="lg" fullWidth disabled={loading}>
           {loading ? 'Sending…' : 'Send Reset Email'}
-        </button>
-        <Link href="/login" className="block text-center text-xs text-text-secondary hover:text-accent">Back to sign in</Link>
+        </Button>
+        <Link
+          href="/login"
+          className="block text-center text-xs text-slate-900/55 hover:text-electric-600"
+        >
+          Back to sign in
+        </Link>
       </form>
-    </div>
+    </AuthShell>
   );
 }

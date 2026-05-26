@@ -56,7 +56,7 @@ export class TendersService {
     }
 
     const page = Number(query.page ?? 1);
-    const pageSize = Number(query.limit ?? 20);
+    const pageSize = Number(query.pageSize ?? 20);
     const skip = (page - 1) * pageSize;
 
     const [total, tenders] = await this.prisma.$transaction([
@@ -66,7 +66,10 @@ export class TendersService {
         skip,
         take: pageSize,
         orderBy: { updatedAt: 'desc' },
-        include: { department: { select: { name: true } } },
+        include: {
+          department: { select: { name: true, code: true } },
+          createdByUser: { select: { displayName: true } },
+        },
       }),
     ]);
 
@@ -82,7 +85,8 @@ export class TendersService {
     const tender = await this.prisma.tender.findUnique({
       where: { id },
       include: {
-        department: { select: { name: true } },
+        department: { select: { name: true, code: true } },
+        createdByUser: { select: { displayName: true } },
         tenderDocuments: true,
         tenderVendors: { include: { vendor: { select: { id: true, companyName: true } } } },
       },
@@ -114,7 +118,10 @@ export class TendersService {
         createdBy: userId,
         owningUserId: userId,
       },
-      include: { department: { select: { name: true } } },
+      include: {
+        department: { select: { name: true, code: true } },
+        createdByUser: { select: { displayName: true } },
+      },
     });
 
     await this.audit.log({
@@ -153,7 +160,10 @@ export class TendersService {
     const updated = await this.prisma.tender.update({
       where: { id },
       data,
-      include: { department: { select: { name: true } } },
+      include: {
+        department: { select: { name: true, code: true } },
+        createdByUser: { select: { displayName: true } },
+      },
     });
 
     await this.audit.log({
@@ -358,6 +368,14 @@ export class TendersService {
       status: STATUS_DB_TO_API[t.status as TenderStatus],
       submissionDeadline: t.submissionCloseAt?.toISOString() ?? null,
       departmentName: t.department?.name ?? '',
+      departmentCode: t.department?.code ?? null,
+      category: t.category ?? null,
+      // Prisma column is `tenderType` (DB `tender_type`); frontend canonical name is `procurementType`.
+      // Mapping here until the Prisma field is renamed under the BUG-008/9/10/11 bundle.
+      procurementType: t.tenderType ?? null,
+      estimatedBudget: t.budgetEstimate != null ? Number(t.budgetEstimate) : null,
+      createdAt: t.createdAt?.toISOString() ?? null,
+      createdByName: t.createdByUser?.displayName ?? null,
       updatedAt: t.updatedAt.toISOString(),
     };
   }

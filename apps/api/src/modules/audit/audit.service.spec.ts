@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AuditRiskLevel } from '@prisma/client';
 import { AuditService } from './audit.service';
 import { PrismaService } from '../../database/prisma.service';
+import { RequestContextService } from '../../common/request-context/request-context.service';
 
 // ─── Mock Prisma ─────────────────────────────────────────────────────────────
 
@@ -38,13 +39,22 @@ const configMock = {
   }),
 };
 
+const requestContextMock = {
+  get: jest.fn().mockReturnValue(undefined),
+  run: jest.fn(),
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const GENESIS = '0'.repeat(64);
 
 // Duplicated from audit.service.ts (not exported — intentional private detail).
+// Must mirror the Date/Buffer branches there exactly, or any test row containing
+// a Date in payload will hash one way in the helper and another in the service.
 function canonicalize(value: unknown): string {
   if (value === null || value === undefined) return 'null';
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  if (Buffer.isBuffer(value)) return JSON.stringify(value.toString('base64'));
   if (Array.isArray(value)) return '[' + (value as unknown[]).map(canonicalize).join(',') + ']';
   if (typeof value === 'object') {
     const obj = value as Record<string, unknown>;
@@ -114,6 +124,7 @@ describe('AuditService', () => {
         AuditService,
         { provide: PrismaService, useValue: prismaMock },
         { provide: ConfigService, useValue: configMock },
+        { provide: RequestContextService, useValue: requestContextMock },
       ],
     }).compile();
 
@@ -235,7 +246,7 @@ describe('AuditService', () => {
       expect(result).toEqual({ ok: true, checked: 3, range: [1n, 3n] });
     });
 
-    it('detects a row whose prevHashChainValue does not match predecessor', async () => {
+    it('detects a link break with breakKind="link"', async () => {
       const row1 = makeAuditRow(1n, null);
       const row2 = makeAuditRow(2n, row1.hashChainValue);
       const row2Broken = { ...row2, prevHashChainValue: 'tampered_prev_value' };
@@ -245,22 +256,79 @@ describe('AuditService', () => {
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
+        expect(result.breakKind).toBe('link');
         expect(result.brokenAtId).toBe('2');
-        expect(result.expectedPrev).toBe(row1.hashChainValue);
+        if (result.breakKind === 'link') {
+          expect(result.expectedPrev).toBe(row1.hashChainValue);
+          expect(result.actualPrev).toBe('tampered_prev_value');
+        }
       }
     });
 
-    it('detects a row whose hashChainValue has been tampered', async () => {
+    it('detects a hash break with breakKind="hash" and reports both stored and recomputed', async () => {
       const row1 = makeAuditRow(1n, null);
-      const row1Tampered = { ...row1, hashChainValue: 'deadbeef'.repeat(8) };
+      const tamperedHash = 'deadbeef'.repeat(8);
+      const row1Tampered = { ...row1, hashChainValue: tamperedHash };
       prismaMock.auditLog.findMany.mockResolvedValue([row1Tampered]);
 
       const result = await service.verifyChain();
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
+        expect(result.breakKind).toBe('hash');
         expect(result.brokenAtId).toBe('1');
+        if (result.breakKind === 'hash') {
+          expect(result.storedHash).toBe(tamperedHash);
+          expect(result.recomputedHash).toBe(row1.hashChainValue);
+          expect(result.recomputedHash).not.toBe(result.storedHash);
+        }
       }
+    });
+
+    // Regression test for AUDIT_CHAIN_BREAK_RCA_2026-05-23. Before the fix,
+    // canonicalize(new Date()) returned '{}' (no enumerable own keys), but
+    // Prisma writes Date to JSONB as an ISO string. verifyChain read back
+    // the ISO string and canonicalized to a quoted string, so the hashes
+    // disagreed. The Date-aware canonicalize closes that gap.
+    it('round-trips a Date in afterValue consistently between log() and verifyChain()', async () => {
+      // 1. Simulate log() with afterValue containing a Date.
+      const approvedAt = new Date('2026-05-21T09:09:34.840Z');
+      const writeTimePayload = {
+        eventType: 'VENDOR_APPROVED',
+        entityType: 'Vendor',
+        entityId: 'vendor-1',
+        actorUserId: 'user-1',
+        actorVendorUserId: undefined,
+        actorRoleCode: undefined,
+        tenderId: undefined,
+        vendorId: 'vendor-1',
+        bidId: undefined,
+        ipAddress: undefined,
+        userAgent: undefined,
+        beforeValue: { status: 'PENDING' },
+        afterValue: { status: 'APPROVED', approvedAt },  // <-- Date, as a real caller would pass
+        reason: undefined,
+        metadata: null,
+        riskLevel: AuditRiskLevel.MEDIUM,
+      };
+      const writeTimeHash = computeHash(GENESIS, writeTimePayload);
+
+      // 2. Simulate the row Prisma would return on readback: Date becomes an
+      //    ISO string in JSONB.
+      const verifyTimeRow = {
+        id: 1n,
+        ...writeTimePayload,
+        afterValue: { status: 'APPROVED', approvedAt: approvedAt.toISOString() },
+        prevHashChainValue: null,
+        hashChainValue: writeTimeHash,
+        eventTime: new Date('2026-01-01T00:00:00Z'),
+      };
+      prismaMock.auditLog.findMany.mockResolvedValue([verifyTimeRow]);
+
+      const result = await service.verifyChain();
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.checked).toBe(1);
     });
 
     it('passes limit to findMany', async () => {
@@ -309,6 +377,33 @@ describe('AuditService', () => {
           data: expect.objectContaining({ prevHashChainValue: prevHash }),
         }),
       );
+    });
+
+    it('falls back to RequestContextService for ipAddress and userAgent when the caller omits them', async () => {
+      requestContextMock.get.mockReturnValueOnce({ ipAddress: '192.0.2.55', userAgent: 'Mozilla/5.0 test' });
+      mockTx.auditLog.findFirst.mockResolvedValue(null);
+
+      await service.log({ eventType: 'TENDER_PUBLISHED', entityType: 'TENDER' });
+
+      const stored = mockTx.auditLog.create.mock.calls[0][0].data;
+      expect(stored.ipAddress).toBe('192.0.2.55');
+      expect(stored.userAgent).toBe('Mozilla/5.0 test');
+    });
+
+    it('prefers explicit ipAddress / userAgent on the entry over request-context values', async () => {
+      requestContextMock.get.mockReturnValueOnce({ ipAddress: '10.0.0.1', userAgent: 'should-be-ignored' });
+      mockTx.auditLog.findFirst.mockResolvedValue(null);
+
+      await service.log({
+        eventType: 'TENDER_PUBLISHED',
+        entityType: 'TENDER',
+        ipAddress: '203.0.113.7',
+        userAgent: 'explicit-agent',
+      });
+
+      const stored = mockTx.auditLog.create.mock.calls[0][0].data;
+      expect(stored.ipAddress).toBe('203.0.113.7');
+      expect(stored.userAgent).toBe('explicit-agent');
     });
 
     it('computes the correct SHA-256 hash', async () => {

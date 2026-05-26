@@ -4,6 +4,22 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import {
+  ClipboardList,
+  RefreshCw,
+  Search,
+  X,
+  AlertCircle,
+  CheckCircle2,
+  Gavel,
+  Trophy,
+  FileText,
+  MessageCircle,
+  Download,
+  XCircle,
+  Table2,
+  Paperclip,
+} from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,9 +97,9 @@ const PRIORITY_STYLES: Record<'HIGH' | 'MEDIUM' | 'LOW', string> = {
   LOW: 'bg-success/10 text-success',
 };
 
-const TASK_TYPE_CONFIG: Record<TaskType, { label: string; icon: string; colorClass: string }> = {
-  TENDER_APPROVAL: { label: 'Tender Approval', icon: 'gavel', colorClass: 'text-accent bg-accent/10' },
-  AWARD_APPROVAL:  { label: 'Award Approval',  icon: 'emoji_events', colorClass: 'text-success bg-success/10' },
+const TASK_TYPE_CONFIG: Record<TaskType, { label: string; icon: React.ReactNode; colorClass: string }> = {
+  TENDER_APPROVAL: { label: 'Tender Approval', icon: <Gavel className="w-4 h-4" />, colorClass: 'text-accent bg-accent/10' },
+  AWARD_APPROVAL:  { label: 'Award Approval',  icon: <Trophy className="w-4 h-4" />, colorClass: 'text-success bg-success/10' },
 };
 
 const TASK_TYPE_FILTER_OPTIONS: { value: string; label: string }[] = [
@@ -130,7 +146,7 @@ function SkeletonRow() {
 function EmptyDetailPanel() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
-      <span className="material-symbols-outlined text-[56px] text-text-secondary/20">checklist</span>
+      <ClipboardList className="w-14 h-14 text-text-secondary/20" />
       <p className="text-sm font-semibold text-text-secondary">No task selected</p>
       <p className="text-xs text-text-secondary/70 max-w-[200px]">
         Click a row in the queue to review its details here.
@@ -141,12 +157,12 @@ function EmptyDetailPanel() {
 
 // ─── Document icon ────────────────────────────────────────────────────────────
 
-function fileIcon(mime: string) {
-  if (mime.includes('pdf')) return { icon: 'picture_as_pdf', color: 'text-danger' };
-  if (mime.includes('word') || mime.includes('doc')) return { icon: 'article', color: 'text-accent' };
+function fileIcon(mime: string): { icon: React.ReactNode } {
+  if (mime.includes('pdf')) return { icon: <FileText className="w-5 h-5 flex-shrink-0 text-danger" /> };
+  if (mime.includes('word') || mime.includes('doc')) return { icon: <FileText className="w-5 h-5 flex-shrink-0 text-accent" /> };
   if (mime.includes('sheet') || mime.includes('excel') || mime.includes('xls'))
-    return { icon: 'table_chart', color: 'text-success' };
-  return { icon: 'description', color: 'text-text-secondary' };
+    return { icon: <Table2 className="w-5 h-5 flex-shrink-0 text-success" /> };
+  return { icon: <Paperclip className="w-5 h-5 flex-shrink-0 text-text-secondary" /> };
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -229,7 +245,11 @@ export default function ApprovalsPage() {
     try {
       const token = getAccessToken();
       if (selectedTask.type === 'AWARD_APPROVAL') {
-        await post(`/tenders/${selectedTask.id}/award-approval`, { action, comments }, token);
+        await post(
+          `/tenders/${selectedTask.id}/award-approval`,
+          { approved: action === 'APPROVE', notes: comments },
+          token,
+        );
       } else {
         // POST /tenders/{id}/approve or /reject — endpoint not yet in contract; backend stub
         const endpoint = action === 'APPROVE'
@@ -271,7 +291,7 @@ export default function ApprovalsPage() {
             disabled={loading}
             className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors shadow-sm disabled:opacity-50"
           >
-            <span className={`material-symbols-outlined text-[18px] ${loading ? 'animate-spin' : ''}`}>refresh</span>
+            <RefreshCw className={`w-4.5 h-4.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
@@ -279,9 +299,7 @@ export default function ApprovalsPage() {
         {/* Filter Bar */}
         <div className="px-6 py-3 bg-bg border-b border-border flex items-center gap-3 flex-shrink-0">
           <div className="flex-1 relative">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-text-secondary pointer-events-none">
-              search
-            </span>
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-text-secondary pointer-events-none" />
             <input
               type="text"
               value={search}
@@ -311,7 +329,7 @@ export default function ApprovalsPage() {
               className="p-2 border border-border rounded-lg hover:bg-card transition-colors text-text-secondary"
               title="Clear filters"
             >
-              <span className="material-symbols-outlined text-[18px]">close</span>
+              <X className="w-4.5 h-4.5" />
             </button>
           )}
         </div>
@@ -320,7 +338,7 @@ export default function ApprovalsPage() {
         <div className="flex-1 overflow-y-auto">
           {error ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <span className="material-symbols-outlined text-[48px] text-danger">error_outline</span>
+              <AlertCircle className="w-12 h-12 text-danger" />
               <p className="text-sm text-text-secondary">{error}</p>
               <button onClick={fetchTasks} className="text-sm text-accent hover:underline font-semibold">Retry</button>
             </div>
@@ -342,7 +360,7 @@ export default function ApprovalsPage() {
                   <tr>
                     <td colSpan={5} className="px-6 py-16 text-center">
                       <div className="flex flex-col items-center gap-3">
-                        <span className="material-symbols-outlined text-[48px] text-text-secondary/20">task_alt</span>
+                        <CheckCircle2 className="w-12 h-12 text-text-secondary/20" />
                         <p className="text-sm text-text-secondary">
                           {tasks.length === 0 ? 'No pending approvals.' : 'No tasks match your filters.'}
                         </p>
@@ -367,7 +385,7 @@ export default function ApprovalsPage() {
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-2">
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${cfg.colorClass}`}>
-                              <span className="material-symbols-outlined text-[16px]">{cfg.icon}</span>
+                              {cfg.icon}
                             </div>
                             <span className="text-xs font-medium text-text-secondary hidden xl:block">{cfg.label}</span>
                           </div>
@@ -464,7 +482,7 @@ export default function ApprovalsPage() {
               {/* Justification */}
               <div className="space-y-2">
                 <label className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary uppercase tracking-wide">
-                  <span className="material-symbols-outlined text-[14px]">description</span>
+                  <FileText className="w-3.5 h-3.5" />
                   Tender Description
                 </label>
                 <div className="bg-card border border-border rounded-lg p-4 text-sm text-text-secondary leading-relaxed max-h-36 overflow-y-auto">
@@ -477,7 +495,7 @@ export default function ApprovalsPage() {
               {/* Comments */}
               <div className="space-y-1.5">
                 <label className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary uppercase tracking-wide">
-                  <span className="material-symbols-outlined text-[14px]">comment</span>
+                  <MessageCircle className="w-3.5 h-3.5" />
                   Your Comments <span className="text-danger normal-case">*</span>
                 </label>
                 <textarea
@@ -501,19 +519,17 @@ export default function ApprovalsPage() {
                   </label>
                   <div className="space-y-2">
                     {selectedTask.documents.map(doc => {
-                      const { icon, color } = fileIcon(doc.mimeType);
+                      const { icon } = fileIcon(doc.mimeType);
                       return (
                         <div
                           key={doc.id}
                           className="flex items-center justify-between p-3 bg-card border border-border rounded-lg hover:border-accent cursor-pointer transition-colors group"
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
-                            <span className={`material-symbols-outlined text-[20px] flex-shrink-0 ${color}`}>{icon}</span>
+                            {icon}
                             <span className="text-sm text-text-primary truncate">{doc.name}</span>
                           </div>
-                          <span className="material-symbols-outlined text-[18px] text-text-secondary group-hover:text-accent transition-colors flex-shrink-0">
-                            download
-                          </span>
+                          <Download className="w-4.5 h-4.5 text-text-secondary group-hover:text-accent transition-colors flex-shrink-0" />
                         </div>
                       );
                     })}
@@ -529,7 +545,7 @@ export default function ApprovalsPage() {
                 disabled={submitting}
                 className="w-full py-3 bg-success hover:bg-success/90 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                <CheckCircle2 className="w-4.5 h-4.5" />
                 {submitting ? 'Processing…' : 'Confirm Approval'}
               </button>
               <button
@@ -537,7 +553,7 @@ export default function ApprovalsPage() {
                 disabled={submitting}
                 className="w-full py-3 border border-danger text-danger hover:bg-danger/5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="material-symbols-outlined text-[18px]">cancel</span>
+                <XCircle className="w-4.5 h-4.5" />
                 Reject Request
               </button>
             </div>

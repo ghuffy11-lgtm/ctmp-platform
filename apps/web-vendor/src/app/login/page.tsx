@@ -1,10 +1,14 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { post } from '@/lib/api';
 import { setTokens } from '@/lib/auth';
+import { AuthShell } from '@/components/layout/AuthShell';
+import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
+import { ErrorBanner } from '@/components/ui/Empty';
 
 interface LoginResponse {
   accessToken: string;
@@ -15,8 +19,6 @@ interface LoginResponse {
 
 export default function VendorLoginPage() {
   const router = useRouter();
-  const emailId = useId();
-  const passwordId = useId();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mfaCode, setMfaCode] = useState('');
@@ -63,84 +65,64 @@ export default function VendorLoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-bg via-card to-blue-50">
-      <div className="bg-card rounded-2xl shadow-xl border border-border p-8 w-full max-w-md">
-        <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-text-primary">CTMP Vendor Portal</h1>
-          <p className="text-sm text-text-secondary mt-1">Sign in to manage your bids</p>
-        </div>
+    <AuthShell
+      title={mfaSession ? 'Verify Identity' : 'Welcome Back'}
+      subtitle={mfaSession ? 'Enter the 6-digit code from your authenticator app.' : 'Sign in to manage your bids.'}
+    >
+      {error && <div className="mb-5"><ErrorBanner message={error} /></div>}
 
-        {error && (
-          <div className="bg-danger/10 border border-danger/30 text-danger text-sm rounded-lg p-3 mb-4">
-            {error}
-          </div>
-        )}
+      {!mfaSession ? (
+        <form onSubmit={handleLogin} className="space-y-5">
+          <Input
+            label="Email"
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            required
+            placeholder="you@company.com"
+            autoComplete="email"
+          />
+          <Input
+            label="Password"
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            required
+            placeholder="••••••••"
+            autoComplete="current-password"
+          />
+          <Button type="submit" size="lg" fullWidth disabled={loading}>
+            {loading ? 'Signing in…' : 'Sign In'}
+          </Button>
+        </form>
+      ) : (
+        <form onSubmit={handleMfa} className="space-y-5">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            value={mfaCode}
+            onChange={e => setMfaCode(e.target.value)}
+            required
+            placeholder="000000"
+            aria-label="MFA code"
+            className="input-field w-full rounded-3xl px-6 py-5 text-center text-3xl font-mono tracking-[0.4em]"
+          />
+          <Button type="submit" size="lg" fullWidth disabled={loading || mfaCode.length !== 6}>
+            {loading ? 'Verifying…' : 'Verify'}
+          </Button>
+        </form>
+      )}
 
-        {!mfaSession ? (
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label htmlFor={emailId} className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">Email</label>
-              <input
-                id={emailId}
-                aria-label="Email"
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent"
-              />
-            </div>
-            <div>
-              <label htmlFor={passwordId} className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">Password</label>
-              <input
-                id={passwordId}
-                aria-label="Password"
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2.5 bg-accent text-white rounded-lg font-bold hover:opacity-90 disabled:opacity-50"
-            >
-              {loading ? 'Signing in…' : 'Sign In'}
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={handleMfa} className="space-y-4">
-            <p className="text-sm text-text-secondary">
-              Enter the 6-digit code from your authenticator app.
-            </p>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              value={mfaCode}
-              onChange={e => setMfaCode(e.target.value)}
-              required
-              className="w-full px-3 py-2 border border-border rounded-lg text-center text-2xl font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-accent"
-              placeholder="000000"
-            />
-            <button
-              type="submit"
-              disabled={loading || mfaCode.length !== 6}
-              className="w-full py-2.5 bg-accent text-white rounded-lg font-bold hover:opacity-90 disabled:opacity-50"
-            >
-              {loading ? 'Verifying…' : 'Verify'}
-            </button>
-          </form>
-        )}
-
-        <div className="mt-6 flex justify-between text-xs">
-          <Link href="/register" className="text-accent hover:underline">Register as vendor</Link>
-          <Link href="/forgot-password" className="text-text-secondary hover:text-accent">Forgot password?</Link>
-        </div>
+      <div className="mt-8 flex justify-between text-xs">
+        <Link href="/register" className="text-electric-500 hover:text-electric-600 hover:underline">
+          Register as vendor
+        </Link>
+        <Link href="/forgot-password" className="text-slate-900/55 hover:text-electric-600">
+          Forgot password?
+        </Link>
       </div>
-    </div>
+    </AuthShell>
   );
 }

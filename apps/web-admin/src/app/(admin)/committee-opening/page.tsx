@@ -4,6 +4,19 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import {
+  Users,
+  ChevronRight,
+  Calendar,
+  User,
+  Printer,
+  Info,
+  CheckCircle2,
+  AlertTriangle,
+  Lock,
+  Unlock,
+  Clock,
+} from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +52,12 @@ interface CommitteeMember {
   name: string;
   role: string;
   attended?: boolean;
+}
+
+interface UserOption {
+  id: string;
+  displayName: string;
+  email: string;
 }
 
 interface CommercialOpeningRecord {
@@ -82,6 +101,12 @@ export default function CommitteeOpeningPage() {
   const [loading, setLoading] = useState(false);
   const [openingEnvelopes, setOpeningEnvelopes] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [availableUsers, setAvailableUsers] = useState<UserOption[]>([]);
+  const [creatingSession, setCreatingSession] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [sessionDate, setSessionDate] = useState('');
+  const [sessionTime, setSessionTime] = useState('');
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
 
   // ─── Fetch tenders ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -162,15 +187,47 @@ export default function CommitteeOpeningPage() {
       await post(
         `/committee-sessions/${session.id}/attendance`,
         {
-          attendance: members.map(m => ({
-            userId: m.userId,
-            attended: m.attended === true,
-          })),
+          attendeeIds: members.filter(m => m.attended === true).map(m => m.userId),
         },
         token,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save attendance');
+    }
+  }
+
+  // Fetch available users for committee member selection
+  useEffect(() => {
+    const token = getAccessToken();
+    get<{ data: UserOption[] }>('/users?pageSize=100', token)
+      .then((res) => setAvailableUsers(res.data ?? []))
+      .catch(() => {});
+  }, []);
+
+  async function handleCreateSession() {
+    if (!selectedTenderId) return;
+    if (!sessionDate) { setError('Session date is required.'); return; }
+    if (selectedMemberIds.length < 2) { setError('Select at least 2 committee members (quorum requirement).'); return; }
+    setCreatingSession(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      const time = sessionTime || '10:00';
+      const scheduledAt = new Date(`${sessionDate}T${time}:00`).toISOString();
+      await post(
+        `/tenders/${selectedTenderId}/committee-sessions`,
+        { scheduledAt, memberIds: selectedMemberIds },
+        token,
+      );
+      setShowCreateForm(false);
+      setSelectedMemberIds([]);
+      setSessionDate('');
+      setSessionTime('');
+      await fetchSessionData(selectedTenderId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create session');
+    } finally {
+      setCreatingSession(false);
     }
   }
 
@@ -184,6 +241,12 @@ export default function CommitteeOpeningPage() {
     setError(null);
     try {
       const token = getAccessToken();
+      // Save attendance first (safety net — user may forget to click Save)
+      await post(
+        `/committee-sessions/${session.id}/attendance`,
+        { attendeeIds: members.filter(m => m.attended === true).map(m => m.userId) },
+        token,
+      );
       const result = await post<{ openedEnvelopeCount: number; records: CommercialOpeningRecord[] }>(
         `/committee-sessions/${session.id}/open-commercial-envelopes`,
         { remarks },
@@ -214,9 +277,7 @@ export default function CommitteeOpeningPage() {
             <div className="p-4 text-xs text-text-secondary">Loading…</div>
           ) : tenders.length === 0 ? (
             <div className="p-6 text-center">
-              <span className="material-symbols-outlined text-[40px] text-text-secondary/20 block mb-2">
-                groups
-              </span>
+              <Users className="w-10 h-10 text-text-secondary/20 mx-auto mb-2" />
               <p className="text-xs text-text-secondary">No tenders awaiting commercial opening.</p>
             </div>
           ) : (
@@ -252,7 +313,7 @@ export default function CommitteeOpeningPage() {
       <div className="flex-1 min-w-0 overflow-y-auto">
         {!selectedTender ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-8">
-            <span className="material-symbols-outlined text-[56px] text-text-secondary/20">groups</span>
+            <Users className="w-14 h-14 text-text-secondary/20" />
             <p className="text-sm font-semibold text-text-secondary">Select a tender to view committee session.</p>
           </div>
         ) : (
@@ -262,9 +323,9 @@ export default function CommitteeOpeningPage() {
               <div className="space-y-2">
                 <nav className="flex items-center gap-1 text-xs text-text-secondary mb-1">
                   <Link href="/tenders" className="hover:text-accent">Tenders</Link>
-                  <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
                   <Link href={`/tenders/${selectedTender.id}`} className="hover:text-accent">{selectedTender.referenceNumber}</Link>
-                  <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
                   <span className="text-text-primary font-medium">Committee Opening</span>
                 </nav>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -299,12 +360,12 @@ export default function CommitteeOpeningPage() {
                 {session && (
                   <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-text-secondary mt-2">
                     <span className="flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[16px]">calendar_today</span>
+                      <Calendar className="w-4 h-4" />
                       {formatDateTime(session.scheduledAt)}
                     </span>
                     {session.chairName && (
                       <span className="flex items-center gap-1.5">
-                        <span className="material-symbols-outlined text-[16px]">person</span>
+                        <User className="w-4 h-4" />
                         Chair: {session.chairName}
                       </span>
                     )}
@@ -313,7 +374,7 @@ export default function CommitteeOpeningPage() {
               </div>
               <div className="flex gap-2">
                 <button className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-bg flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[16px]">print</span>
+                  <Printer className="w-4 h-4" />
                   Print Agenda
                 </button>
               </div>
@@ -325,16 +386,95 @@ export default function CommitteeOpeningPage() {
               </div>
             )}
 
-            {/* Missing-session warning */}
-            {!loading && !session && (
+            {/* Missing-session warning + create form */}
+            {!loading && !session && !showCreateForm && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 flex items-start gap-3">
-                <span className="material-symbols-outlined text-[24px] text-amber-700">info</span>
-                <div>
+                <Info className="w-6 h-6 text-amber-700 flex-shrink-0" />
+                <div className="flex-1">
                   <p className="text-sm font-bold text-amber-900 mb-1">No committee session scheduled</p>
-                  <p className="text-xs text-amber-900/80">
+                  <p className="text-xs text-amber-900/80 mb-3">
                     A committee session must be created before commercial envelopes can be opened.
-                    Schedule a session via the tender detail page first.
+                    Minimum 2 members required for quorum.
                   </p>
+                  <button
+                    onClick={() => setShowCreateForm(true)}
+                    className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors"
+                  >
+                    Schedule Committee Session
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!loading && !session && showCreateForm && (
+              <div className="bg-card rounded-xl border border-border p-6 shadow-sm space-y-4">
+                <h3 className="text-base font-bold text-text-primary">Schedule Committee Session</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Session Date</label>
+                    <input
+                      type="date"
+                      value={sessionDate}
+                      onChange={(e) => setSessionDate(e.target.value)}
+                      className="px-3 py-2 border border-border rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Session Time</label>
+                    <input
+                      type="time"
+                      value={sessionTime}
+                      onChange={(e) => setSessionTime(e.target.value)}
+                      placeholder="10:00"
+                      className="px-3 py-2 border border-border rounded-lg text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Committee Members (select at least 2)</label>
+                  <div className="border border-border rounded-lg max-h-48 overflow-y-auto">
+                    {availableUsers.length === 0 ? (
+                      <p className="p-3 text-xs text-text-secondary italic">No users available. Create users first via Settings.</p>
+                    ) : (
+                      availableUsers.map((u) => {
+                        const checked = selectedMemberIds.includes(u.id);
+                        return (
+                          <label key={u.id} className="flex items-center gap-3 p-2.5 border-b border-border last:border-b-0 cursor-pointer hover:bg-bg">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                setSelectedMemberIds((prev) =>
+                                  e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
+                                );
+                              }}
+                              className="w-4 h-4"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-text-primary truncate">{u.displayName || u.email}</p>
+                              <p className="text-xs text-text-secondary truncate">{u.email}</p>
+                            </div>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                  <p className="text-xs text-text-secondary">{selectedMemberIds.length} selected</p>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => { setShowCreateForm(false); setError(null); }}
+                    className="px-4 py-2 border border-border text-text-secondary text-sm font-semibold rounded-lg hover:bg-bg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCreateSession}
+                    disabled={creatingSession}
+                    className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg disabled:opacity-60"
+                  >
+                    {creatingSession ? 'Creating…' : 'Create Session'}
+                  </button>
                 </div>
               </div>
             )}
@@ -354,17 +494,17 @@ export default function CommitteeOpeningPage() {
                       </p>
                     ) : (
                       members.map(m => (
-                        <div key={m.userId} className="flex items-center justify-between p-2.5 bg-bg rounded-lg border border-border">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-full bg-accent/10 text-accent font-bold text-xs flex items-center justify-center">
+                        <div key={m.userId} className="flex items-center justify-between gap-3 p-2.5 bg-bg rounded-lg border border-border">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className="w-8 h-8 rounded-full bg-accent/10 text-accent font-bold text-xs flex items-center justify-center shrink-0">
                               {initials(m.name)}
                             </div>
-                            <div>
-                              <p className="text-sm font-semibold text-text-primary">{m.name}</p>
-                              <p className="text-[10px] uppercase tracking-wider text-text-secondary">{m.role}</p>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-text-primary truncate">{m.name}</p>
+                              <p className="text-[10px] uppercase tracking-wider text-text-secondary truncate">{m.role}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1 bg-card rounded-full p-0.5 border border-border">
+                          <div className="flex items-center gap-1 bg-card rounded-full p-0.5 border border-border shrink-0">
                             <button
                               onClick={() => toggleAttendance(m.userId, true)}
                               className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition-colors ${
@@ -388,9 +528,9 @@ export default function CommitteeOpeningPage() {
                   </div>
                   <div className="px-5 py-3 bg-bg border-t border-border flex justify-between items-center">
                     <p className={`text-xs font-bold flex items-center gap-1.5 ${quorumMet ? 'text-success' : 'text-danger'}`}>
-                      <span className="material-symbols-outlined text-[16px]">
-                        {quorumMet ? 'check_circle' : 'warning'}
-                      </span>
+                      {quorumMet
+                        ? <CheckCircle2 className="w-4 h-4" />
+                        : <AlertTriangle className="w-4 h-4" />}
                       {quorumMet
                         ? `Quorum met (${presentCount}/${members.length})`
                         : `Quorum not met (${presentCount}/${members.length})`}
@@ -427,7 +567,7 @@ export default function CommitteeOpeningPage() {
                   <div className="px-5 py-3 border-b border-border bg-bg flex justify-between items-center">
                     <h3 className="text-sm font-bold text-text-primary">Technically Qualified Vendors</h3>
                     <span className="text-xs text-text-secondary flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[14px]">lock</span>
+                      <Lock className="w-3.5 h-3.5" />
                       Commercial Envelopes
                     </span>
                   </div>
@@ -465,18 +605,18 @@ export default function CommitteeOpeningPage() {
                                 </span>
                               </td>
                               <td className="px-5 py-3 flex items-center gap-1.5 text-text-secondary">
-                                <span className="material-symbols-outlined text-[16px]">
-                                  {r.envelopeStatus === 'OPENED' ? 'lock_open' : 'lock'}
-                                </span>
+                                {r.envelopeStatus === 'OPENED'
+                                  ? <Unlock className="w-4 h-4" />
+                                  : <Lock className="w-4 h-4" />}
                                 {r.envelopeStatus}
                               </td>
                               <td className="px-5 py-3">
                                 <span className={`flex items-center gap-1 text-xs font-medium ${
                                   r.checksumVerified ? 'text-success' : 'text-text-secondary'
                                 }`}>
-                                  <span className="material-symbols-outlined text-[16px]">
-                                    {r.checksumVerified ? 'check_circle' : 'schedule'}
-                                  </span>
+                                  {r.checksumVerified
+                                    ? <CheckCircle2 className="w-4 h-4" />
+                                    : <Clock className="w-4 h-4" />}
                                   {r.checksumVerified ? 'VERIFIED' : 'PENDING'}
                                 </span>
                               </td>
@@ -498,7 +638,7 @@ export default function CommitteeOpeningPage() {
                             : 'bg-border text-text-secondary/60 cursor-not-allowed'
                         }`}
                       >
-                        <span className="material-symbols-outlined">lock_open</span>
+                        <Unlock className="w-5 h-5" />
                         {openingEnvelopes ? 'Opening…' : 'Open Commercial Envelopes'}
                       </button>
                       <p className="text-xs text-text-secondary">

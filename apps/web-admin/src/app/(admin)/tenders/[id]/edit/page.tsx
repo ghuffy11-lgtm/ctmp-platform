@@ -6,6 +6,14 @@ import Link from 'next/link';
 import { get, patch } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import {
+  AlertCircle,
+  ChevronRight,
+  Lock,
+  Info,
+  ArrowLeft,
+  Save,
+} from 'lucide-react';
 
 const CATEGORIES = [
   'Construction', 'IT Services', 'Healthcare', 'Engineering',
@@ -134,7 +142,7 @@ export default function EditTenderPage() {
   if (loadError || !tender || !form) {
     return (
       <div className="p-8 max-w-5xl mx-auto flex flex-col items-center gap-3 py-24">
-        <span className="material-symbols-outlined text-[48px] text-danger">error_outline</span>
+        <AlertCircle className="w-12 h-12 text-danger" />
         <p className="text-sm text-text-secondary">{loadError ?? 'Tender not found'}</p>
         <Link href="/tenders" className="text-sm text-accent hover:underline font-semibold">
           Back to Tenders
@@ -150,11 +158,11 @@ export default function EditTenderPage() {
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-xs text-text-secondary mb-6">
         <Link href="/tenders" className="hover:text-accent transition-colors">Tenders</Link>
-        <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+        <ChevronRight className="w-3.5 h-3.5" />
         <Link href={`/tenders/${tenderId}`} className="hover:text-accent transition-colors">
           {tender.referenceNumber}
         </Link>
-        <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+        <ChevronRight className="w-3.5 h-3.5" />
         <span className="text-text-primary font-semibold">Edit</span>
       </nav>
 
@@ -196,9 +204,7 @@ export default function EditTenderPage() {
                   disabled
                   className="w-full px-4 py-2.5 text-sm border border-border rounded-lg bg-bg text-text-secondary/60 cursor-not-allowed pr-10 font-mono"
                 />
-                <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-[16px] text-text-secondary/40">
-                  lock
-                </span>
+                <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary/40" />
               </div>
             </div>
           </div>
@@ -276,7 +282,7 @@ export default function EditTenderPage() {
               />
             </div>
             <p className="flex items-center gap-1 text-xs text-text-secondary mt-2">
-              <span className="material-symbols-outlined text-[13px]">info</span>
+              <Info className="w-3.5 h-3.5" />
               Closing time is based on GMT+3 (Kuwait time).
             </p>
           </div>
@@ -300,7 +306,7 @@ export default function EditTenderPage() {
             href={`/tenders/${tenderId}`}
             className="flex items-center gap-1.5 text-sm text-text-secondary hover:bg-bg px-4 py-2 rounded-lg transition-colors border border-border"
           >
-            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            <ArrowLeft className="w-4 h-4" />
             Discard Changes
           </Link>
           <button
@@ -308,7 +314,7 @@ export default function EditTenderPage() {
             disabled={!canSave}
             className="flex items-center gap-1.5 px-6 py-2.5 text-sm font-semibold bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
-            <span className="material-symbols-outlined text-[16px]">save</span>
+            <Save className="w-4 h-4" />
             {saving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>

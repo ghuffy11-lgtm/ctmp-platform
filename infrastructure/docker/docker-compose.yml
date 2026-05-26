@@ -126,10 +126,12 @@ services:
     build:
       context: ../..
       dockerfile: infrastructure/docker/web-admin.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
     container_name: ctmp-web-admin
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://api:3000}
+      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
     ports:
       - '${WEB_ADMIN_PORT:-4200}:4200'
     depends_on:
@@ -139,10 +141,13 @@ services:
     build:
       context: ../..
       dockerfile: infrastructure/docker/web-vendor.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
+        NEXT_PUBLIC_HCAPTCHA_SITE_KEY: ${HCAPTCHA_SITE_KEY:-10000000-ffff-ffff-ffff-000000000001}
     container_name: ctmp-web-vendor
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://api:3000}
+      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
     ports:
       - '${WEB_VENDOR_PORT:-4300}:4300'
     depends_on:

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { get, patch } from '@/lib/api';
 import { getAccessToken, hasPermission } from '@/lib/auth';
+import { Shield, RefreshCw, ShieldCheck, CheckCircle2, ChevronDown } from 'lucide-react';
 
 interface SecurityAlert {
   id: string;
@@ -96,7 +97,7 @@ export default function SecurityAlertsPage() {
   if (!canView) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 gap-4 text-center max-w-md mx-auto">
-        <span className="material-symbols-outlined text-[72px] text-text-secondary/30">security</span>
+        <Shield className="w-[72px] h-[72px] text-text-secondary/30" />
         <h1 className="text-xl font-bold text-text-primary">Audit Access Required</h1>
         <p className="text-sm text-text-secondary">
           Viewing security alerts requires the <code className="bg-bg px-1.5 py-0.5 rounded text-xs">audit:view</code> permission.
@@ -113,9 +114,6 @@ export default function SecurityAlertsPage() {
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-text-primary tracking-tight">Security Alerts</h1>
-          <p className="text-sm text-text-secondary mt-0.5">
-            System integrity events — audit chain breaks and other critical signals.
-          </p>
         </div>
         <div className="flex items-center gap-3">
           {unacked > 0 && (
@@ -136,7 +134,7 @@ export default function SecurityAlertsPage() {
             onClick={fetchAlerts}
             className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card flex items-center gap-2"
           >
-            <span className="material-symbols-outlined text-[16px]">refresh</span>
+            <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
         </div>
@@ -164,7 +162,7 @@ export default function SecurityAlertsPage() {
             ) : alerts.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-12 text-center">
-                  <span className="material-symbols-outlined text-[40px] text-text-secondary/30 block mb-2">verified_user</span>
+                  <ShieldCheck className="w-10 h-10 text-text-secondary/30 mx-auto mb-2" />
                   <p className="text-sm text-text-secondary">No security alerts. System integrity is intact.</p>
                 </td>
               </tr>
@@ -191,7 +189,7 @@ export default function SecurityAlertsPage() {
                     <td className="px-4 py-3">
                       {alert.acknowledged ? (
                         <span className="flex items-center gap-1 text-xs text-success">
-                          <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
                           Acknowledged
                         </span>
                       ) : (
@@ -205,9 +203,7 @@ export default function SecurityAlertsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`material-symbols-outlined text-[18px] text-text-secondary transition-transform ${expanded === alert.id ? 'rotate-180' : ''}`}>
-                        expand_more
-                      </span>
+                      <ChevronDown className={`w-[18px] h-[18px] text-text-secondary transition-transform ${expanded === alert.id ? 'rotate-180' : ''}`} />
                     </td>
                   </tr>
                   {expanded === alert.id && (

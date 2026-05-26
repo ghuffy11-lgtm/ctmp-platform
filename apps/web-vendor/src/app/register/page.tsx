@@ -1,8 +1,17 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
+import HCaptcha from '@hcaptcha/react-hcaptcha';
+import { MailCheck } from 'lucide-react';
 import { post } from '@/lib/api';
+import { AuthShell } from '@/components/layout/AuthShell';
+import { Input, Textarea } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
+import { ErrorBanner } from '@/components/ui/Empty';
+
+const HCAPTCHA_SITE_KEY =
+  process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY ?? '10000000-ffff-ffff-ffff-000000000001';
 
 export default function VendorRegisterPage() {
   const [form, setForm] = useState({
@@ -21,6 +30,7 @@ export default function VendorRegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+  const captchaRef = useRef<HCaptcha>(null);
 
   function update<K extends keyof typeof form>(key: K, value: string) {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -49,6 +59,9 @@ export default function VendorRegisterPage() {
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
+      // CAPTCHA tokens are single-use server-side, reset for retry.
+      setCaptchaToken('');
+      captchaRef.current?.resetCaptcha();
     } finally {
       setLoading(false);
     }
@@ -56,107 +69,148 @@ export default function VendorRegisterPage() {
 
   if (success) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-bg">
-        <div className="bg-card rounded-2xl shadow-xl border border-border p-8 max-w-md text-center">
-          <span className="material-symbols-outlined text-[48px] text-success mb-4 inline-block">mark_email_read</span>
-          <h1 className="text-xl font-bold text-text-primary mb-2">Registration submitted</h1>
-          <p className="text-sm text-text-secondary mb-4">
-            Verification email sent to <strong>{form.contactEmail}</strong>. Confirm your email,
-            then await admin approval. You will receive a follow-up email once approved.
+      <AuthShell title="Registration Submitted" subtitle="">
+        <div className="text-center">
+          <div className="inline-flex w-16 h-16 items-center justify-center rounded-3xl bg-emerald-100 border border-emerald-300 mb-5">
+            <MailCheck className="w-8 h-8 text-emerald-600" strokeWidth={1.5} />
+          </div>
+          <p className="text-sm text-slate-900/70 mb-6 leading-relaxed">
+            Verification email sent to <strong className="text-slate-900">{form.contactEmail}</strong>.
+            Confirm your email, then await admin approval. You'll receive a follow-up email once approved.
           </p>
-          <Link href="/login" className="inline-block px-4 py-2 bg-accent text-white rounded-lg font-bold">
-            Back to sign in
+          <Link href="/login">
+            <Button size="lg" fullWidth>Back to Sign In</Button>
           </Link>
         </div>
-      </div>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-bg via-card to-blue-50">
-      <div className="bg-card rounded-2xl shadow-xl border border-border p-8 w-full max-w-2xl">
-        <h1 className="text-2xl font-bold text-text-primary mb-1">Register as a Vendor</h1>
-        <p className="text-sm text-text-secondary mb-6">
-          Submit your company details. Registration is reviewed by procurement before activation.
-        </p>
+    <AuthShell
+      title="Register as a Vendor"
+      subtitle="Submit your company details. Registration is reviewed by procurement before activation."
+      wide
+    >
+      {error && <div className="mb-6"><ErrorBanner message={error} /></div>}
 
-        {error && (
-          <div className="bg-danger/10 border border-danger/30 text-danger text-sm rounded-lg p-3 mb-4">{error}</div>
-        )}
+      <form onSubmit={handleSubmit} className="space-y-8">
+        <Section title="Company Information">
+          <Input
+            label="Company Name"
+            value={form.companyName}
+            onChange={e => update('companyName', e.target.value)}
+            required
+          />
+          <Input
+            label="Registration Number"
+            value={form.registrationNumber}
+            onChange={e => update('registrationNumber', e.target.value)}
+          />
+          <Input
+            label="Tax Number"
+            value={form.taxNumber}
+            onChange={e => update('taxNumber', e.target.value)}
+          />
+          <Input
+            label="Country"
+            value={form.country}
+            onChange={e => update('country', e.target.value)}
+            maxLength={2}
+            placeholder="KW"
+          />
+          <Input
+            label="Phone"
+            value={form.phone}
+            onChange={e => update('phone', e.target.value)}
+            className="md:col-span-2"
+          />
+          <Textarea
+            label="Address"
+            value={form.address}
+            onChange={e => update('address', e.target.value)}
+            rows={3}
+            className="md:col-span-2"
+          />
+        </Section>
 
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Company Name" value={form.companyName} onChange={v => update('companyName', v)} required />
-          <Field label="Registration Number" value={form.registrationNumber} onChange={v => update('registrationNumber', v)} />
-          <Field label="Tax Number" value={form.taxNumber} onChange={v => update('taxNumber', v)} />
-          <Field label="Country" value={form.country} onChange={v => update('country', v)} />
-          <Field label="Phone" value={form.phone} onChange={v => update('phone', v)} />
-          <Field label="Address" value={form.address} onChange={v => update('address', v)} colspan />
+        <Section title="Primary Contact">
+          <Input
+            label="Contact Full Name"
+            value={form.contactFullName}
+            onChange={e => update('contactFullName', e.target.value)}
+            required
+          />
+          <Input
+            label="Contact Phone"
+            value={form.contactPhone}
+            onChange={e => update('contactPhone', e.target.value)}
+          />
+          <Input
+            label="Contact Email"
+            type="email"
+            value={form.contactEmail}
+            onChange={e => update('contactEmail', e.target.value)}
+            required
+            className="md:col-span-2"
+            autoComplete="email"
+          />
+          <Input
+            label="Password"
+            type="password"
+            value={form.password}
+            onChange={e => update('password', e.target.value)}
+            required
+            className="md:col-span-2"
+            autoComplete="new-password"
+            hint="At least 12 characters with a mix of uppercase, lowercase, numbers, and symbols."
+          />
+        </Section>
 
-          <div className="col-span-full mt-2 mb-1">
-            <p className="text-xs font-bold uppercase tracking-wider text-text-secondary">Primary Contact</p>
-          </div>
-          <Field label="Contact Full Name" value={form.contactFullName} onChange={v => update('contactFullName', v)} required />
-          <Field label="Contact Phone" value={form.contactPhone} onChange={v => update('contactPhone', v)} />
-          <Field label="Contact Email" value={form.contactEmail} onChange={v => update('contactEmail', v)} type="email" required colspan />
-          <Field label="Password" value={form.password} onChange={v => update('password', v)} type="password" required colspan />
-
-          <div className="col-span-full mt-2">
-            <p className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">CAPTCHA</p>
-            <input
-              type="text"
-              value={captchaToken}
-              onChange={e => setCaptchaToken(e.target.value)}
-              placeholder="Paste CAPTCHA token (placeholder — real provider integration pending)"
-              className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent"
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-900/55 mb-4">
+            Verify you are human
+          </p>
+          <div className="flex justify-center md:justify-start">
+            <HCaptcha
+              ref={captchaRef}
+              sitekey={HCAPTCHA_SITE_KEY}
+              theme="light"
+              onVerify={token => { setCaptchaToken(token); setError(null); }}
+              onExpire={() => setCaptchaToken('')}
+              onError={() => {
+                setCaptchaToken('');
+                setError('CAPTCHA failed to load. Refresh and try again.');
+              }}
             />
-            <p className="text-[11px] text-text-secondary italic mt-1">
-              CAPTCHA is mandatory per procurement compliance. Token is validated server-side.
-            </p>
           </div>
+          <p className="text-[11px] text-slate-900/50 italic mt-2">
+            CAPTCHA is mandatory per procurement compliance. Token is validated server-side.
+          </p>
+        </div>
 
-          <div className="col-span-full flex justify-end gap-2 mt-2">
-            <Link href="/login" className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-bg">
+        <div className="flex flex-col-reverse md:flex-row justify-end gap-3 pt-2 border-t border-slate-900/10">
+          <Link href="/login" className="md:self-center">
+            <Button variant="ghost" size="md" type="button" fullWidth>
               Cancel
-            </Link>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-5 py-2 bg-accent text-white rounded-lg font-bold disabled:opacity-50"
-            >
-              {loading ? 'Submitting…' : 'Submit Registration'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+            </Button>
+          </Link>
+          <Button type="submit" size="md" disabled={loading}>
+            {loading ? 'Submitting…' : 'Submit Registration'}
+          </Button>
+        </div>
+      </form>
+    </AuthShell>
   );
 }
 
-function Field({
-  label, value, onChange, type = 'text', required, colspan,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  type?: string;
-  required?: boolean;
-  colspan?: boolean;
-}) {
-  const inputId = useId();
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className={colspan ? 'col-span-full' : ''}>
-      <label htmlFor={inputId} className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">
-        {label}{required && ' *'}
-      </label>
-      <input
-        id={inputId}
-        aria-label={label}
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        required={required}
-        className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent"
-      />
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-900/55 mb-5">
+        {title}
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">{children}</div>
     </div>
   );
 }

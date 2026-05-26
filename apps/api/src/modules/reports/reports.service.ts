@@ -40,7 +40,8 @@ export class ReportsService {
   }
 
   async exportReport(reportCode: string, dto: ExportReportDto, userId: string, perms: string[]) {
-    const def = REPORT_CATALOG.find(r => r.code === reportCode);
+    const normalisedCode = reportCode.toLowerCase();
+    const def = REPORT_CATALOG.find(r => r.code === normalisedCode);
     if (!def) throw new NotFoundException(`Unknown report code: ${reportCode}`);
 
     if (def.requiresCommercialExportPermission && !perms.includes('commercial:export')) {
@@ -56,6 +57,7 @@ export class ReportsService {
     if (dto.fromDate) filters.fromDate = dto.fromDate;
     if (dto.toDate) filters.toDate = dto.toDate;
     if (dto.departmentId) filters.departmentId = dto.departmentId;
+    if (dto.tenderId) filters.tenderId = dto.tenderId;
 
     const job = await this.prisma.reportExportJob.create({
       data: {

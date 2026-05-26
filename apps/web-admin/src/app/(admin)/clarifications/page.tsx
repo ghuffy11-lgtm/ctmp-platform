@@ -4,6 +4,11 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import {
+  User, Globe, Lock, ChevronRight, Building2, CornerDownLeft,
+  Search, MessageSquare, Download, RefreshCw, CheckCircle2, SearchX,
+  FileText, Calendar, Clock, Printer,
+} from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -135,7 +140,11 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
     setSubmitError(null);
     try {
       const token = getAccessToken();
-      await post(`/clarifications/${clarification.id}/reply`, { reply, visibility }, token);
+      await post(
+        `/clarifications/${clarification.id}/reply`,
+        { reply, isPublic: visibility === 'GENERAL_PUBLIC' },
+        token,
+      );
       setReply('');
       onReplied();
     } catch (err) {
@@ -156,15 +165,15 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
         <div className="p-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <div className="w-10 h-10 bg-bg rounded-full flex items-center justify-center flex-shrink-0">
-              <span className="material-symbols-outlined text-[18px] text-text-secondary">person</span>
+              <User className="w-5 h-5 text-text-secondary" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-0.5">
                 <span className="text-sm font-semibold text-text-primary">{vendorLabel}</span>
                 {clarification.replies.some(r => r.visibility === 'GENERAL_PUBLIC') ? (
-                  <span className="material-symbols-outlined text-[14px] text-text-secondary" title="Public reply">public</span>
+                  <Globe className="w-3.5 h-3.5 text-text-secondary" aria-label="Public reply" />
                 ) : (
-                  <span className="material-symbols-outlined text-[14px] text-text-secondary" title="Private">lock</span>
+                  <Lock className="w-3.5 h-3.5 text-text-secondary" aria-label="Private" />
                 )}
               </div>
               <p className="text-sm text-text-secondary truncate">{clarification.question}</p>
@@ -180,9 +189,7 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
                 {clarification.status}
               </p>
             </div>
-            <span className="material-symbols-outlined text-[18px] text-text-secondary group-hover:translate-x-0.5 transition-transform">
-              chevron_right
-            </span>
+            <ChevronRight className="w-5 h-5 text-text-secondary group-hover:translate-x-0.5 transition-transform" />
           </div>
         </div>
       </div>
@@ -200,7 +207,7 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
         <div className="flex justify-between items-start mb-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-accent/10 rounded-lg flex items-center justify-center flex-shrink-0">
-              <span className="material-symbols-outlined text-[20px] text-accent">corporate_fare</span>
+              <Building2 className="w-5 h-5 text-accent" />
             </div>
             <div>
               <p className="text-sm font-bold text-text-primary">{vendorLabel}</p>
@@ -225,7 +232,7 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
           {clarification.replies.map(r => (
             <div key={r.id} className="bg-card rounded-lg border border-border p-3.5 shadow-sm">
               <div className="flex items-center gap-2 mb-1.5">
-                <span className="material-symbols-outlined text-[14px] text-accent">reply</span>
+                <CornerDownLeft className="w-3.5 h-3.5 text-accent" />
                 <span className="text-xs font-semibold text-text-primary">
                   {r.repliedByName ?? 'Procurement Officer'}
                 </span>
@@ -234,9 +241,10 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
                     ? 'bg-accent/10 text-accent'
                     : 'bg-border text-text-secondary'
                 }`}>
-                  <span className="material-symbols-outlined text-[10px]">
-                    {r.visibility === 'GENERAL_PUBLIC' ? 'public' : 'lock'}
-                  </span>
+                  {r.visibility === 'GENERAL_PUBLIC'
+                    ? <Globe className="w-2.5 h-2.5" />
+                    : <Lock className="w-2.5 h-2.5" />
+                  }
                   {r.visibility === 'GENERAL_PUBLIC' ? 'Public' : 'Private'}
                 </span>
               </div>
@@ -250,7 +258,7 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
       {clarification.status === 'OPEN' && (
         <div className="p-5 border-t border-border bg-white">
           <div className="flex items-center gap-2 mb-3">
-            <span className="material-symbols-outlined text-[18px] text-accent">reply</span>
+            <CornerDownLeft className="w-5 h-5 text-accent" />
             <span className="text-sm font-semibold text-text-primary">Submit Clarification Response</span>
           </div>
           <textarea
@@ -278,7 +286,7 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
                   }`}
                 >
                   <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[12px]">lock</span>
+                    <Lock className="w-3 h-3" />
                     Private
                   </span>
                 </button>
@@ -292,7 +300,7 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
                   }`}
                 >
                   <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[12px]">public</span>
+                    <Globe className="w-3 h-3" />
                     Public
                   </span>
                 </button>
@@ -336,19 +344,25 @@ export default function ClarificationsPage() {
   const [sort, setSort] = useState<SortOrder>('NEWEST');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // ─── Fetch tenders in Clarification Period ──────────────────────────────────
+  // ─── Fetch tenders eligible for clarifications (Published + Clarification Period) ──
   useEffect(() => {
+    const ELIGIBLE_STATUSES = ['Published', 'Clarification Period'];
     async function fetchTenders() {
       setTendersLoading(true);
       try {
         const token = getAccessToken();
-        const res = await get<PaginatedTenders>(
-          '/tenders?status=Clarification%20Period&pageSize=50',
-          token,
+        const results = await Promise.all(
+          ELIGIBLE_STATUSES.map(s =>
+            get<PaginatedTenders>(
+              `/tenders?status=${encodeURIComponent(s)}&pageSize=50`,
+              token,
+            ).catch(() => ({ data: [], total: 0, page: 1, pageSize: 50 })),
+          ),
         );
-        setTenders(res.data);
-        if (res.data.length > 0) {
-          setSelectedTenderId(res.data[0].id);
+        const merged = results.flatMap(r => r.data);
+        setTenders(merged);
+        if (merged.length > 0) {
+          setSelectedTenderId(merged[0].id);
         }
       } catch {
         // swallow — show empty state
@@ -416,9 +430,7 @@ export default function ClarificationsPage() {
             Active Tenders
           </p>
           <div className="relative">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-text-secondary pointer-events-none">
-              search
-            </span>
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" />
             <input
               type="text"
               placeholder="Search tenders..."
@@ -431,10 +443,8 @@ export default function ClarificationsPage() {
             Array.from({ length: 4 }).map((_, i) => <TenderSkeleton key={i} />)
           ) : tenders.length === 0 ? (
             <div className="p-6 text-center">
-              <span className="material-symbols-outlined text-[40px] text-text-secondary/20 block mb-2">
-                forum
-              </span>
-              <p className="text-xs text-text-secondary">No tenders in Clarification Period.</p>
+              <MessageSquare className="text-text-secondary/20 block mb-2" style={{ width: 40, height: 40 }} />
+              <p className="text-xs text-text-secondary">No tenders in Published or Clarification Period.</p>
             </div>
           ) : (
             tenders.map(tender => {
@@ -470,7 +480,7 @@ export default function ClarificationsPage() {
                   </p>
                   {days !== null && (
                     <div className="flex items-center gap-1 mt-1.5">
-                      <span className="material-symbols-outlined text-[12px] text-text-secondary">schedule</span>
+                      <Clock className="w-3 h-3 text-text-secondary" />
                       <span className="text-xs text-text-secondary">
                         {days > 0 ? `Due in ${days} day${days !== 1 ? 's' : ''}` : 'Overdue'}
                       </span>
@@ -487,7 +497,7 @@ export default function ClarificationsPage() {
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {!selectedTender ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
-            <span className="material-symbols-outlined text-[56px] text-text-secondary/20">forum</span>
+            <MessageSquare className="text-text-secondary/20" style={{ width: 56, height: 56 }} />
             <p className="text-sm font-semibold text-text-secondary">Select a tender to view clarifications.</p>
           </div>
         ) : (
@@ -497,11 +507,11 @@ export default function ClarificationsPage() {
               {/* Breadcrumb */}
               <nav className="flex items-center gap-1 text-xs text-text-secondary mb-2">
                 <Link href="/tenders" className="hover:text-accent transition-colors">Tenders</Link>
-                <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+                <ChevronRight className="w-3.5 h-3.5" />
                 <Link href={`/tenders/${selectedTender.id}`} className="hover:text-accent transition-colors">
                   {selectedTender.title}
                 </Link>
-                <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+                <ChevronRight className="w-3.5 h-3.5" />
                 <span className="text-text-primary font-medium">Clarifications</span>
               </nav>
 
@@ -516,13 +526,13 @@ export default function ClarificationsPage() {
                     className="p-2 rounded-lg hover:bg-bg border border-border transition-colors text-text-secondary"
                     title="Refresh"
                   >
-                    <span className="material-symbols-outlined text-[18px]">refresh</span>
+                    <RefreshCw className="w-5 h-5" />
                   </button>
                   <button className="p-2 rounded-lg hover:bg-bg border border-border transition-colors text-text-secondary" title="Print">
-                    <span className="material-symbols-outlined text-[18px]">print</span>
+                    <Printer className="w-5 h-5" />
                   </button>
                   <button className="p-2 rounded-lg hover:bg-bg border border-border transition-colors text-text-secondary" title="Export">
-                    <span className="material-symbols-outlined text-[18px]">download</span>
+                    <Download className="w-5 h-5" />
                   </button>
                 </div>
               </div>
@@ -570,9 +580,10 @@ export default function ClarificationsPage() {
                 Array.from({ length: 3 }).map((_, i) => <ThreadSkeleton key={i} />)
               ) : filtered.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 gap-3">
-                  <span className="material-symbols-outlined text-[48px] text-text-secondary/20">
-                    {tab === 'OPEN' ? 'check_circle' : 'search_off'}
-                  </span>
+                  {tab === 'OPEN'
+                    ? <CheckCircle2 className="text-text-secondary/20" style={{ width: 48, height: 48 }} />
+                    : <SearchX className="text-text-secondary/20" style={{ width: 48, height: 48 }} />
+                  }
                   <p className="text-sm text-text-secondary">
                     {tab === 'OPEN'
                       ? 'No pending clarifications.'
@@ -607,13 +618,13 @@ export default function ClarificationsPage() {
               className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-bg text-text-secondary hover:text-accent transition-colors"
               title="Tender Details"
             >
-              <span className="material-symbols-outlined text-[20px]">description</span>
+              <FileText className="w-5 h-5" />
             </Link>
             <button
               className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-bg text-text-secondary hover:text-accent transition-colors"
               title="Timeline"
             >
-              <span className="material-symbols-outlined text-[20px]">event</span>
+              <Calendar className="w-5 h-5" />
             </button>
             <div className="w-6 h-px bg-border" />
             <button
@@ -621,7 +632,7 @@ export default function ClarificationsPage() {
               className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-bg text-text-secondary hover:text-accent transition-colors"
               title="Refresh"
             >
-              <span className="material-symbols-outlined text-[20px]">history</span>
+              <RefreshCw className="w-5 h-5" />
             </button>
           </>
         )}

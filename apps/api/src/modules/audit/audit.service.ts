@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { AuditRiskLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { RequestContextService } from '../../common/request-context/request-context.service';
 import { AuditSearchDto } from './dto/audit-search.dto';
 
 const GENESIS_HASH = '0'.repeat(64);
@@ -31,8 +32,17 @@ export interface AuditLogEntry {
   riskLevel?: AuditRiskLevel;
 }
 
+// Stable canonical JSON for hashing. Must agree with Prisma's JSONB
+// serialisation roundtrip — Prisma writes Date via Date.prototype.toJSON()
+// (ISO-8601) and Buffer via base64, so we normalise those the same way
+// BEFORE hashing. Without these branches `Object.keys(new Date()) === []`
+// and we would emit '{}' at write time but read back an ISO string at
+// verify time — exactly the asymmetry that produced the AUDIT_CHAIN_BREAK
+// alerts of 2026-05-21. See agents/reviews/AUDIT_CHAIN_BREAK_RCA_2026-05-23.md.
 function canonicalize(value: unknown): string {
   if (value === null || value === undefined) return 'null';
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  if (Buffer.isBuffer(value)) return JSON.stringify(value.toString('base64'));
   if (Array.isArray(value)) return '[' + value.map(canonicalize).join(',') + ']';
   if (typeof value === 'object') {
     const obj = value as Record<string, unknown>;
@@ -49,6 +59,7 @@ export class AuditService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly requestContext: RequestContextService,
   ) {}
 
   async onModuleInit() {
@@ -63,9 +74,14 @@ export class AuditService implements OnModuleInit {
         this.logger.log(
           `Audit chain verified — ${result.checked} rows OK${result.range ? ` (id ${result.range[0]}..${result.range[1]})` : ''}`,
         );
+      } else if (result.breakKind === 'link') {
+        this.logger.error(
+          `AUDIT CHAIN BREAK (link) at row id=${result.brokenAtId} — predecessor hash=${result.expectedPrev}, stored prev_hash=${result.actualPrev}`,
+        );
+        await this.recordSecurityAlert(result);
       } else {
         this.logger.error(
-          `AUDIT CHAIN BREAK at row id=${result.brokenAtId} — expected prev=${result.expectedPrev}, got=${result.actualPrev}`,
+          `AUDIT CHAIN BREAK (hash) at row id=${result.brokenAtId} — recomputed=${result.recomputedHash}, stored=${result.storedHash}`,
         );
         await this.recordSecurityAlert(result);
       }
@@ -79,10 +95,18 @@ export class AuditService implements OnModuleInit {
    * prev_hash_chain_value matches the previous row's hash_chain_value AND
    * each row's hash_chain_value matches SHA-256(prev || canonical(payload)).
    * Cheap O(N) scan; default 1000 rows on boot.
+   *
+   * On failure, distinguishes a `link` break (this row's prev_hash doesn't
+   * match the predecessor's hash) from a `hash` break (this row's stored
+   * hash doesn't match the SHA-256 of the canonicalised payload). Earlier
+   * versions of this method conflated the two by overloading `actualPrev`
+   * with `row.hashChainValue` on hash mismatches — see
+   * agents/reviews/AUDIT_CHAIN_BREAK_RCA_2026-05-23.md.
    */
   async verifyChain(limit = 1000): Promise<
     | { ok: true; checked: number; range?: [bigint, bigint] }
-    | { ok: false; checked: number; brokenAtId: string; expectedPrev: string; actualPrev: string }
+    | { ok: false; breakKind: 'link'; checked: number; brokenAtId: string; expectedPrev: string; actualPrev: string }
+    | { ok: false; breakKind: 'hash'; checked: number; brokenAtId: string; storedHash: string; recomputedHash: string }
   > {
     const rows = await this.prisma.auditLog.findMany({
       orderBy: { id: 'desc' },
@@ -97,6 +121,7 @@ export class AuditService implements OnModuleInit {
       if (actualPrev !== expectedPrev) {
         return {
           ok: false,
+          breakKind: 'link',
           checked: rows.indexOf(row),
           brokenAtId: row.id.toString(),
           expectedPrev,
@@ -127,10 +152,11 @@ export class AuditService implements OnModuleInit {
       if (recomputed !== row.hashChainValue) {
         return {
           ok: false,
+          breakKind: 'hash',
           checked: rows.indexOf(row),
           brokenAtId: row.id.toString(),
-          expectedPrev,
-          actualPrev: row.hashChainValue,
+          storedHash: row.hashChainValue,
+          recomputedHash: recomputed,
         };
       }
       expectedPrev = row.hashChainValue;
@@ -143,17 +169,21 @@ export class AuditService implements OnModuleInit {
     };
   }
 
-  private async recordSecurityAlert(result: {
-    brokenAtId: string;
-    expectedPrev: string;
-    actualPrev: string;
-  }) {
+  private async recordSecurityAlert(
+    result:
+      | { breakKind: 'link'; brokenAtId: string; expectedPrev: string; actualPrev: string }
+      | { breakKind: 'hash'; brokenAtId: string; storedHash: string; recomputedHash: string },
+  ) {
+    const message =
+      result.breakKind === 'link'
+        ? `Audit hash chain integrity broken (link) at audit_logs.id=${result.brokenAtId}. Predecessor hash=${result.expectedPrev}, stored prev_hash=${result.actualPrev}.`
+        : `Audit hash chain integrity broken (hash) at audit_logs.id=${result.brokenAtId}. Recomputed hash=${result.recomputedHash}, stored hash=${result.storedHash}.`;
     try {
       await this.prisma.securityAlert.create({
         data: {
           alertType: 'AUDIT_CHAIN_BREAK',
           severity: AuditRiskLevel.CRITICAL,
-          message: `Audit hash chain integrity broken at audit_logs.id=${result.brokenAtId}. Expected prev=${result.expectedPrev}, actual=${result.actualPrev}.`,
+          message,
           metadata: result as unknown as Prisma.InputJsonValue,
         },
       });
@@ -171,6 +201,14 @@ export class AuditService implements OnModuleInit {
    * still reject UPDATE / DELETE on audit_logs.
    */
   async log(entry: AuditLogEntry): Promise<void> {
+    // Fall back to the per-request AsyncLocalStorage context for IP / UA
+    // when the caller didn't pass them explicitly. Background jobs and
+    // scripts run outside any request scope and will see undefined here,
+    // which is fine — those rows have no meaningful client IP.
+    const ctx = this.requestContext.get();
+    const resolvedIpAddress = entry.ipAddress ?? ctx?.ipAddress;
+    const resolvedUserAgent = entry.userAgent ?? ctx?.userAgent;
+
     await this.prisma.$transaction(async tx => {
       // 0x6354_4d50 = 'cTMP' — arbitrary 32-bit key shared by every replica.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${AUDIT_LOCK_KEY})`;
@@ -191,8 +229,8 @@ export class AuditService implements OnModuleInit {
         tenderId: entry.tenderId,
         vendorId: entry.vendorId,
         bidId: entry.bidId,
-        ipAddress: entry.ipAddress,
-        userAgent: entry.userAgent,
+        ipAddress: resolvedIpAddress,
+        userAgent: resolvedUserAgent,
         beforeValue: entry.beforeValue ?? null,
         afterValue: entry.afterValue ?? null,
         reason: entry.reason,
@@ -217,6 +255,16 @@ export class AuditService implements OnModuleInit {
     });
   }
 
+  // Eagerly load the actor's display name (internal users) or vendor company
+  // name (vendor users) so the audit log viewer doesn't have to fall back to
+  // a UUID prefix. Both relations are nullable — a row may have neither
+  // actor (system-internal events) or one of the two — so they're optional
+  // here and the serializer resolves the first available name.
+  private static readonly ACTOR_INCLUDE = {
+    actorUser: { select: { displayName: true } },
+    actorVendorUser: { select: { vendor: { select: { companyName: true } } } },
+  } as const;
+
   async search(query: AuditSearchDto) {
     const page = (query as any).page ?? 1;
     const pageSize = (query as any).pageSize ?? 50;
@@ -232,6 +280,7 @@ export class AuditService implements OnModuleInit {
         skip,
         take: pageSize,
         orderBy: { id: 'desc' },
+        include: AuditService.ACTOR_INCLUDE,
       }),
     ]);
 
@@ -254,6 +303,7 @@ export class AuditService implements OnModuleInit {
         skip,
         take: pageSize,
         orderBy: { id: 'desc' },
+        include: AuditService.ACTOR_INCLUDE,
       }),
     ]);
     return {
@@ -269,6 +319,10 @@ export class AuditService implements OnModuleInit {
     eventType: log.eventType,
     actorUserId: log.actorUserId ?? undefined,
     actorVendorUserId: log.actorVendorUserId ?? undefined,
+    actorName:
+      log.actorUser?.displayName ??
+      log.actorVendorUser?.vendor?.companyName ??
+      undefined,
     actorRole: log.actorRoleCode ?? undefined,
     entityType: log.entityType,
     entityId: log.entityId ?? undefined,

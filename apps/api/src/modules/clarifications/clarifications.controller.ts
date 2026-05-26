@@ -2,7 +2,9 @@ import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { OptionalVendorOrUserGuard } from '../../common/guards/optional-vendor-or-user.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ClarificationsService } from './clarifications.service';
 import { CreateClarificationDto } from './dto/create-clarification.dto';
@@ -10,20 +12,21 @@ import { ReplyClarificationDto } from './dto/reply-clarification.dto';
 
 @ApiTags('clarifications')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller()
 export class ClarificationsController {
   constructor(private readonly clarificationsService: ClarificationsService) {}
 
   @Get('tenders/:tenderId/clarifications')
-  @RequirePermissions('clarification:view_internal')
+  @Public()
+  @UseGuards(OptionalVendorOrUserGuard)
   @ApiOperation({ operationId: 'listClarifications', summary: 'List clarifications for a tender' })
   findAll(@Param('tenderId') tenderId: string, @CurrentUser() user: any) {
     return this.clarificationsService.findAll(tenderId, user);
   }
 
   @Post('tenders/:tenderId/clarifications')
-  @RequirePermissions('clarification:create')
+  @Public()
+  @UseGuards(OptionalVendorOrUserGuard)
   @ApiOperation({ operationId: 'createClarification', summary: 'Submit clarification question' })
   create(
     @Param('tenderId') tenderId: string,
@@ -34,6 +37,7 @@ export class ClarificationsController {
   }
 
   @Post('clarifications/:id/reply')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermissions('clarification:reply')
   @ApiOperation({ operationId: 'replyClarification', summary: 'Reply to clarification' })
   reply(

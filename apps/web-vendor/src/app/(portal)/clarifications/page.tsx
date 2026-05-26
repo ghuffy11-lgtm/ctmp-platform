@@ -1,9 +1,15 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { MessageSquare, Reply } from 'lucide-react';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
-import { StatusBadge } from '@/components/ui/StatusBadge';
+import { GlassCard } from '@/components/ui/GlassCard';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Textarea } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
+import { StatusBadge, Chip } from '@/components/ui/StatusBadge';
+import { Loading, Empty, ErrorBanner } from '@/components/ui/Empty';
 
 interface TenderSummary {
   id: string;
@@ -36,11 +42,9 @@ export default function VendorClarificationsPage() {
   const [loading, setLoading] = useState(true);
   const [threadLoading, setThreadLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const [newQuestion, setNewQuestion] = useState('');
   const [posting, setPosting] = useState(false);
 
-  // Fetch eligible tenders.
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -64,7 +68,6 @@ export default function VendorClarificationsPage() {
     load();
   }, []);
 
-  // Fetch clarifications when tender changes.
   const fetchClarifications = useCallback(async (tenderId: string) => {
     setThreadLoading(true);
     try {
@@ -103,40 +106,41 @@ export default function VendorClarificationsPage() {
   const selectedTender = tenders.find(t => t.id === selectedTenderId) ?? null;
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary tracking-tight">Clarifications</h1>
-        <p className="text-sm text-text-secondary mt-0.5">
-          Ask procurement to clarify scope, requirements, or terms. You see your own threads + any
-          replies marked public.
-        </p>
-      </div>
+    <div className="space-y-10">
+      <PageHeader
+        title="Clarifications"
+        subtitle="Ask procurement to clarify scope, requirements, or terms. You see your own threads plus any replies marked public."
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-        {/* Tender list */}
-        <div className="md:col-span-1 bg-card rounded-xl border border-border shadow-sm overflow-hidden">
-          <div className="p-3 border-b border-border bg-bg">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Tender selector */}
+        <GlassCard padding="none" className="lg:col-span-1 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-900/10">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-900/55">
               Eligible Tenders
             </p>
           </div>
           {loading ? (
-            <div className="p-4 text-xs text-text-secondary">Loading…</div>
+            <div className="p-6 text-sm text-slate-900/55">Loading…</div>
           ) : tenders.length === 0 ? (
-            <div className="p-4 text-xs text-text-secondary italic">No tenders in clarification or published phase.</div>
+            <div className="p-6 text-sm text-slate-900/55 italic">
+              No tenders in clarification or published phase.
+            </div>
           ) : (
-            <ul className="divide-y divide-border">
+            <ul className="divide-y divide-slate-900/5">
               {tenders.map(t => (
                 <li key={t.id}>
                   <button
                     onClick={() => setSelectedTenderId(t.id)}
-                    className={`w-full text-left p-3 transition-colors ${
-                      selectedTenderId === t.id ? 'bg-accent/5 border-l-4 border-l-accent' : 'hover:bg-bg/60'
+                    className={`w-full text-left p-5 transition-colors ${
+                      selectedTenderId === t.id
+                        ? 'bg-electric-500/10 border-l-2 border-l-electric-500'
+                        : 'hover:bg-slate-900/5'
                     }`}
                   >
-                    <p className="text-[10px] font-mono font-bold text-accent">{t.referenceNumber}</p>
-                    <p className="text-xs font-semibold text-text-primary mt-0.5 leading-snug">{t.title}</p>
-                    <div className="mt-1">
+                    <p className="text-[10px] font-mono text-electric-600">{t.referenceNumber}</p>
+                    <p className="text-sm font-medium mt-1 leading-snug line-clamp-2">{t.title}</p>
+                    <div className="mt-2">
                       <StatusBadge status={t.status} />
                     </div>
                   </button>
@@ -144,55 +148,53 @@ export default function VendorClarificationsPage() {
               ))}
             </ul>
           )}
-        </div>
+        </GlassCard>
 
-        {/* Thread + ask form */}
-        <div className="md:col-span-3 space-y-4">
+        {/* Thread area */}
+        <div className="lg:col-span-3 space-y-6">
           {!selectedTender ? (
-            <div className="bg-card rounded-xl border border-border shadow-sm p-8 text-center text-sm text-text-secondary">
-              Select a tender on the left to view or post clarifications.
-            </div>
+            <Empty
+              icon={MessageSquare}
+              title="Select a tender"
+              description="Pick a tender on the left to view or post clarifications."
+            />
           ) : (
             <>
-              {/* Ask form */}
-              <form
-                onSubmit={handleAsk}
-                className="bg-card rounded-xl border border-border shadow-sm p-4 space-y-3"
-              >
-                <p className="text-sm font-bold text-text-primary">Ask a question</p>
-                <textarea
-                  value={newQuestion}
-                  onChange={e => setNewQuestion(e.target.value)}
-                  placeholder="Type your clarification request…"
-                  rows={3}
-                  required
-                  className="w-full p-3 text-sm border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent bg-bg resize-none"
-                />
-                {error && <p className="text-xs text-danger">{error}</p>}
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={posting || !newQuestion.trim()}
-                    className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-bold disabled:opacity-50"
-                  >
-                    {posting ? 'Submitting…' : 'Submit Question'}
-                  </button>
-                </div>
-              </form>
-
-              {/* Thread list */}
-              <div className="space-y-3">
-                {threadLoading ? (
-                  <div className="p-6 text-center text-sm text-text-secondary">Loading threads…</div>
-                ) : clarifications.length === 0 ? (
-                  <div className="bg-card rounded-xl border border-border p-8 text-center">
-                    <span className="material-symbols-outlined text-[40px] text-text-secondary/30 block mb-1">forum</span>
-                    <p className="text-sm text-text-secondary">No clarifications on this tender yet.</p>
+              <GlassCard>
+                <form onSubmit={handleAsk} className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="heading-font text-xl font-semibold">Ask a question</h3>
+                    <Chip tone="electric">{selectedTender.referenceNumber}</Chip>
                   </div>
-                ) : (
-                  clarifications.map(c => <ThreadCard key={c.id} clarification={c} />)
-                )}
-              </div>
+                  <Textarea
+                    value={newQuestion}
+                    onChange={e => setNewQuestion(e.target.value)}
+                    placeholder="Type your clarification request…"
+                    rows={4}
+                    required
+                  />
+                  {error && <ErrorBanner message={error} />}
+                  <div className="flex justify-end">
+                    <Button type="submit" disabled={posting || !newQuestion.trim()} size="md">
+                      {posting ? 'Submitting…' : 'Submit Question'}
+                    </Button>
+                  </div>
+                </form>
+              </GlassCard>
+
+              {threadLoading ? (
+                <Loading label="Loading threads…" />
+              ) : clarifications.length === 0 ? (
+                <Empty
+                  icon={MessageSquare}
+                  title="No clarifications yet"
+                  description="Your questions and any public replies on this tender will appear here."
+                />
+              ) : (
+                <div className="space-y-4">
+                  {clarifications.map(c => <ThreadCard key={c.id} clarification={c} />)}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -203,46 +205,44 @@ export default function VendorClarificationsPage() {
 
 function ThreadCard({ clarification }: { clarification: Clarification }) {
   return (
-    <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
-      <div className="p-4 border-b border-border">
-        <div className="flex items-start justify-between mb-2">
-          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-            clarification.status === 'OPEN' ? 'bg-amber-100 text-amber-800' :
-            clarification.status === 'ANSWERED' ? 'bg-success/15 text-success' :
-            'bg-border text-text-secondary'
-          }`}>
-            {clarification.status}
-          </span>
-          <span className="text-[11px] text-text-secondary">
+    <GlassCard padding="none" className="overflow-hidden">
+      <div className="p-6 border-b border-slate-900/10">
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <StatusBadge status={clarification.status} />
+          <span className="text-xs text-slate-900/50">
             {new Date(clarification.createdAt).toLocaleString('en-GB')}
           </span>
         </div>
-        <p className="text-sm text-text-primary leading-relaxed">{clarification.question}</p>
+        <p className="text-sm text-slate-900/90 leading-relaxed">{clarification.question}</p>
       </div>
 
       {clarification.replies.length > 0 && (
-        <div className="bg-bg/40 px-4 py-3 space-y-2 border-t border-border">
+        <div className="bg-slate-50 px-6 py-5 space-y-3">
           {clarification.replies.map(r => (
-            <div key={r.id} className="bg-card rounded-lg border border-border p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="material-symbols-outlined text-[14px] text-accent">reply</span>
-                <span className="text-xs font-bold text-text-primary">
+            <div
+              key={r.id}
+              className="rounded-2xl bg-white border border-slate-900/10 p-4"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Reply className="w-4 h-4 text-electric-600" />
+                <span className="text-xs font-semibold">
                   {r.repliedByName ?? 'Procurement Officer'}
                 </span>
-                <span className={`ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                  r.visibility === 'GENERAL_PUBLIC' ? 'bg-accent/10 text-accent' : 'bg-border text-text-secondary'
-                }`}>
+                <Chip
+                  tone={r.visibility === 'GENERAL_PUBLIC' ? 'electric' : 'neutral'}
+                  className="ml-auto"
+                >
                   {r.visibility === 'GENERAL_PUBLIC' ? 'PUBLIC' : 'PRIVATE'}
-                </span>
+                </Chip>
               </div>
-              <p className="text-xs text-text-secondary leading-relaxed">{r.reply}</p>
-              <p className="text-[10px] text-text-secondary/60 mt-1">
+              <p className="text-sm text-slate-900/80 leading-relaxed">{r.reply}</p>
+              <p className="text-[10px] text-slate-900/50 mt-2">
                 {new Date(r.repliedAt).toLocaleString('en-GB')}
               </p>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </GlassCard>
   );
 }

@@ -4,6 +4,14 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { get, post } from '@/lib/api';
 import { getAccessToken, hasPermission } from '@/lib/auth';
+import {
+  Lock,
+  Unlock,
+  ArrowLeftRight,
+  ChevronRight,
+  Download,
+  CheckCircle2,
+} from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,7 +71,7 @@ function formatCurrency(amount?: number, currency = 'USD') {
 function NoAccessScreen() {
   return (
     <div className="flex flex-col items-center justify-center h-full p-8 gap-4 text-center max-w-md mx-auto">
-      <span className="material-symbols-outlined text-[72px] text-text-secondary/30">lock</span>
+      <Lock className="w-[72px] h-[72px] text-text-secondary/30" />
       <h1 className="text-xl font-bold text-text-primary">Commercial Access Required</h1>
       <p className="text-sm text-text-secondary">
         Commercial Comparison requires the <code className="bg-bg px-1.5 py-0.5 rounded text-xs">commercial:view</code> permission.
@@ -91,6 +99,8 @@ export default function CommercialComparisonPage() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
+  const [savingPrice, setSavingPrice] = useState<string | null>(null);
 
   useEffect(() => {
     const token = getAccessToken();
@@ -145,18 +155,39 @@ export default function CommercialComparisonPage() {
     if (selectedTenderId) fetchComparison(selectedTenderId);
   }, [selectedTenderId, fetchComparison]);
 
-  async function handleRecommendAward(bidId: string, vendorId: string) {
+  async function handleSavePrice(bidId: string) {
+    const raw = priceInputs[bidId];
+    const price = Number(raw);
+    if (!raw || !Number.isFinite(price) || price < 0) {
+      setError('Enter a valid positive price.');
+      return;
+    }
+    setSavingPrice(bidId);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      await post(`/bids/${bidId}/commercial-evaluations`, { totalPrice: price }, token);
+      if (selectedTenderId) await fetchComparison(selectedTenderId);
+      setPriceInputs((prev) => ({ ...prev, [bidId]: '' }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save price');
+    } finally {
+      setSavingPrice(null);
+    }
+  }
+
+  async function handleRecommendAward(bidId: string, _vendorId: string) {
     if (!selectedTenderId) return;
-    const reason = prompt('Reason for award recommendation:');
-    if (!reason) return;
+    const justification = prompt('Justification for award recommendation:');
+    if (!justification) return;
     try {
       const token = getAccessToken();
       await post(
-        `/tenders/${selectedTenderId}/award-recommendations`,
-        { recommendedVendorId: vendorId, recommendedBidId: bidId, reason },
+        `/tenders/${selectedTenderId}/award-recommendation`,
+        { recommendedBidId: bidId, justification },
         token,
       );
-      alert('Award recommendation submitted.');
+      alert('Award recommendation submitted. Approval task added to Approvals queue.');
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to recommend');
     }
@@ -167,7 +198,7 @@ export default function CommercialComparisonPage() {
     setExporting(true);
     try {
       const token = getAccessToken();
-      await post(`/reports/commercial-comparison`, { tenderId: selectedTenderId }, token);
+      await post(`/reports/commercial_comparison/export`, { format: 'XLSX', tenderId: selectedTenderId }, token);
       alert('Export job enqueued. Track progress in Reports.');
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to export');
@@ -201,7 +232,7 @@ export default function CommercialComparisonPage() {
             <div className="p-4 text-xs text-text-secondary">Loading…</div>
           ) : tenders.length === 0 ? (
             <div className="p-6 text-center">
-              <span className="material-symbols-outlined text-[40px] text-text-secondary/20 block mb-2">compare</span>
+              <ArrowLeftRight className="w-10 h-10 text-text-secondary/20 mx-auto mb-2" />
               <p className="text-xs text-text-secondary">No tenders in commercial comparison.</p>
             </div>
           ) : (
@@ -232,16 +263,16 @@ export default function CommercialComparisonPage() {
       <div className="flex-1 min-w-0 overflow-y-auto">
         {!selectedTender ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 p-8 text-center">
-            <span className="material-symbols-outlined text-[56px] text-text-secondary/20">compare</span>
+            <ArrowLeftRight className="w-14 h-14 text-text-secondary/20" />
             <p className="text-sm text-text-secondary">Select a tender to compare commercial offers.</p>
           </div>
         ) : (
           <div className="p-6 max-w-6xl mx-auto space-y-5">
             <nav className="flex items-center gap-1 text-xs text-text-secondary">
               <Link href="/tenders" className="hover:text-accent">Tenders</Link>
-              <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+              <ChevronRight className="w-3.5 h-3.5" />
               <Link href={`/tenders/${selectedTender.id}`} className="hover:text-accent">{selectedTender.referenceNumber}</Link>
-              <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+              <ChevronRight className="w-3.5 h-3.5" />
               <span className="text-text-primary font-medium">Commercial Comparison</span>
             </nav>
 
@@ -257,7 +288,7 @@ export default function CommercialComparisonPage() {
                     disabled={exporting}
                     className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card flex items-center gap-2 disabled:opacity-50"
                   >
-                    <span className="material-symbols-outlined text-[16px]">download</span>
+                    <Download className="w-4 h-4" />
                     {exporting ? 'Exporting…' : 'Export Comparison'}
                   </button>
                 )}
@@ -279,9 +310,9 @@ export default function CommercialComparisonPage() {
                       access[key] ? 'bg-success/10 text-success' : 'bg-border text-text-secondary/60'
                     }`}
                   >
-                    <span className="material-symbols-outlined text-[12px]">
-                      {access[key] ? 'check_circle' : 'lock'}
-                    </span>
+                    {access[key]
+                      ? <CheckCircle2 className="w-3 h-3" />
+                      : <Lock className="w-3 h-3" />}
                     {label}
                   </span>
                 ))}
@@ -332,15 +363,38 @@ export default function CommercialComparisonPage() {
                               </span>
                             </td>
                             <td className="px-5 py-4 flex items-center gap-1.5 text-text-secondary">
-                              <span className="material-symbols-outlined text-[16px]">
-                                {row.commercialEnvelopeStatus === 'OPENED' ? 'lock_open' : 'lock'}
-                              </span>
+                              {row.commercialEnvelopeStatus === 'OPENED'
+                                ? <Unlock className="w-4 h-4" />
+                                : <Lock className="w-4 h-4" />}
                               {row.commercialEnvelopeStatus}
                             </td>
                             <td className="px-5 py-4 text-right font-mono font-bold text-text-primary">
-                              {row.commercialDetailsVisible
-                                ? formatCurrency(row.totalAmount, row.currency)
-                                : <span className="text-text-secondary/50 italic font-sans font-normal">hidden</span>}
+                              {row.totalAmount !== undefined && row.totalAmount !== null
+                                ? (row.commercialDetailsVisible
+                                    ? formatCurrency(row.totalAmount, row.currency)
+                                    : <span className="text-text-secondary/50 italic font-sans font-normal">hidden</span>)
+                                : row.commercialEnvelopeStatus === 'OPENED' && row.commercialDetailsVisible
+                                  ? (
+                                    <div className="flex items-center gap-2 justify-end">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={priceInputs[row.bidId] ?? ''}
+                                        onChange={(e) => setPriceInputs((prev) => ({ ...prev, [row.bidId]: e.target.value }))}
+                                        placeholder="0.00"
+                                        className="w-28 px-2 py-1 border border-border rounded text-sm font-mono text-right"
+                                      />
+                                      <button
+                                        onClick={() => handleSavePrice(row.bidId)}
+                                        disabled={savingPrice === row.bidId}
+                                        className="px-2 py-1 bg-accent text-white text-xs font-bold rounded disabled:opacity-50"
+                                      >
+                                        {savingPrice === row.bidId ? '…' : 'Save'}
+                                      </button>
+                                    </div>
+                                  )
+                                  : <span className="text-text-secondary/50 italic font-sans font-normal">pending</span>}
                             </td>
                             <td className="px-5 py-4 text-center">
                               {rank === 1 && (

@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { RefreshCw, Store, Clock, BadgeCheck, Ban, Search, CheckCircle2, PauseCircle } from 'lucide-react';
+import type { LucideProps } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -143,29 +145,28 @@ export default function VendorsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-text-primary tracking-tight">Vendor Management</h1>
-          <p className="text-sm text-text-secondary mt-0.5">Registration review, approvals, and lifecycle management.</p>
         </div>
         <button
           onClick={fetchVendors}
           className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card flex items-center gap-2"
         >
-          <span className="material-symbols-outlined text-[16px]">refresh</span>
+          <RefreshCw className="w-4 h-4" />
           Refresh
         </button>
       </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Vendors', value: vendors.length, color: 'text-text-primary', icon: 'storefront' },
-          { label: 'Pending Approval', value: pendingCount, color: 'text-amber-600', icon: 'pending' },
-          { label: 'Approved', value: approvedCount, color: 'text-success', icon: 'verified' },
-          { label: 'Rejected', value: rejectedCount, color: 'text-danger', icon: 'block' },
-        ].map(s => (
+        {([
+          { label: 'Total Vendors', value: vendors.length, color: 'text-text-primary', Icon: Store },
+          { label: 'Pending Approval', value: pendingCount, color: 'text-amber-600', Icon: Clock },
+          { label: 'Approved', value: approvedCount, color: 'text-success', Icon: BadgeCheck },
+          { label: 'Rejected', value: rejectedCount, color: 'text-danger', Icon: Ban },
+        ] as { label: string; value: number; color: string; Icon: React.ComponentType<LucideProps> }[]).map(s => (
           <div key={s.label} className="bg-card rounded-xl border border-border p-4 shadow-sm">
             <div className="flex items-start justify-between mb-2">
               <span className="text-xs font-bold uppercase text-text-secondary">{s.label}</span>
-              <span className={`material-symbols-outlined text-[20px] ${s.color}`}>{s.icon}</span>
+              <s.Icon className={`w-5 h-5 ${s.color}`} />
             </div>
             <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
           </div>
@@ -181,7 +182,7 @@ export default function VendorsPage() {
         <div className="flex-1 bg-card rounded-xl border border-border shadow-sm overflow-hidden flex flex-col">
           <div className="p-4 border-b border-border flex gap-3 flex-wrap items-center">
             <div className="relative flex-1 min-w-[200px]">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-text-secondary">search</span>
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary" />
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -207,7 +208,7 @@ export default function VendorsPage() {
               <div className="p-6 text-center text-sm text-text-secondary">Loading…</div>
             ) : filtered.length === 0 ? (
               <div className="p-8 text-center">
-                <span className="material-symbols-outlined text-[48px] text-text-secondary/20 block mb-2">storefront</span>
+                <Store className="w-12 h-12 text-text-secondary/20 mx-auto mb-2" />
                 <p className="text-sm text-text-secondary">No vendors match the filter.</p>
               </div>
             ) : (
@@ -260,7 +261,7 @@ export default function VendorsPage() {
         <div className="w-[380px] flex-shrink-0 bg-card rounded-xl border border-border shadow-sm overflow-hidden flex flex-col">
           {!selected ? (
             <div className="p-8 text-center flex-1 flex flex-col items-center justify-center">
-              <span className="material-symbols-outlined text-[48px] text-text-secondary/20 mb-2">storefront</span>
+              <Store className="w-12 h-12 text-text-secondary/20 mb-2" />
               <p className="text-sm text-text-secondary">Select a vendor.</p>
             </div>
           ) : (
@@ -298,7 +299,7 @@ export default function VendorsPage() {
                       disabled={actionInFlight || !selected.emailVerified}
                       className="w-full px-4 py-2.5 bg-success text-white rounded-lg text-sm font-bold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
-                      <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                      <CheckCircle2 className="w-4 h-4" />
                       Approve Vendor
                     </button>
                     {!selected.emailVerified && (
@@ -309,7 +310,7 @@ export default function VendorsPage() {
                       disabled={actionInFlight}
                       className="w-full px-4 py-2.5 bg-danger text-white rounded-lg text-sm font-bold hover:opacity-90 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
                     >
-                      <span className="material-symbols-outlined text-[16px]">block</span>
+                      <Ban className="w-4 h-4" />
                       Reject
                     </button>
                   </>
@@ -320,7 +321,7 @@ export default function VendorsPage() {
                     disabled={actionInFlight}
                     className="w-full px-4 py-2.5 border border-danger text-danger rounded-lg text-sm font-bold hover:bg-danger/5 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
                   >
-                    <span className="material-symbols-outlined text-[16px]">pause_circle</span>
+                    <PauseCircle className="w-4 h-4" />
                     Suspend
                   </button>
                 )}
@@ -340,9 +341,9 @@ function FieldRow({ label, value, verified }: { label: string; value: string; ve
       <p className="text-sm text-text-primary flex items-center gap-1.5">
         {value}
         {verified !== undefined && (
-          <span className={`material-symbols-outlined text-[14px] ${verified ? 'text-success' : 'text-amber-600'}`} title={verified ? 'Verified' : 'Unverified'}>
-            {verified ? 'verified' : 'pending'}
-          </span>
+          verified
+            ? <BadgeCheck className="w-3.5 h-3.5 text-success" aria-label="Verified" />
+            : <Clock className="w-3.5 h-3.5 text-amber-600" aria-label="Unverified" />
         )}
       </p>
     </div>

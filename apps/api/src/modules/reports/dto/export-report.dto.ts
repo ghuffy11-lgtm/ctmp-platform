@@ -21,4 +21,9 @@ export class ExportReportDto {
   @IsString()
   @IsOptional()
   departmentId?: string;
+
+  @ApiPropertyOptional({ description: 'Scope the report to a single tender (used by commercial_comparison).' })
+  @IsString()
+  @IsOptional()
+  tenderId?: string;
 }

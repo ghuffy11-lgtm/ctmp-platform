@@ -3,6 +3,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { get, post } from '@/lib/api';
 import { getAccessToken, hasPermission } from '@/lib/auth';
+import {
+  RefreshCw,
+  Lock,
+  Download,
+  Gavel,
+  Store,
+  CreditCard,
+  Shield,
+  BarChart3,
+  FileText,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+} from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,20 +42,22 @@ interface ReportExportJob {
 
 type ExportFormat = 'XLSX' | 'PDF';
 
-const STATUS_STYLES: Record<ReportExportJob['status'], { label: string; cls: string; icon: string }> = {
-  QUEUED:    { label: 'Queued',   cls: 'bg-border text-text-secondary', icon: 'schedule' },
-  RUNNING:   { label: 'Running',  cls: 'bg-amber-100 text-amber-800', icon: 'sync' },
-  COMPLETED: { label: 'Ready',    cls: 'bg-success/10 text-success', icon: 'check_circle' },
-  FAILED:    { label: 'Failed',   cls: 'bg-danger/10 text-danger', icon: 'error' },
+type IconComponent = React.ComponentType<{ className?: string }>;
+
+const STATUS_STYLES: Record<ReportExportJob['status'], { label: string; cls: string; icon: IconComponent; spin?: boolean }> = {
+  QUEUED:    { label: 'Queued',   cls: 'bg-border text-text-secondary',  icon: Clock },
+  RUNNING:   { label: 'Running',  cls: 'bg-amber-100 text-amber-800',    icon: RefreshCw, spin: true },
+  COMPLETED: { label: 'Ready',    cls: 'bg-success/10 text-success',     icon: CheckCircle2 },
+  FAILED:    { label: 'Failed',   cls: 'bg-danger/10 text-danger',       icon: AlertCircle },
 };
 
-const CATEGORY_ICONS: Record<string, string> = {
-  Tender: 'gavel',
-  Vendor: 'storefront',
-  Financial: 'payments',
-  Audit: 'policy',
-  Operations: 'analytics',
-  Default: 'description',
+const CATEGORY_ICONS: Record<string, IconComponent> = {
+  Tender:     Gavel,
+  Vendor:     Store,
+  Financial:  CreditCard,
+  Audit:      Shield,
+  Operations: BarChart3,
+  Default:    FileText,
 };
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -65,13 +81,15 @@ export default function ReportsPage() {
     setError(null);
     try {
       const token = getAccessToken();
-      const [defsRes, jobsRes] = await Promise.all([
-        get<{ items: ReportDefinition[] }>('/reports', token),
-        // GAP: GET /reports/jobs (history) not contracted. Speculative.
-        get<{ items: ReportExportJob[] }>('/reports/jobs?pageSize=20', token).catch(() => ({ items: [] })),
-      ]);
+      const canViewJobs = token ? hasPermission(token, 'reports:export') : false;
+      const defsRes = await get<{ items: ReportDefinition[] }>('/reports', token);
       setReports(defsRes.items ?? []);
-      setJobs(jobsRes.items ?? []);
+      if (canViewJobs) {
+        const jobsRes = await get<{ items: ReportExportJob[] }>('/reports/jobs?pageSize=20', token).catch(() => ({ items: [] }));
+        setJobs(jobsRes.items ?? []);
+      } else {
+        setJobs([]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load reports');
     } finally {
@@ -160,9 +178,6 @@ export default function ReportsPage() {
       <div className="flex justify-between items-end flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-text-primary tracking-tight">Reports &amp; Analytics</h1>
-          <p className="text-sm text-text-secondary mt-0.5">
-            Async export jobs. Downloads audit-logged. Commercial reports gated by <code>commercial:export</code>.
-          </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 bg-card border border-border rounded-lg p-0.5">
@@ -182,7 +197,7 @@ export default function ReportsPage() {
             onClick={fetchAll}
             className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card flex items-center gap-2"
           >
-            <span className="material-symbols-outlined text-[16px]">refresh</span>
+            <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
         </div>
@@ -199,52 +214,53 @@ export default function ReportsPage() {
         ) : Object.keys(grouped).length === 0 ? (
           <div className="bg-card rounded-xl border border-border p-8 text-center text-sm text-text-secondary">No reports configured.</div>
         ) : (
-          Object.entries(grouped).map(([category, defs]) => (
-            <div key={category}>
-              <h2 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">{category}</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {defs.map(r => {
-                  const gated = r.requiresCommercialExportPermission && !canCommercialExport;
-                  return (
-                    <div
-                      key={r.code}
-                      className={`bg-card rounded-xl border border-border p-5 shadow-sm flex flex-col ${gated ? 'opacity-60' : ''}`}
-                    >
-                      <div className="flex items-start gap-3 mb-3">
-                        <div className="w-10 h-10 bg-accent/10 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <span className="material-symbols-outlined text-[22px] text-accent">
-                            {CATEGORY_ICONS[category] ?? CATEGORY_ICONS.Default}
-                          </span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-text-primary leading-snug">{r.name}</p>
-                          <p className="text-[10px] uppercase tracking-wider text-text-secondary mt-0.5 font-mono">{r.code}</p>
-                        </div>
-                      </div>
-                      {r.description && (
-                        <p className="text-xs text-text-secondary mb-4 flex-1">{r.description}</p>
-                      )}
-                      {r.requiresCommercialExportPermission && (
-                        <div className="mb-3 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-700 self-start">
-                          <span className="material-symbols-outlined text-[12px]">lock</span>
-                          commercial:export
-                        </div>
-                      )}
-                      <button
-                        onClick={() => handleEnqueue(r)}
-                        disabled={gated || enqueueing === r.code}
-                        className="w-full px-4 py-2 bg-accent text-white rounded-lg text-sm font-bold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                        title={gated ? 'Requires commercial:export permission' : undefined}
+          Object.entries(grouped).map(([category, defs]) => {
+            const CategoryIcon = CATEGORY_ICONS[category] ?? CATEGORY_ICONS.Default;
+            return (
+              <div key={category}>
+                <h2 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">{category}</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {defs.map(r => {
+                    const gated = r.requiresCommercialExportPermission && !canCommercialExport;
+                    return (
+                      <div
+                        key={r.code}
+                        className={`bg-card rounded-xl border border-border p-5 shadow-sm flex flex-col ${gated ? 'opacity-60' : ''}`}
                       >
-                        <span className="material-symbols-outlined text-[16px]">download</span>
-                        {enqueueing === r.code ? 'Enqueueing…' : `Export ${format}`}
-                      </button>
-                    </div>
-                  );
-                })}
+                        <div className="flex items-start gap-3 mb-3">
+                          <div className="w-10 h-10 bg-accent/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <CategoryIcon className="w-[22px] h-[22px] text-accent" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-text-primary leading-snug">{r.name}</p>
+                            <p className="text-[10px] uppercase tracking-wider text-text-secondary mt-0.5 font-mono">{r.code}</p>
+                          </div>
+                        </div>
+                        {r.description && (
+                          <p className="text-xs text-text-secondary mb-4 flex-1">{r.description}</p>
+                        )}
+                        {r.requiresCommercialExportPermission && (
+                          <div className="mb-3 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-700 self-start">
+                            <Lock className="w-3 h-3" />
+                            commercial:export
+                          </div>
+                        )}
+                        <button
+                          onClick={() => handleEnqueue(r)}
+                          disabled={gated || enqueueing === r.code}
+                          className="w-full px-4 py-2 bg-accent text-white rounded-lg text-sm font-bold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                          title={gated ? 'Requires commercial:export permission' : undefined}
+                        >
+                          <Download className="w-4 h-4" />
+                          {enqueueing === r.code ? 'Enqueueing…' : `Export ${format}`}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -268,6 +284,7 @@ export default function ReportsPage() {
               <tbody className="divide-y divide-border">
                 {jobs.map(j => {
                   const meta = STATUS_STYLES[j.status];
+                  const StatusIcon = meta.icon;
                   return (
                     <tr key={j.id} className="hover:bg-bg/60">
                       <td className="px-4 py-3 font-semibold text-text-primary">
@@ -276,9 +293,7 @@ export default function ReportsPage() {
                       <td className="px-4 py-3 text-text-secondary">{j.format ?? '—'}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold ${meta.cls}`}>
-                          <span className={`material-symbols-outlined text-[14px] ${j.status === 'RUNNING' ? 'animate-spin' : ''}`}>
-                            {meta.icon}
-                          </span>
+                          <StatusIcon className={`w-3.5 h-3.5 ${j.status === 'RUNNING' ? 'animate-spin' : ''}`} />
                           {meta.label}
                         </span>
                         {j.status === 'FAILED' && j.errorMessage && (
