@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VENDOR • CONNECT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+        
+        :root {
+            --navy: 10 20 40;
+            --electric: 0 180 255;
+        }
+        
+        body {
+            font-family: 'Inter', system_ui, sans-serif;
+            background: linear-gradient(135deg, #0A1428 0%, #1E2A4A 100%);
+        }
+        
+        .heading-font {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        .glass {
+            background: rgba(15, 23, 42, 0.78);
+            backdrop-filter: blur(28px);
+            border: 1px solid rgba(0, 180, 255, 0.18);
+        }
+
+        .nav-link {
+            position: relative;
+            transition: color 0.3s;
+        }
+        .nav-link:after {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 3px;
+            bottom: -6px;
+            left: 0;
+            background: rgb(0 180 255);
+            transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .nav-link.active:after,
+        .nav-link:hover:after {
+            width: 100%;
+        }
+
+        .card-hover {
+            transition: all 0.4s cubic-bezier(0.4, 0.0, 0.2, 1);
+        }
+        .card-hover:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 25px 50px -12px rgb(0 180 255 / 0.25);
+        }
+
+        .input-focus {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .input-focus:focus {
+            box-shadow: 0 0 0 4px rgba(0, 180, 255, 0.35);
+            border-color: rgb(0 180 255);
+        }
+
+        .btn-electric {
+            background: linear-gradient(90deg, #00B4FF, #00F0FF);
+            color: #0A1428;
+            font-weight: 600;
+        }
+        .btn-electric:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 35px -10px rgb(0 180 255);
+        }
+    </style>
+</head>
+<body class="text-white min-h-screen overflow-x-hidden">
+
+    <!-- Top Navigation -->
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-white/10 bg-[#0A1428]/95 backdrop-blur-2xl">
+        <div class="max-w-screen-2xl mx-auto px-8 py-5 flex items-center justify-between">
+            <div class="flex items-center gap-x-3">
+                <div class="w-9 h-9 bg-[#00B4FF] rounded-2xl flex items-center justify-center text-[#0A1428] font-bold text-3xl leading-none">V</div>
+                <div class="heading-font tracking-tighter">
+                    <span class="text-3xl font-semibold">VENDOR</span>
+                    <span class="text-[#00B4FF] text-sm tracking-[4px] font-medium block -mt-1">CONNECT</span>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-x-9 text-sm font-medium" id="mainNav">
+                <a onclick="navigateTo('dashboard')" class="nav-link cursor-pointer active">Dashboard</a>
+                <a onclick="navigateTo('tenders')" class="nav-link cursor-pointer">Tenders</a>
+                <a onclick="navigateTo('bids')" class="nav-link cursor-pointer">My Bids</a>
+                <a onclick="navigateTo('clarifications')" class="nav-link cursor-pointer">Clarifications</a>
+                <a onclick="navigateTo('profile')" class="nav-link cursor-pointer">Profile</a>
+            </div>
+
+            <div class="flex items-center gap-x-4">
+                <div class="flex items-center gap-x-3 bg-white/5 px-5 py-2 rounded-3xl border border-white/10">
+                    <div class="w-8 h-8 bg-emerald-400 rounded-2xl flex items-center justify-center text-[#0A1428] text-sm font-bold">AC</div>
+                    <div>
+                        <div class="text-sm font-medium">Acme Corp</div>
+                        <div class="text-[10px] text-emerald-400 -mt-1">Verified</div>
+                    </div>
+                </div>
+                <button onclick="logout()" class="px-6 py-3 rounded-2xl border border-white/20 hover:bg-white/10 transition-all">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="pt-24 pb-12 max-w-screen-2xl mx-auto px-8" id="content"></div>
+
+    <script>
+        // Sample Data
+        const tenders = [
+            { 
+                id: "TND-2026-047", 
+                title: "Supply & Installation of Smart Traffic Management System",
+                dept: "Ministry of Interior", 
+                category: "Technology", 
+                closing: "2026-06-05", 
+                budget: "KD 1,850,000",
+                description: "Design, supply, installation, and maintenance of an intelligent traffic management system across major intersections in Kuwait City."
+            },
+            { 
+                id: "TND-2026-042", 
+                title: "Construction of New Medical Warehouse",
+                dept: "Ministry of Health", 
+                category: "Construction", 
+                closing: "2026-05-28", 
+                budget: "KD 4,200,000",
+                description: "Turnkey construction of a state-of-the-art medical storage facility."
+            }
+        ];
+
+        function navigateTo(page) {
+            document.querySelectorAll('#mainNav a').forEach(a => a.classList.remove('active'));
+            const activeLink = Array.from(document.querySelectorAll('#mainNav a')).find(a => a.getAttribute('onclick').includes(page));
+            if (activeLink) activeLink.classList.add('active');
+
+            let html = '';
+
+            switch(page) {
+                case 'dashboard':
+                    html = `
+                    <div class="space-y-12">
+                        <div>
+                            <h1 class="heading-font text-5xl font-semibold tracking-tighter">Good morning, Acme Corp</h1>
+                            <p class="text-white/60">Last login: Today at 10:30 AM</p>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+                            <div class="glass rounded-3xl p-8 card-hover">
+                                <div class="text-emerald-400 text-sm font-medium mb-1">ACTIVE BIDS</div>
+                                <div class="text-6xl heading-font font-semibold">7</div>
+                            </div>
+                            <div class="glass rounded-3xl p-8 card-hover">
+                                <div class="text-[#00B4FF] text-sm font-medium mb-1">OPEN TENDERS</div>
+                                <div class="text-6xl heading-font font-semibold">23</div>
+                            </div>
+                            <div class="glass rounded-3xl p-8 card-hover">
+                                <div class="text-amber-400 text-sm font-medium mb-1">CLARIFICATIONS</div>
+                                <div class="text-6xl heading-font font-semibold">4</div>
+                            </div>
+                            <div class="glass rounded-3xl p-8 card-hover">
+                                <div class="text-purple-400 text-sm font-medium mb-1">AWARDED</div>
+                                <div class="text-6xl heading-font font-semibold">12</div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between items-center mb-6">
+                                <h2 class="heading-font text-3xl font-semibold">Recent Tenders</h2>
+                                <a onclick="navigateTo('tenders')" class="text-[#00B4FF] hover:underline flex items-center gap-2">View All <i class="fa-solid fa-arrow-right"></i></a>
+                            </div>
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                ${tenders.map(t => `
+                                <div onclick="viewTender('${t.id}')" class="glass rounded-3xl p-8 card-hover cursor-pointer">
+                                    <div class="font-mono text-xs text-white/50">${t.id}</div>
+                                    <div class="heading-font text-xl font-medium mt-2 leading-tight">${t.title}</div>
+                                    <div class="mt-6 flex justify-between text-sm">
+                                        <div><span class="text-white/60">Closes:</span> ${t.closing}</div>
+                                        <div class="text-emerald-400 font-medium">${t.budget}</div>
+                                    </div>
+                                </div>`).join('')}
+                            </div>
+                        </div>
+                    </div>`;
+                    break;
+
+                case 'tenders':
+                    html = `
+                    <div>
+                        <div class="flex justify-between items-end mb-8">
+                            <div>
+                                <h1 class="heading-font text-5xl font-semibold tracking-tighter">Public Tenders</h1>
+                                <p class="text-white/60">23 opportunities available</p>
+                            </div>
+                            <input type="text" placeholder="Search tenders..." 
+                                   class="input-focus bg-white/5 border border-white/20 rounded-3xl px-6 py-4 w-96 outline-none">
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                            ${tenders.map(t => `
+                            <div onclick="viewTender('${t.id}')" class="glass rounded-3xl p-8 card-hover cursor-pointer">
+                                <div class="font-mono text-xs text-white/50">${t.id}</div>
+                                <div class="heading-font text-2xl font-medium mt-3 leading-tight">${t.title}</div>
+                                <div class="flex gap-2 mt-6">
+                                    <span class="px-4 py-1 bg-white/10 rounded-2xl text-xs">${t.dept}</span>
+                                    <span class="px-4 py-1 bg-[#00B4FF]/10 text-[#00B4FF] rounded-2xl text-xs">${t.category}</span>
+                                </div>
+                                <div class="mt-8 flex justify-between items-end">
+                                    <div>
+                                        <div class="text-xs text-white/60">Closes in</div>
+                                        <div class="text-2xl font-semibold text-rose-400">11 days</div>
+                                    </div>
+                                    <button class="px-8 py-4 btn-electric rounded-3xl text-sm">VIEW DETAILS</button>
+                                </div>
+                            </div>`).join('')}
+                        </div>
+                    </div>`;
+                    break;
+
+                case 'bids':
+                    html = `
+                    <div class="glass rounded-3xl p-10">
+                        <h2 class="heading-font text-4xl font-semibold mb-8">My Bids</h2>
+                        <table class="w-full">
+                            <thead class="border-b border-white/10">
+                                <tr class="text-white/60 text-sm">
+                                    <th class="py-5 text-left">Tender ID</th>
+                                    <th class="py-5 text-left">Title</th>
+                                    <th class="py-5 text-left">Submitted</th>
+                                    <th class="py-5 text-left">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="border-b border-white/10 hover:bg-white/5">
+                                    <td class="py-6 font-medium">${tenders[0].id}</td>
+                                    <td class="py-6">${tenders[0].title.substring(0, 45)}...</td>
+                                    <td class="py-6 text-white/60">May 20, 2026</td>
+                                    <td class="py-6"><span class="px-6 py-2 bg-amber-400/10 text-amber-400 rounded-3xl text-xs font-medium">Under Evaluation</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>`;
+                    break;
+
+                case 'clarifications':
+                    html = `
+                    <div class="glass rounded-3xl p-10">
+                        <div class="flex justify-between mb-8">
+                            <h2 class="heading-font text-4xl font-semibold">Clarifications</h2>
+                            <button onclick="newClarification()" class="px-8 py-4 btn-electric rounded-3xl">+ New Question</button>
+                        </div>
+                        <div class="space-y-4">
+                            <div class="glass p-6 rounded-3xl flex justify-between items-center">
+                                <div>
+                                    <div class="font-medium">${tenders[0].id} - Technical Specs</div>
+                                    <div class="text-xs text-white/60 mt-1">Submitted 2 days ago</div>
+                                </div>
+                                <span class="px-6 py-2 bg-emerald-400/10 text-emerald-400 rounded-3xl text-sm">Answered</span>
+                            </div>
+                        </div>
+                    </div>`;
+                    break;
+
+                case 'profile':
+                    html = `
+                    <div class="max-w-3xl mx-auto glass rounded-3xl p-12">
+                        <h2 class="heading-font text-4xl font-semibold mb-10">Company Profile</h2>
+                        <div class="space-y-8">
+                            <div class="grid grid-cols-2 gap-6">
+                                <div>
+                                    <label class="text-xs text-white/60 block mb-2">Company Name</label>
+                                    <input value="Acme Corporation Ltd." class="input-focus w-full bg-white/5 border border-white/20 rounded-3xl px-6 py-4">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-white/60 block mb-2">Registration No.</label>
+                                    <input value="CR-2024-87192" class="input-focus w-full bg-white/5 border border-white/20 rounded-3xl px-6 py-4">
+                                </div>
+                            </div>
+                            <button onclick="saveProfile()" class="w-full py-6 btn-electric rounded-3xl text-lg">SAVE CHANGES</button>
+                        </div>
+                    </div>`;
+                    break;
+            }
+
+            document.getElementById('content').innerHTML = html;
+        }
+
+        function viewTender(id) {
+            const tender = tenders.find(t => t.id === id);
+            if (!tender) return;
+
+            const html = `
+            <div class="max-w-5xl mx-auto">
+                <button onclick="navigateTo('tenders')" class="flex items-center gap-2 text-[#00B4FF] mb-6 hover:underline">
+                    ← Back to Tenders
+                </button>
+                
+                <div class="glass rounded-3xl p-10">
+                    <div class="flex justify-between">
+                        <div>
+                            <div class="font-mono text-sm text-white/50">${tender.id}</div>
+                            <h1 class="heading-font text-4xl font-semibold mt-2">${tender.title}</h1>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-4xl font-semibold text-emerald-400">${tender.budget}</div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-10 mt-12">
+                        <div class="lg:col-span-2 space-y-10">
+                            <div>
+                                <h3 class="font-semibold mb-4">Description</h3>
+                                <p class="text-white/80 leading-relaxed">${tender.description}</p>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold mb-4">Key Requirements</h3>
+                                <ul class="space-y-3">
+                                    <li class="flex gap-3"><i class="fa-solid fa-check text-[#00B4FF] mt-1"></i> High-quality materials &amp; compliance with Kuwait standards</li>
+                                    <li class="flex gap-3"><i class="fa-solid fa-check text-[#00B4FF] mt-1"></i> Full project management and training</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="glass p-6 rounded-3xl mb-6">
+                                <div class="text-white/60">Closing Date</div>
+                                <div class="text-3xl font-semibold">${tender.closing}</div>
+                                <div class="text-rose-400">11 days left</div>
+                            </div>
+                            <button onclick="startBid()" class="w-full py-7 btn-electric rounded-3xl text-xl mb-4">START BID</button>
+                            <button onclick="downloadDocs()" class="w-full py-6 border border-white/30 hover:border-white/60 rounded-3xl">Download All Documents</button>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+            document.getElementById('content').innerHTML = html;
+        }
+
+        function startBid() { alert("✅ Bid Submission Wizard Started"); }
+        function downloadDocs() { alert("📄 Documents downloaded"); }
+        function newClarification() { alert("📝 New Clarification Form Opened"); }
+        function saveProfile() { alert("✅ Profile saved successfully!"); }
+        function logout() { if(confirm("Sign out?")) location.reload(); }
+
+        // Initialize
+        window.onload = () => navigateTo('dashboard');
+    </script>
+</body>
+</html>

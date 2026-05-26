@@ -531,3 +531,77 @@ Related files:
 
 `apps/web-admin/src/app/(admin)/tenders/page.tsx`, `apps/web-admin/src/lib/api.ts`, `apps/web-admin/src/lib/auth.ts`
 
+### Audit Payloads Must Use Primitives Only
+
+Use when:
+
+Calling `this.audit.log({...})` from any service. The `beforeValue`, `afterValue`, and `metadata` fields are stored as JSONB and rehydrated on `verifyChain()` boot — any value type whose JS in-memory representation differs from its JSONB roundtrip will silently break the hash chain.
+
+Pattern:
+
+Convert all non-primitive values to plain strings/numbers/booleans/plain-objects/arrays before handing the payload to `audit.log()`. Prisma `Date` objects from `findOne()`/`update()` results are the most common offender — always call `.toISOString()`:
+
+```ts
+const updated = await this.prisma.vendor.update({ where: { id }, data: { approvedAt: new Date() } });
+
+await this.audit.log({
+  eventType: 'VENDOR_APPROVED',
+  entityType: 'Vendor',
+  entityId: id,
+  beforeValue: { status: VendorStatus.PENDING },
+  afterValue: {
+    status: VendorStatus.APPROVED,
+    approvedAt: updated.approvedAt.toISOString(),   // ← .toISOString(), NOT the raw Date
+  },
+  riskLevel: AuditRiskLevel.MEDIUM,
+});
+```
+
+Same rule for `Buffer` (use `.toString('base64')`), `BigInt` (use `.toString()`), `Decimal`, and any custom class. Plain numbers, strings, booleans, `null`, plain `{}` objects, and arrays of those are safe.
+
+Do not:
+
+- Do NOT pass a JS `Date` directly in `beforeValue` / `afterValue` / `metadata`. `canonicalize()` sees `Object.keys(date) === []` and emits `'{}'`; Prisma writes the same `Date` to JSONB as an ISO string. The two representations don't match and the row's stored hash will not validate on the next `verifyChain` run.
+- Do NOT rely on Prisma to "fix it up." The asymmetry is at canonicalize time, before Prisma's serializer touches the value.
+- Do NOT add date conversions inside `canonicalize()` as a one-off — if the canonicalizer is fixed to be Date-aware, the entire historical chain has to be rebaked under the new rule. That's a coordinated migration, not a casual patch.
+
+Related files:
+
+`apps/api/src/modules/audit/audit.service.ts` (canonicalize, log, verifyChain), `apps/api/src/modules/vendors/vendors.service.ts:133`, `apps/api/src/modules/committee/committee.service.ts:56`, `agents/reviews/AUDIT_CHAIN_BREAK_RCA_2026-05-23.md` (full root-cause history).
+
+### Per-Request Context via AsyncLocalStorage
+
+Use when:
+
+A backend service needs information about the current HTTP request (client IP, User-Agent, request id, eventually trace context) but the call site is several layers deep and threading the value through every controller→service signature would touch dozens of files.
+
+Pattern:
+
+1. Define a typed context interface (`{ ipAddress?, userAgent?, … }`).
+2. Wrap Node's `AsyncLocalStorage<TheContext>` inside an `@Injectable()` service exposing `run(ctx, fn)` and `get(): TheContext | undefined`.
+3. Add a NestJS middleware that calls `ctx.run({ ipAddress: req.ip, userAgent: req.headers['user-agent'] }, () => next())` for every request. Apply globally via `consumer.apply(...).forRoutes('*')` in `AppModule.configure()`.
+4. Mark the module `@Global()` so the service is injectable anywhere without per-module imports.
+5. In any consumer (`AuditService`, for example): inject the context service and use its values as **fallbacks** — explicit arguments always win. This keeps tests deterministic (no hidden ambient state surprises) and lets background jobs / scripts pass arguments directly.
+6. Set `app.set('trust proxy', 1)` in `main.ts` so `req.ip` resolves to the real client IP through nginx (leftmost X-Forwarded-For), not the loopback / docker-bridge address.
+
+```ts
+// audit.service.ts (consumer pattern)
+async log(entry: AuditLogEntry): Promise<void> {
+  const ctx = this.requestContext.get();
+  const resolvedIp = entry.ipAddress ?? ctx?.ipAddress;
+  const resolvedUa = entry.userAgent ?? ctx?.userAgent;
+  // … use resolvedIp/resolvedUa in the payload …
+}
+```
+
+Do not:
+
+- Do NOT make consumers depend on the context being present. Outside an HTTP request (BullMQ worker, one-shot script, cron job) `get()` returns `undefined`. Treat the values as optional everywhere.
+- Do NOT use AsyncLocalStorage for transactional state (e.g. current Prisma `tx`). Pass those as arguments — they're hot-path and worth the clarity.
+- Do NOT set `trust proxy: true` (boolean). That trusts every hop in `X-Forwarded-For`, including any value a client smuggled in. Use the number-of-hops form (`1`, `2`) or a CIDR list matching your actual proxy layer.
+- Do NOT raise this to `AsyncLocalStorage` per concept — request context is one well-defined scope. If a second concept (e.g. tenant scoping) shows up later, add fields to the same `RequestContext` interface; don't spawn a parallel ALS instance.
+
+Related files:
+
+`apps/api/src/common/request-context/{request-context.service.ts,request-context.middleware.ts,request-context.module.ts}`, `apps/api/src/app.module.ts` (`configure()`), `apps/api/src/main.ts` (trust proxy), `apps/api/src/modules/audit/audit.service.ts` (consumer).
+

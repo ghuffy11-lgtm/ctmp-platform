@@ -2,6 +2,24 @@
 
 This file defines how coding agents should work in this repository.
 
+## Remote Server Access Boundaries — NON-NEGOTIABLE
+
+The CTMP stack runs on remote Ubuntu server `10.1.13.98` (user: `claude`).
+
+**Permitted:**
+- All file operations inside `/mnt/repo/ctmp-platform/` only
+- Docker commands scoped to project `ctmp`: containers `ctmp-*`, volumes `ctmp_*`, network `ctmp_default`
+- `docker compose --project-name ctmp` run from `/mnt/repo/ctmp-platform/infrastructure/docker/`
+- Reading logs via `docker logs ctmp-*`
+
+**Off-limits — never read, write, list, or touch:**
+- Any path outside `/mnt/repo/ctmp-platform/` on the remote server
+- Other projects in `/mnt/repo/` (complainmgmt, Oriciety, docker, etc.)
+- `/home/`, `/etc/`, `/var/`, `/opt/`, `/root/`, or any system path
+- Docker resources (containers, volumes, images, networks) belonging to other projects
+
+**Rule:** If a task requires going outside `/mnt/repo/ctmp-platform/` or touching another project's Docker resources, stop immediately and ask the user for explicit permission before doing anything. Do not proceed until permission is granted. Do not find alternative routes that achieve the same access. No exceptions.
+
 ## General Rules
 
 - Read `START_HERE_FOR_AI_AGENTS.md` first.
