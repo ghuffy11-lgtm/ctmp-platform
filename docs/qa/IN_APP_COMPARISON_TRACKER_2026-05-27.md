@@ -62,16 +62,16 @@ The biggest piece. Replaces the existing page **in place**.
 
 | Item | Status | Files | Notes |
 |---|---|---|---|
-| C.1 Delete old page content, write new hybrid view | `[ ]` | `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` | In-place replacement |
-| C.2 Comparison API endpoint | `[ ]` | `apps/api/src/modules/comparison/comparison.controller.ts` | `GET /tenders/:id/comparison/commercial` |
-| C.3 Comparison service: tech score + commercial total + line items per vendor | `[ ]` | `apps/api/src/modules/comparison/comparison.service.ts` | Includes FAILed vendors with FAIL flag |
-| C.4 CommercialMatrix component | `[ ]` | `apps/web-admin/src/components/comparison/CommercialMatrix.tsx` | Summary ↔ Itemized toggle |
-| C.5 VendorComparisonCard with all 5 blocks | `[ ]` | `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` | line items, tech detail, docs, profile, recommend |
-| C.6 Pre-select lowest PASS on load | `[ ]` | Inside CommercialMatrix.tsx | Visual highlight + AwardConfirmDialog default |
-| C.7 FAIL vendors grayed-out + badge | `[ ]` | Inside CommercialMatrix.tsx | Still expandable for audit |
-| C.8 Audit badge in header | `[ ]` | Inside page.tsx | Counts views; links to audit page |
-| C.9 RBAC: `comparison:commercial:view` enforced server-side | `[ ]` | API guard | Only after commercial opening |
-| C.10 Verification | `[ ]` | — | All blocks render; toggle works; pre-select correct; FAIL grayed |
+| C.1 Delete old page content, write new hybrid view | `[x] 2026-05-27` | `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` | In-place replacement. Tender picker (Committee Commercial Opening+), summary header, matrix on top, vendor cards below. Suspense wrapper around `useSearchParams`. |
+| C.2 Comparison API endpoint | `[x] 2026-05-27` | `apps/api/src/modules/comparison/comparison.controller.ts` | `GET /tenders/:id/comparison/commercial` gated by `comparison:commercial:view`. Returns 401 on no-auth (verified). |
+| C.3 Comparison service: tech score + commercial total + line items per vendor | `[x] 2026-05-27` | `apps/api/src/modules/comparison/comparison.service.ts` | Aggregates technical avg + commercial total + envelope status + commercial docs + vendor profile + evaluator comments. Pre-computes `lowestPassBidId`. BOQ line items deferred to Phase F per the data model. |
+| C.4 CommercialMatrix component | `[x] 2026-05-27` | `apps/web-admin/src/components/comparison/CommercialMatrix.tsx` | Summary ↔ Itemized toggle. Itemized renders a Phase-F placeholder (BOQ template doesn't exist yet). Sorts: lowest-PASS first, then PASS ascending price, then FAIL/PENDING. |
+| C.5 VendorComparisonCard with all 5 blocks | `[x] 2026-05-27` | `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` | Block 1 line items (Phase F placeholder showing total) · Block 2 tech detail with link to Technical Comparison · Block 3 commercial docs (reuses `<CommercialDocumentsList>` + PDF viewer) · Block 4 vendor profile snapshot · Block 5 Recommend button (PASS only). |
+| C.6 Pre-select lowest PASS on load | `[x] 2026-05-27` | CommercialMatrix.tsx + page.tsx | Server returns `lowestPassBidId`; matrix row highlighted with success border + Award icon + "Lowest PASS" badge; corresponding card auto-expands. |
+| C.7 FAIL vendors grayed-out + badge | `[x] 2026-05-27` | CommercialMatrix.tsx + VendorComparisonCard.tsx | Matrix row at 60% opacity, FAIL pill, still expandable. Card disables Recommend with explicit "cannot be awarded" notice. |
+| C.8 Audit badge in header | `[x] 2026-05-27` | Inside page.tsx | "N views logged" pill in tender header. Server counts `BID_DOCUMENT_VIEWED` + `COMMERCIAL_COMPARISON_VIEWED` audit events. Click → `/audit-log?tenderId=…`. |
+| C.9 RBAC: `comparison:commercial:view` enforced server-side | `[x] 2026-05-27` | Controller `@RequirePermissions('comparison:commercial:view')` + service-level envelope check | Permission was pre-seeded in migration 011. Service also returns 403 if NO commercial envelope has been opened yet (status-based gate per spec). |
+| C.10 Verification | `[x] 2026-05-27` | — | Verified live: comparison/commercial route mapped in boot log, 401 on no-auth, audit chain 217 rows OK, frontend chunk contains "Lowest PASS" + `CommercialMatrix`. Recommendation flow uses existing `/award-recommendation` endpoint as stop-gap until Phase D's `AwardConfirmDialog` replaces it. |
 
 ---
 

@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { TenderStatus, TechnicalResult } from '@prisma/client';
+import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { TenderStatus, TechnicalResult, EnvelopeType, EnvelopeStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 
 const STATUS_DB_TO_API: Record<TenderStatus, string> = {
@@ -172,6 +172,166 @@ export class ComparisonService {
         pendingCount,
         evaluatorTotal: vendors.reduce((s, v) => s + v.evaluators.length, 0),
       },
+      vendors,
+    };
+  }
+
+  /**
+   * Phase C (BUG-035): commercial comparison surface.
+   *
+   * Returns ALL vendors (PASS + FAIL + PENDING) — the page grays FAIL rows
+   * but still surfaces them for audit transparency (master-plan rule A3).
+   * Each vendor block carries:
+   *   technicalScore + technicalResult — from TechnicalEvaluation / Bid
+   *   commercialTotal + currency + comments — from CommercialEvaluation (average
+   *     across evaluators if multiple submitted)
+   *   commercialEnvelopeStatus — whether the committee has opened the envelope
+   *   commercialDocuments — list of bid documents in the COMMERCIAL envelope
+   *     (filenames only; per-file download still gated by commercial:download)
+   *   vendorProfile — minimal company snapshot
+   * The server also pre-computes `lowestPassBidId` per master-plan rule F1.
+   */
+  async commercialComparison(tenderId: string, user: any) {
+    const tender = await this.prisma.tender.findUnique({
+      where: { id: tenderId },
+      include: {
+        department: { select: { name: true, code: true } },
+      },
+    });
+    if (!tender) throw new NotFoundException('Tender not found');
+
+    // Per spec: commercial visibility only AFTER the committee opening session
+    // has flipped at least one envelope to OPENED. Status-side gate; the
+    // endpoint-level permission gate is `comparison:commercial:view`.
+    const openedEnvelopes = await this.prisma.bidEnvelope.count({
+      where: {
+        envelopeType: EnvelopeType.COMMERCIAL,
+        status: EnvelopeStatus.OPENED,
+        bid: { tenderId },
+      },
+    });
+    const allowedTenderStatuses: TenderStatus[] = [
+      TenderStatus.COMMITTEE_COMMERCIAL_OPENING,
+      TenderStatus.COMMERCIAL_EVALUATION,
+      TenderStatus.AWARD_RECOMMENDATION,
+      TenderStatus.AWARDED,
+      TenderStatus.TENDER_CLOSED,
+    ];
+    const committeeOpened = openedEnvelopes > 0 || allowedTenderStatuses.includes(tender.status);
+    if (!committeeOpened) {
+      throw new ForbiddenException(
+        'Commercial comparison is only available after the committee commercial opening session.',
+      );
+    }
+
+    const bids = await this.prisma.bid.findMany({
+      where: { tenderId },
+      include: {
+        vendor: {
+          select: { id: true, companyName: true, status: true, country: true },
+        },
+        bidEnvelopes: {
+          include: {
+            bidDocuments: { select: { id: true, originalFilename: true, fileSize: true, uploadedAt: true } },
+          },
+        },
+        technicalEvaluations: { select: { overallScore: true } },
+        commercialEvaluations: { select: { totalPrice: true, currency: true, comments: true, evaluatorUserId: true } },
+      },
+      orderBy: { submittedAt: 'asc' },
+    });
+
+    const criteria = await this.prisma.tenderTechnicalCriterion.findMany({
+      where: { tenderId },
+      orderBy: { sortOrder: 'asc' },
+    });
+    const totalMaxScore = criteria.reduce((sum, c) => sum + Number(c.maxScore), 0);
+
+    const vendors = bids.map(bid => {
+      const techScores = bid.technicalEvaluations
+        .map(e => (e.overallScore != null ? Number(e.overallScore) : null))
+        .filter((v): v is number => typeof v === 'number');
+      const technicalScore = techScores.length > 0
+        ? techScores.reduce((s, v) => s + v, 0) / techScores.length
+        : null;
+
+      const prices = bid.commercialEvaluations
+        .map(e => (e.totalPrice != null ? Number(e.totalPrice) : null))
+        .filter((v): v is number => typeof v === 'number');
+      const commercialTotal = prices.length > 0
+        ? prices.reduce((s, v) => s + v, 0) / prices.length
+        : null;
+      const currency =
+        bid.commercialEvaluations.find(e => e.currency)?.currency ?? 'KWD';
+
+      const commercialEnvelope = bid.bidEnvelopes.find(e => e.envelopeType === EnvelopeType.COMMERCIAL);
+
+      return {
+        bidId: bid.id,
+        vendorId: bid.vendor.id,
+        vendorName: bid.vendor.companyName,
+        vendor: {
+          id: bid.vendor.id,
+          companyName: bid.vendor.companyName,
+          status: bid.vendor.status,
+          country: bid.vendor.country ?? null,
+        },
+        bidStatus: bid.status,
+        submittedAt: bid.submittedAt?.toISOString() ?? null,
+        technicalResult: bid.technicalResult,
+        technicalScore,
+        technicalMaxScore: totalMaxScore || null,
+        commercialEnvelopeStatus: commercialEnvelope?.status ?? null,
+        commercialEnvelopeOpenedAt: commercialEnvelope?.openedAt?.toISOString() ?? null,
+        commercialTotal,
+        currency,
+        commercialDocuments: (commercialEnvelope?.bidDocuments ?? []).map(d => ({
+          id: d.id,
+          filename: d.originalFilename,
+          fileSize: Number(d.fileSize),
+          uploadedAt: d.uploadedAt.toISOString(),
+        })),
+        commentsByEvaluator: bid.commercialEvaluations
+          .filter(e => e.comments)
+          .map(e => ({ evaluatorUserId: e.evaluatorUserId, comments: e.comments ?? '' })),
+      };
+    });
+
+    // Master plan F1: pre-select the lowest commercial price among technically-PASS vendors.
+    const passWithPrice = vendors.filter(
+      v => v.technicalResult === TechnicalResult.PASS && v.commercialTotal != null,
+    );
+    passWithPrice.sort((a, b) => (a.commercialTotal ?? Infinity) - (b.commercialTotal ?? Infinity));
+    const lowestPassBidId = passWithPrice.length > 0 ? passWithPrice[0].bidId : null;
+
+    // Audit-view count for the header badge.
+    const auditViewCount = await this.prisma.auditLog.count({
+      where: {
+        tenderId,
+        eventType: { in: ['BID_DOCUMENT_VIEWED', 'COMMERCIAL_COMPARISON_VIEWED'] },
+      },
+    });
+
+    return {
+      tender: {
+        id: tender.id,
+        referenceNumber: tender.reference,
+        title: tender.title,
+        status: STATUS_DB_TO_API[tender.status as TenderStatus],
+        departmentName: tender.department?.name ?? null,
+        departmentCode: tender.department?.code ?? null,
+        currency: tender.currency ?? 'KWD',
+        estimatedBudget: tender.estimatedBudget != null ? Number(tender.estimatedBudget) : null,
+      },
+      summary: {
+        bidCount: vendors.length,
+        passCount: vendors.filter(v => v.technicalResult === TechnicalResult.PASS).length,
+        failCount: vendors.filter(v => v.technicalResult === TechnicalResult.FAIL).length,
+        pendingCount: vendors.filter(v => v.technicalResult === TechnicalResult.PENDING).length,
+        priceCount: vendors.filter(v => v.commercialTotal != null).length,
+        auditViewCount,
+      },
+      lowestPassBidId,
       vendors,
     };
   }

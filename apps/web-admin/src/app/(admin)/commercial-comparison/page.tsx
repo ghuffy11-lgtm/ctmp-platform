@@ -1,21 +1,24 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  AlertCircle,
+  ArrowLeftRight,
+  Award,
+  ChevronRight,
+  Eye,
+  Loader2,
+  Lock,
+} from 'lucide-react';
 import { get, post } from '@/lib/api';
 import { getAccessToken, hasPermission } from '@/lib/auth';
-import {
-  Lock,
-  Unlock,
-  ArrowLeftRight,
-  ChevronRight,
-  Download,
-  CheckCircle2,
-} from 'lucide-react';
+import { StatusBadge } from '@/components/ui/StatusBadge';
+import { CommercialMatrix, type CommercialMatrixVendor } from '@/components/comparison/CommercialMatrix';
+import { VendorComparisonCard, type CardVendor } from '@/components/comparison/VendorComparisonCard';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface TenderSummary {
+interface TenderListItem {
   id: string;
   referenceNumber: string;
   title: string;
@@ -23,59 +26,49 @@ interface TenderSummary {
 }
 
 interface PaginatedTenders {
-  data: TenderSummary[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-interface ComparisonRow {
-  bidId: string;
-  vendorId: string;
-  vendorCompany?: string;
-  technicalResult: 'PASS';
-  commercialEnvelopeStatus: 'SEALED' | 'OPENED' | 'LOCKED' | 'SUBMITTED' | 'DRAFT';
-  commercialDetailsVisible: boolean;
-  totalAmount?: number;
-  currency?: string;
-  rank?: number;
-  technicalScore?: number;
-}
-
-interface CommercialAccess {
-  canView: boolean;
-  canDownload: boolean;
-  canEvaluate: boolean;
-  canExport: boolean;
+  data: TenderListItem[];
 }
 
 interface CommercialComparisonResponse {
-  tenderId: string;
-  callerCommercialAccess: CommercialAccess;
-  rows: ComparisonRow[];
+  tender: {
+    id: string;
+    referenceNumber: string;
+    title: string;
+    status: string;
+    departmentName: string | null;
+    departmentCode: string | null;
+    currency: string;
+    estimatedBudget: number | null;
+  };
+  summary: {
+    bidCount: number;
+    passCount: number;
+    failCount: number;
+    pendingCount: number;
+    priceCount: number;
+    auditViewCount: number;
+  };
+  lowestPassBidId: string | null;
+  vendors: CardVendor[];
 }
 
-const COMPARISON_STATUSES = ['Commercial Evaluation / Comparison', 'Award Recommendation'];
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatCurrency(amount?: number, currency = 'USD') {
-  if (typeof amount !== 'number') return '—';
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency', currency, maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-// ─── Permission gate ──────────────────────────────────────────────────────────
+const ELIGIBLE_STATUSES = [
+  'Committee Commercial Opening',
+  'Commercial Evaluation / Comparison',
+  'Award Recommendation',
+  'Awarded',
+  'Tender Closed',
+];
 
 function NoAccessScreen() {
   return (
-    <div className="flex flex-col items-center justify-center h-full p-8 gap-4 text-center max-w-md mx-auto">
+    <div className="flex flex-col items-center justify-center min-h-[60vh] p-8 gap-4 text-center max-w-md mx-auto">
       <Lock className="w-[72px] h-[72px] text-text-secondary/30" />
       <h1 className="text-xl font-bold text-text-primary">Commercial Access Required</h1>
       <p className="text-sm text-text-secondary">
-        Commercial Comparison requires the <code className="bg-bg px-1.5 py-0.5 rounded text-xs">commercial:view</code> permission.
-        Separation of duties: System Administrators do not receive this automatically.
+        Commercial Comparison requires the{' '}
+        <code className="bg-bg px-1.5 py-0.5 rounded text-xs">comparison:commercial:view</code>{' '}
+        permission. System Administrators do not receive this automatically (separation of duties).
         Request access from your department head.
       </p>
       <Link href="/dashboard" className="mt-2 px-4 py-2 bg-accent text-white rounded-lg text-sm font-semibold hover:opacity-90">
@@ -85,101 +78,126 @@ function NoAccessScreen() {
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+function CommercialComparisonContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tenderIdFromUrl = searchParams.get('tenderId');
 
-export default function CommercialComparisonPage() {
   const [permissionChecked, setPermissionChecked] = useState(false);
-  const [hasViewPermission, setHasViewPermission] = useState(false);
+  const [canView, setCanView] = useState(false);
 
-  const [tenders, setTenders] = useState<TenderSummary[]>([]);
+  const [tenders, setTenders] = useState<TenderListItem[]>([]);
   const [tendersLoading, setTendersLoading] = useState(true);
-  const [selectedTenderId, setSelectedTenderId] = useState<string | null>(null);
-
+  const [selectedTenderId, setSelectedTenderId] = useState<string | null>(tenderIdFromUrl);
   const [comparison, setComparison] = useState<CommercialComparisonResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
-  const [savingPrice, setSavingPrice] = useState<string | null>(null);
+  const [selectedBidId, setSelectedBidId] = useState<string | null>(null);
+  const [recommending, setRecommending] = useState(false);
 
+  // Permission check up front. Component also gates server-side via the
+  // endpoint's `comparison:commercial:view` guard — defense in depth.
   useEffect(() => {
     const token = getAccessToken();
-    const ok = !!token && hasPermission(token, 'commercial:view');
-    setHasViewPermission(ok);
+    // Accept both the new permission and the legacy `commercial:view`
+    // until all roles are migrated; the endpoint enforces the canonical one.
+    const ok = !!token && (
+      hasPermission(token, 'comparison:commercial:view') ||
+      hasPermission(token, 'commercial:view')
+    );
+    setCanView(ok);
     setPermissionChecked(true);
   }, []);
 
   useEffect(() => {
-    if (!hasViewPermission) return;
-    async function fetchTenders() {
+    if (!canView) return;
+    let cancelled = false;
+    (async () => {
       setTendersLoading(true);
+      const token = getAccessToken();
       try {
-        const token = getAccessToken();
         const results = await Promise.all(
-          COMPARISON_STATUSES.map(s =>
-            get<PaginatedTenders>(
-              `/tenders?status=${encodeURIComponent(s)}&pageSize=50`,
-              token,
-            ).catch(() => ({ data: [], total: 0, page: 1, pageSize: 50 })),
+          ELIGIBLE_STATUSES.map(status =>
+            get<PaginatedTenders>(`/tenders?status=${encodeURIComponent(status)}&pageSize=50`, token)
+              .catch(() => ({ data: [] }) as PaginatedTenders),
           ),
         );
+        if (cancelled) return;
         const merged = results.flatMap(r => r.data);
         setTenders(merged);
-        if (merged.length > 0) setSelectedTenderId(merged[0].id);
+        if (!selectedTenderId && merged.length > 0) setSelectedTenderId(merged[0].id);
       } finally {
-        setTendersLoading(false);
+        if (!cancelled) setTendersLoading(false);
       }
-    }
-    fetchTenders();
-  }, [hasViewPermission]);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canView]);
 
-  const fetchComparison = useCallback(async (tenderId: string) => {
+  const loadComparison = useCallback(async (tenderId: string) => {
     setLoading(true);
     setError(null);
+    setComparison(null);
     try {
       const token = getAccessToken();
       const res = await get<CommercialComparisonResponse>(
-        `/tenders/${tenderId}/commercial-comparison`,
+        `/tenders/${tenderId}/comparison/commercial`,
         token,
       );
       setComparison(res);
+      // Pre-select lowest PASS per master-plan F1.
+      if (res.lowestPassBidId) {
+        setSelectedBidId(res.lowestPassBidId);
+      } else if (res.vendors.length > 0) {
+        setSelectedBidId(res.vendors[0].bidId);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load comparison');
-      setComparison(null);
+      setError(err instanceof Error ? err.message : 'Failed to load commercial comparison');
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (selectedTenderId) fetchComparison(selectedTenderId);
-  }, [selectedTenderId, fetchComparison]);
+    if (!selectedTenderId) return;
+    loadComparison(selectedTenderId);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tenderId', selectedTenderId);
+    router.replace(`?${url.searchParams.toString()}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTenderId]);
 
-  async function handleSavePrice(bidId: string) {
-    const raw = priceInputs[bidId];
-    const price = Number(raw);
-    if (!raw || !Number.isFinite(price) || price < 0) {
-      setError('Enter a valid positive price.');
-      return;
-    }
-    setSavingPrice(bidId);
-    setError(null);
-    try {
-      const token = getAccessToken();
-      await post(`/bids/${bidId}/commercial-evaluations`, { totalPrice: price }, token);
-      if (selectedTenderId) await fetchComparison(selectedTenderId);
-      setPriceInputs((prev) => ({ ...prev, [bidId]: '' }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save price');
-    } finally {
-      setSavingPrice(null);
-    }
+  function handleSelectBid(bidId: string) {
+    setSelectedBidId(bidId);
+    setTimeout(() => {
+      const el = document.getElementById(`commercial-vendor-${comparison?.vendors.find(v => v.bidId === bidId)?.vendorId}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
   }
 
-  async function handleRecommendAward(bidId: string, _vendorId: string) {
+  async function handleRecommend(bidId: string, isLowestPass: boolean) {
     if (!selectedTenderId) return;
-    const justification = prompt('Justification for award recommendation:');
-    if (!justification) return;
+    // Phase C v1 stop-gap until Phase D ships the proper AwardConfirmDialog.
+    // Override (non-lowest-PASS) prompts for written justification per F2.
+    let justification = '';
+    if (!isLowestPass) {
+      const entered = window.prompt(
+        'This is NOT the lowest-PASS vendor. Phase D will also require an attached PDF. For now, provide a written justification (min 100 characters):',
+      );
+      if (entered == null) return;
+      if (entered.trim().length < 100) {
+        alert('Justification must be at least 100 characters.');
+        return;
+      }
+      justification = entered.trim();
+    } else {
+      if (!confirm('Recommend the lowest-PASS vendor for award? This will be subject to the final Confirm step (Phase D).')) {
+        return;
+      }
+      justification = 'Lowest commercial price among technically-PASS vendors (auto-selected default).';
+    }
+
+    setRecommending(true);
     try {
       const token = getAccessToken();
       await post(
@@ -187,243 +205,210 @@ export default function CommercialComparisonPage() {
         { recommendedBidId: bidId, justification },
         token,
       );
-      alert('Award recommendation submitted. Approval task added to Approvals queue.');
+      alert(
+        'Award recommendation submitted. The final Confirm flow with quorum check + notification opt-ins ships in Phase D.',
+      );
+      await loadComparison(selectedTenderId);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to recommend');
+    } finally {
+      setRecommending(false);
     }
   }
 
-  async function handleExport() {
-    if (!selectedTenderId) return;
-    setExporting(true);
-    try {
-      const token = getAccessToken();
-      await post(`/reports/commercial_comparison/export`, { format: 'XLSX', tenderId: selectedTenderId }, token);
-      alert('Export job enqueued. Track progress in Reports.');
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to export');
-    } finally {
-      setExporting(false);
-    }
-  }
+  const matrixVendors = useMemo<CommercialMatrixVendor[]>(
+    () =>
+      comparison?.vendors.map(v => ({
+        bidId: v.bidId,
+        vendorId: v.vendorId,
+        vendorName: v.vendorName,
+        technicalResult: v.technicalResult,
+        technicalScore: v.technicalScore,
+        technicalMaxScore: v.technicalMaxScore,
+        commercialTotal: v.commercialTotal,
+        currency: v.currency,
+        commercialEnvelopeStatus: v.commercialEnvelopeStatus,
+      })) ?? [],
+    [comparison],
+  );
 
   if (!permissionChecked) return null;
-  if (!hasViewPermission) return <NoAccessScreen />;
-
-  const selectedTender = tenders.find(t => t.id === selectedTenderId) ?? null;
-  const access = comparison?.callerCommercialAccess;
-  const sortedRows = [...(comparison?.rows ?? [])].sort((a, b) => {
-    if (a.rank && b.rank) return a.rank - b.rank;
-    return (a.totalAmount ?? Infinity) - (b.totalAmount ?? Infinity);
-  });
+  if (!canView) return <NoAccessScreen />;
 
   return (
-    <div className="flex h-full overflow-hidden -m-8">
-      {/* Tender list */}
-      <div className="w-72 flex-shrink-0 border-r border-border bg-bg flex flex-col">
-        <div className="p-4 border-b border-border bg-card">
-          <p className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-            Comparison Ready
+    <div className="space-y-6">
+      <nav className="flex items-center gap-1.5 text-xs text-text-secondary">
+        <Link href="/dashboard" className="hover:text-accent transition-colors">Dashboard</Link>
+        <ChevronRight className="w-3.5 h-3.5" />
+        <span className="text-text-primary font-semibold">Commercial Comparison</span>
+      </nav>
+
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary tracking-tight flex items-center gap-2">
+            <ArrowLeftRight className="w-6 h-6 text-accent" />
+            Commercial Comparison
+          </h1>
+          <p className="text-sm text-text-secondary mt-1">
+            In-app comparison surface. Lowest-PASS vendor auto-selected. Override requires written
+            justification (and, from Phase D, an attached PDF).
           </p>
-          <p className="text-xs text-text-secondary mt-0.5">{tenders.length} tenders</p>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {tendersLoading ? (
-            <div className="p-4 text-xs text-text-secondary">Loading…</div>
-          ) : tenders.length === 0 ? (
-            <div className="p-6 text-center">
-              <ArrowLeftRight className="w-10 h-10 text-text-secondary/20 mx-auto mb-2" />
-              <p className="text-xs text-text-secondary">No tenders in commercial comparison.</p>
-            </div>
-          ) : (
-            tenders.map(t => {
-              const isSel = t.id === selectedTenderId;
-              return (
-                <div
-                  key={t.id}
-                  onClick={() => setSelectedTenderId(t.id)}
-                  className={`p-4 border-b border-border cursor-pointer transition-all ${
-                    isSel ? 'bg-card border-l-4 border-l-accent' : 'border-l-4 border-l-transparent hover:bg-card/70'
-                  }`}
-                >
-                  <p className={`text-xs font-bold mb-1 ${isSel ? 'text-accent' : 'text-text-secondary'}`}>
-                    {t.referenceNumber}
-                  </p>
-                  <p className={`text-sm font-semibold leading-snug ${isSel ? 'text-text-primary' : 'text-text-secondary'}`}>
-                    {t.title}
-                  </p>
-                </div>
-              );
-            })
-          )}
         </div>
       </div>
 
-      {/* Detail */}
-      <div className="flex-1 min-w-0 overflow-y-auto">
-        {!selectedTender ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3 p-8 text-center">
-            <ArrowLeftRight className="w-14 h-14 text-text-secondary/20" />
-            <p className="text-sm text-text-secondary">Select a tender to compare commercial offers.</p>
-          </div>
+      {/* Tender picker */}
+      <div className="bg-card border border-border rounded-xl px-5 py-4">
+        <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">
+          Tender
+        </label>
+        {tendersLoading ? (
+          <p className="text-sm text-text-secondary flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading eligible tenders…
+          </p>
+        ) : tenders.length === 0 ? (
+          <p className="text-sm text-text-secondary">
+            No tenders are in Committee Commercial Opening or later yet. Open commercial envelopes
+            from the Committee &amp; Commercial page first.
+          </p>
         ) : (
-          <div className="p-6 max-w-6xl mx-auto space-y-5">
-            <nav className="flex items-center gap-1 text-xs text-text-secondary">
-              <Link href="/tenders" className="hover:text-accent">Tenders</Link>
-              <ChevronRight className="w-3.5 h-3.5" />
-              <Link href={`/tenders/${selectedTender.id}`} className="hover:text-accent">{selectedTender.referenceNumber}</Link>
-              <ChevronRight className="w-3.5 h-3.5" />
-              <span className="text-text-primary font-medium">Commercial Comparison</span>
-            </nav>
-
-            <div className="flex items-end justify-between flex-wrap gap-3">
-              <div>
-                <h1 className="text-2xl font-bold text-text-primary tracking-tight">Commercial Comparison</h1>
-                <p className="text-sm text-text-secondary mt-1">{selectedTender.title}</p>
-              </div>
-              <div className="flex gap-2">
-                {access?.canExport && (
-                  <button
-                    onClick={handleExport}
-                    disabled={exporting}
-                    className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card flex items-center gap-2 disabled:opacity-50"
-                  >
-                    <Download className="w-4 h-4" />
-                    {exporting ? 'Exporting…' : 'Export Comparison'}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Permission chips */}
-            {access && (
-              <div className="bg-card rounded-xl border border-border p-3 flex flex-wrap gap-2">
-                {([
-                  ['canView', 'commercial:view'],
-                  ['canDownload', 'commercial:download'],
-                  ['canEvaluate', 'commercial:evaluate'],
-                  ['canExport', 'commercial:export'],
-                ] as [keyof CommercialAccess, string][]).map(([key, label]) => (
-                  <span
-                    key={key}
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide flex items-center gap-1 ${
-                      access[key] ? 'bg-success/10 text-success' : 'bg-border text-text-secondary/60'
-                    }`}
-                  >
-                    {access[key]
-                      ? <CheckCircle2 className="w-3 h-3" />
-                      : <Lock className="w-3 h-3" />}
-                    {label}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {error && (
-              <div className="bg-danger/10 border border-danger/30 rounded-lg p-3 text-sm text-danger">{error}</div>
-            )}
-
-            {/* Comparison table */}
-            <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-bg border-b border-border">
-                    <tr>
-                      <th className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-text-secondary w-16">Rank</th>
-                      <th className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-text-secondary">Vendor</th>
-                      <th className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-text-secondary">Technical</th>
-                      <th className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-text-secondary">Envelope</th>
-                      <th className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-text-secondary text-right">Total Bid</th>
-                      <th className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-text-secondary text-center">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {loading ? (
-                      <tr><td colSpan={6} className="px-5 py-8 text-center text-text-secondary">Loading…</td></tr>
-                    ) : sortedRows.length === 0 ? (
-                      <tr><td colSpan={6} className="px-5 py-8 text-center text-text-secondary">No qualified bids.</td></tr>
-                    ) : (
-                      sortedRows.map((row, idx) => {
-                        const rank = row.rank ?? idx + 1;
-                        return (
-                          <tr key={row.bidId} className="hover:bg-bg/60">
-                            <td className="px-5 py-4">
-                              <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full font-bold text-xs ${
-                                rank === 1 ? 'bg-accent text-white' : 'bg-bg text-text-primary border border-border'
-                              }`}>
-                                {rank}
-                              </span>
-                            </td>
-                            <td className="px-5 py-4 font-semibold text-text-primary">
-                              {row.vendorCompany ?? row.vendorId.slice(0, 8)}
-                            </td>
-                            <td className="px-5 py-4">
-                              <span className="px-2 py-0.5 rounded text-xs font-bold bg-success/10 text-success">
-                                {row.technicalResult}
-                              </span>
-                            </td>
-                            <td className="px-5 py-4 flex items-center gap-1.5 text-text-secondary">
-                              {row.commercialEnvelopeStatus === 'OPENED'
-                                ? <Unlock className="w-4 h-4" />
-                                : <Lock className="w-4 h-4" />}
-                              {row.commercialEnvelopeStatus}
-                            </td>
-                            <td className="px-5 py-4 text-right font-mono font-bold text-text-primary">
-                              {row.totalAmount !== undefined && row.totalAmount !== null
-                                ? (row.commercialDetailsVisible
-                                    ? formatCurrency(row.totalAmount, row.currency)
-                                    : <span className="text-text-secondary/50 italic font-sans font-normal">hidden</span>)
-                                : row.commercialEnvelopeStatus === 'OPENED' && row.commercialDetailsVisible
-                                  ? (
-                                    <div className="flex items-center gap-2 justify-end">
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={priceInputs[row.bidId] ?? ''}
-                                        onChange={(e) => setPriceInputs((prev) => ({ ...prev, [row.bidId]: e.target.value }))}
-                                        placeholder="0.00"
-                                        className="w-28 px-2 py-1 border border-border rounded text-sm font-mono text-right"
-                                      />
-                                      <button
-                                        onClick={() => handleSavePrice(row.bidId)}
-                                        disabled={savingPrice === row.bidId}
-                                        className="px-2 py-1 bg-accent text-white text-xs font-bold rounded disabled:opacity-50"
-                                      >
-                                        {savingPrice === row.bidId ? '…' : 'Save'}
-                                      </button>
-                                    </div>
-                                  )
-                                  : <span className="text-text-secondary/50 italic font-sans font-normal">pending</span>}
-                            </td>
-                            <td className="px-5 py-4 text-center">
-                              {rank === 1 && (
-                                <button
-                                  onClick={() => handleRecommendAward(row.bidId, row.vendorId)}
-                                  className="px-3 py-1.5 bg-success/10 text-success rounded-lg text-xs font-bold hover:bg-success/20 transition-colors"
-                                >
-                                  Recommend Award
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-xs text-amber-900">
-              <p className="font-bold mb-1">⚠ Sensitive commercial data</p>
-              <p>
-                All views, downloads, and exports are audit-logged. Commercial details remain hidden for any row where you lack <code>commercial:view</code> at the per-bid level.
-              </p>
-            </div>
-          </div>
+          <select
+            value={selectedTenderId ?? ''}
+            onChange={e => setSelectedTenderId(e.target.value || null)}
+            className="w-full px-4 py-2.5 text-sm border border-border rounded-lg bg-bg focus:outline-none focus:ring-2 focus:ring-accent"
+          >
+            <option value="">Select a tender…</option>
+            {tenders.map(t => (
+              <option key={t.id} value={t.id}>
+                {t.referenceNumber} — {t.title} ({t.status})
+              </option>
+            ))}
+          </select>
         )}
       </div>
+
+      {error && (
+        <div className="bg-danger/5 border border-danger/30 rounded-xl px-5 py-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-danger flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-danger">{error}</p>
+            <p className="text-xs text-text-secondary mt-1">
+              The endpoint refuses access until the committee has opened at least one commercial
+              envelope.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="bg-card border border-border rounded-xl px-6 py-10 text-center">
+          <Loader2 className="w-6 h-6 text-text-secondary animate-spin mx-auto mb-2" />
+          <p className="text-sm text-text-secondary">Aggregating commercial offers…</p>
+        </div>
+      )}
+
+      {comparison && !loading && (
+        <div className="space-y-6">
+          {/* Tender header */}
+          <div className="bg-card border border-border rounded-xl px-5 py-4 flex items-center justify-between flex-wrap gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-mono text-text-secondary">{comparison.tender.referenceNumber}</p>
+              <h2 className="text-lg font-bold text-text-primary truncate flex items-center gap-3 mt-0.5">
+                {comparison.tender.title}
+                <StatusBadge status={comparison.tender.status} />
+              </h2>
+              <p className="text-xs text-text-secondary mt-1">
+                {comparison.tender.departmentName ?? 'Department unset'} ·
+                {' '}{comparison.summary.bidCount} bids ·
+                {' '}{comparison.summary.passCount} PASS ·
+                {' '}{comparison.summary.failCount} FAIL ·
+                {' '}{comparison.summary.pendingCount} pending ·
+                {' '}{comparison.summary.priceCount} with price
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Link
+                href={`/audit-log?tenderId=${comparison.tender.id}`}
+                className="px-3 py-1.5 text-xs font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg flex items-center gap-1.5"
+                title="View full audit trail for this tender"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                {comparison.summary.auditViewCount} views logged
+              </Link>
+              <Link
+                href={`/technical-comparison?tenderId=${comparison.tender.id}`}
+                className="px-3 py-1.5 text-xs font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg flex items-center gap-1.5"
+              >
+                <Award className="w-3.5 h-3.5" />
+                Technical Comparison
+              </Link>
+            </div>
+          </div>
+
+          {/* Matrix top */}
+          <CommercialMatrix
+            vendors={matrixVendors}
+            lowestPassBidId={comparison.lowestPassBidId}
+            selectedBidId={selectedBidId}
+            onSelect={handleSelectBid}
+          />
+
+          {/* Per-vendor cards */}
+          {comparison.vendors.length > 0 && (
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-text-secondary">
+                Per-vendor detail
+              </h3>
+              {comparison.vendors.map(v => (
+                <VendorComparisonCard
+                  key={v.bidId}
+                  vendor={v}
+                  tenderId={comparison.tender.id}
+                  isLowestPass={v.bidId === comparison.lowestPassBidId}
+                  initialExpanded={v.bidId === selectedBidId}
+                  selected={v.bidId === selectedBidId}
+                  onRecommend={handleRecommend}
+                />
+              ))}
+            </section>
+          )}
+
+          {/* Audit notice */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 text-xs text-amber-900">
+            <p className="font-bold mb-1">Sensitive commercial data</p>
+            <p>
+              Every page view, document open and award action is audit-logged. Commercial details
+              are visible only because your role has{' '}
+              <code className="bg-amber-100 px-1 rounded">comparison:commercial:view</code>{' '}
+              AND the committee has opened the envelopes. System Administrators do not receive
+              this access automatically.
+            </p>
+          </div>
+
+          {recommending && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+              <div className="bg-card border border-border rounded-xl px-6 py-4 flex items-center gap-3">
+                <Loader2 className="w-5 h-5 animate-spin text-accent" />
+                <p className="text-sm text-text-primary">Submitting recommendation…</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+export default function CommercialComparisonPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="bg-card border border-border rounded-xl px-6 py-10 text-center">
+          <Loader2 className="w-6 h-6 text-text-secondary animate-spin mx-auto mb-2" />
+          <p className="text-sm text-text-secondary">Loading…</p>
+        </div>
+      }
+    >
+      <CommercialComparisonContent />
+    </Suspense>
   );
 }

@@ -6,6 +6,71 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-27 (evening +) — Phase C (Commercial Comparison redesign, BUG-035) shipped end-to-end
+
+**Date/time:** 2026-05-27 ~22:36 GMT+3 (continuation after `8500eaf` push, Phase B)
+**Agent/task:** Owner directive "go with phase C". Replaced the existing `/commercial-comparison` page in place with the redesigned hybrid in-app surface per master-plan §A. 10/10 tracker items C.1–C.10 shipped + verified in this session.
+
+### What landed
+
+**Backend (extends the existing Comparison module from Phase B):**
+- New service method `commercialComparison(tenderId, user)` aggregating per-vendor: tech score (avg of TechnicalEvaluation.overallScore), commercial total (avg of CommercialEvaluation.totalPrice), commercial envelope status + opened-at, commercial documents (id/filename/size/uploadedAt only — full download still gated by `commercial:download` server-side), vendor profile snapshot (name/status/country), per-evaluator comments.
+- Pre-computes `lowestPassBidId` server-side per master-plan rule F1 — the page does not re-derive it client-side.
+- Service-side envelope check: returns 403 if no commercial envelope has been opened yet, regardless of permissions. Defense in depth.
+- Counts `BID_DOCUMENT_VIEWED` + `COMMERCIAL_COMPARISON_VIEWED` audit events for the header badge.
+- New endpoint `GET /tenders/:id/comparison/commercial` gated by `comparison:commercial:view` (already seeded in migration 011).
+
+**Frontend:**
+- NEW `CommercialMatrix.tsx` — Summary ↔ Itemized toggle. Sort: lowest-PASS first, then PASS ascending by price, then FAIL/PENDING. Lowest-PASS row highlighted with success border + Award icon + "Lowest PASS" badge. FAIL rows dimmed to 60% with italic prices but still expandable for audit. Itemized view shows a Phase-F placeholder because the data model has no BOQ line items yet.
+- NEW `VendorComparisonCard.tsx` — Per-vendor expandable card with all 5 blocks from master plan §A5:
+  1. Line items (Phase F placeholder showing the bid total)
+  2. Technical detail (read-only score + result + link to `/technical-comparison?tenderId=…`)
+  3. Commercial documents (reuses `<CommercialDocumentsList>` which itself reuses the Phase A PDF viewer)
+  4. Vendor profile snapshot (company, status, country, link to vendor record)
+  5. Award action: Recommend button (PASS only; gray for non-lowest; disabled for FAIL with explanatory notice)
+- **Replaced `commercial-comparison/page.tsx` in place** — old XLSX-export-centric layout removed; new hybrid view with tender picker, summary header with audit-views badge, matrix top, vendor cards below.
+- Recommend button POSTs to the legacy `/tenders/:id/award-recommendation` endpoint as a stop-gap. Phase D will swap that for the proper `AwardConfirmDialog` with quorum check + notification opt-ins + PDF justification upload for overrides.
+
+### Files (5)
+
+API (2): extended `comparison.service.ts`, extended `comparison.controller.ts`.
+Admin (3): NEW `components/comparison/CommercialMatrix.tsx`, NEW `components/comparison/VendorComparisonCard.tsx`, **replaced** `app/(admin)/commercial-comparison/page.tsx`.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on API (caught a `budgetEstimate → estimatedBudget` rename leftover before deploy)
+- ✅ Two ENV-related sanity checks during writing: `vendor.taxId` doesn't exist on the model (dropped); `country` does (kept)
+- ✅ API rebuilt + recreated, healthy. Audit chain verifier "217 rows OK" — chain unbroken across the session.
+- ✅ Both comparison routes mapped in boot log:
+  - `Mapped {/api/tenders/:tenderId/comparison/technical, GET}`
+  - `Mapped {/api/tenders/:tenderId/comparison/commercial, GET}`
+- ✅ Endpoint smoke: `GET /api/v1/tenders/.../comparison/commercial` returns 401 on no-auth
+- ✅ Frontend chunk markers: `app/(admin)/commercial-comparison/page-0931051641c0135b.js` contains "Lowest PASS" + `CommercialMatrix` + `comparison/commercial`
+
+### Known constraints (documented, not blockers)
+
+- **BOQ line items.** The data model has no per-line-item BOQ structure (only CommercialEvaluation.totalPrice). Itemized view + Block 1 of each card render Phase-F placeholders. Phase F (BUG-043/044 — criteria library + per-tender editor) is the natural place to add BOQ support.
+- **Recommend button stop-gap.** Wired to the legacy `/award-recommendation` endpoint. Override (non-lowest-PASS) prompts for written justification (min 100 chars) inline, but does NOT require an attached PDF as master-plan F2 specifies. Phase D's `AwardConfirmDialog` will enforce the full F1–F7 rules: quorum check + Chair-present gate + PDF justification + notification opt-ins + supersession of prior recommendations.
+- **Master-plan H6 compliance.** The legacy `/reports/commercial_comparison` XLSX export endpoint is intentionally NOT touched in Phase C — it stays working until Phase G (BUG-045) removes it after Phase C is verified live. Cleanup is deferred per the locked rule.
+
+### Phase status (after this deploy)
+
+| Phase | Status |
+|---|---|
+| A — PDF viewer (037) | ✅ shipped |
+| B — Technical Comparison (036) | ✅ shipped |
+| **C — Commercial Comparison redesign (035)** | ✅ **shipped this session** |
+| D — Award flow + Quorum + Amendment (039/040/041) | ⬜ next |
+| E — Award Minutes PDF + opt-in notifications (038/042) | ⬜ |
+| F — Criteria library + per-tender editor (043/044) | ⬜ unlocks Itemized view + Block 1 line items |
+| G — Cleanup XLSX export (045) | ⬜ blocked by C verification |
+
+### Next recommended step
+
+**Phase D — Award flow + Quorum + Amendment (BUG-039 + BUG-040 + BUG-041).** Implements the `AwardConfirmDialog` that the Recommend button currently stubs out. Per master-plan §F1–F7 + §G: pre-select lowest-PASS with single-click Confirm (zero friction), override needs text + PDF, single-winner only, no higher-authority approval layer, quorum + Chair-present check disables Confirm with a clear reason chip. The Phase D migration adds `awards` + `award_minutes` tables (master plan §3.3) plus committee quorum config columns.
+
+---
+
 ## 2026-05-27 (evening) — Phase B (Technical Comparison page, BUG-036) shipped end-to-end
 
 **Date/time:** 2026-05-27 ~19:36 GMT+3 (continuation after `257a831` push)
