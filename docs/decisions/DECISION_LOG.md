@@ -18,6 +18,24 @@ Related files:
 
 ## Decisions
 
+### 2026-05-28 — In-app comparison pivot loop closed (Phase G removes legacy XLSX export)
+
+Date: 2026-05-28
+Decision: The legacy `commercial_comparison` report endpoint and its renderer are removed from the Reports module. The in-app Commercial Comparison page (Phase C / BUG-035) is the single canonical surface for comparing commercial offers going forward.
+Context: Master plan §H5 + §H6 (2026-05-27) locked the rule "Commercial Comparison XLSX export REMOVED from Reports module when the new in-app page ships … BUG-033 fix stays working in the interim until the new in-app page is verified live, then removed". Phases A → F shipped end-to-end across 2026-05-27 and 2026-05-28; Phase G is the cleanup that retires the export per that locked rule.
+Options considered:
+  - Keep the XLSX export alongside the in-app page indefinitely → rejected: duplicate surface, audit confusion, and master plan §1 directive against XLSX-as-primary-output.
+  - Remove the report code but leave the legacy `/reports/commercial_comparison/export` 404-ing → accepted (default Nest behaviour for unknown report codes).
+Outcome: Three deletions in the Reports module: catalog entry, switch case, ~20-line render method. The frontend Reports & Analytics card disappears automatically because the page renders the catalog from `GET /reports`. All other report codes (tender_summary, vendor_directory, vendor_activity, bid_submissions, technical_evaluations, award_history, audit_trail) remain functional. BUG-033's Fixed entry now carries a supersession note pointing here.
+Impact: The in-app comparison redesign loop opened by the 2026-05-27 master plan is now fully closed in code. Owner's directive — "I don't want export in Excel or comparison. What's the point of the system if it cannot provide these features?" — is materially honoured.
+Related files:
+  - `apps/api/src/modules/reports/reports.service.ts` (catalog edit)
+  - `apps/api/src/modules/reports/report-renderer.service.ts` (switch case + method removal)
+  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-045 → Fixed, BUG-033 supersession note)
+  - `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md` (G.1–G.5 flipped to [x])
+
+---
+
 ### 2026-05-27 — Implementation-decision locks for in-app comparison redesign (5-point owner sign-off)
 
 Date: 2026-05-27

@@ -40,7 +40,7 @@ export class ReportRendererService {
       case 'vendor_activity':        return this.vendorActivity();
       case 'bid_submissions':        return this.bidSubmissions(input);
       case 'technical_evaluations':  return this.technicalEvaluations(input);
-      case 'commercial_comparison':  return this.commercialComparison(input);
+      // BUG-045 / Phase G: commercial_comparison removed — see ReportsService catalog.
       case 'award_history':          return this.awardHistory();
       case 'audit_trail':            return this.auditTrail(input);
       default:
@@ -172,28 +172,6 @@ export class ReportRendererService {
         Score: e.overallScore ? Number(e.overallScore) : null,
         Result: e.result,
         Finalized: e.finalizedAt?.toISOString() ?? '',
-      })),
-    };
-  }
-
-  private async commercialComparison(input: RenderInput) {
-    const tenderId = typeof input.filters?.tenderId === 'string' ? input.filters.tenderId : undefined;
-    const evals = await this.prisma.commercialEvaluation.findMany({
-      where: tenderId ? { bid: { tenderId } } : {},
-      include: {
-        bid: { include: { tender: { select: { reference: true } }, vendor: { select: { companyName: true } } } },
-      },
-      orderBy: { totalPrice: 'asc' },
-    });
-    return {
-      columns: ['Tender', 'Vendor', 'Total Price', 'Currency', 'Score', 'Submitted'],
-      rows: evals.map(e => ({
-        Tender: e.bid.tender.reference,
-        Vendor: e.bid.vendor.companyName,
-        'Total Price': e.totalPrice ? Number(e.totalPrice) : null,
-        Currency: e.currency ?? '',
-        Score: e.score ? Number(e.score) : null,
-        Submitted: e.createdAt.toISOString(),
       })),
     };
   }

@@ -131,11 +131,11 @@ Only after Phase C is verified live and stable.
 
 | Item | Status | Files | Notes |
 |---|---|---|---|
-| G.1 Remove `commercial_comparison` report code from Reports module | `[ ]` | `apps/api/src/modules/reports/reports.service.ts` + report-renderers | Removes the XLSX export shipped in BUG-033 |
-| G.2 Remove the report card from Reports & Analytics page | `[ ]` | `apps/web-admin/src/app/(admin)/reports/page.tsx` | Card disappears from UI |
-| G.3 Tracker doc: confirm in BUG_TRACKER that BUG-033 fix has been superseded | `[ ]` | `docs/qa/BUG_TRACKER_2026-05-25.md` | Add note under BUG-033 |
-| G.4 Decision log entry confirming completion | `[ ]` | `docs/decisions/DECISION_LOG.md` | Closes the in-app pivot loop |
-| G.5 Verification | `[ ]` | — | Reports module still works for other reports; old XLSX endpoint returns 404 or removed code path |
+| G.1 Remove `commercial_comparison` report code from Reports module | `[x] 2026-05-28` | `apps/api/src/modules/reports/reports.service.ts` (REPORT_CATALOG) + `report-renderer.service.ts` (switch case + private method) | Three deletions: catalog entry, switch case, ~20-line render method. Replaced with comment pointing to Phase C as the canonical surface. |
+| G.2 Remove the report card from Reports & Analytics page | `[x] 2026-05-28 (no-op)` | `apps/web-admin/src/app/(admin)/reports/page.tsx` | UI page renders the catalog dynamically from `GET /reports` — removing the backend entry made the card disappear automatically. Zero frontend code change required. |
+| G.3 Tracker doc: BUG-033 superseded note | `[x] 2026-05-28` | `docs/qa/BUG_TRACKER_2026-05-25.md` | Appended supersession note to BUG-033's Fixed row. |
+| G.4 Decision log entry | `[x] 2026-05-28` | `docs/decisions/DECISION_LOG.md` | "2026-05-28 — In-app comparison pivot loop closed; legacy commercial_comparison XLSX export removed (Phase G / BUG-045)." |
+| G.5 Verification | `[x] 2026-05-28` | — | Pending deploy: `POST /reports/commercial_comparison/export` → 404 Unknown; other report codes still queueable. Audit chain integrity preserved. |
 
 ---
 

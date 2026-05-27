@@ -21,7 +21,9 @@ const REPORT_CATALOG: ReportDefinition[] = [
   { code: 'vendor_activity',        name: 'Vendor Activity',        description: 'Logins, bids, clarifications per vendor.', category: 'Vendor' },
   { code: 'bid_submissions',        name: 'Bid Submissions',        description: 'Submissions with envelope checksum verification.', category: 'Operations' },
   { code: 'technical_evaluations',  name: 'Technical Evaluations',  description: 'Per-bid technical scores + pass/fail.', category: 'Operations' },
-  { code: 'commercial_comparison',  name: 'Commercial Comparison',  description: 'Ranked commercial offers.', category: 'Financial', requiresCommercialExportPermission: true },
+  // BUG-045 / Phase G (2026-05-28): the legacy commercial_comparison XLSX export
+  // was removed once the in-app Commercial Comparison page (Phase C / BUG-035)
+  // verified live. Use /commercial-comparison in the admin portal instead.
   { code: 'award_history',          name: 'Award History',          description: 'Awarded tenders + amounts.', category: 'Financial', requiresCommercialExportPermission: true },
   { code: 'audit_trail',            name: 'Audit Trail',            description: 'Filtered audit log export.', category: 'Audit' },
 ];

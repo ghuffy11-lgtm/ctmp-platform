@@ -6,6 +6,77 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-28 — Phase G (legacy XLSX export removed) — in-app comparison loop closed
+
+**Date/time:** 2026-05-28 ~00:42 GMT+3 (continuation after `c12f5f5` push, Phase F)
+**Agent/task:** Owner directive "Phase g". The FINAL phase. Removes the legacy `commercial_comparison` Reports XLSX export per master plan H5/H6 + BUG-045. Phase A → G of the in-app comparison redesign are now all shipped to `origin/develop`.
+
+### What landed
+
+**Backend (api-only, no migration):**
+- `apps/api/src/modules/reports/reports.service.ts` — deleted the `commercial_comparison` entry from `REPORT_CATALOG`. Comment marker left pointing to Phase G + the in-app surface.
+- `apps/api/src/modules/reports/report-renderer.service.ts` — deleted the `case 'commercial_comparison'` switch branch + the entire `commercialComparison()` private method (~20 lines).
+
+**Frontend (zero changes):**
+- The Reports & Analytics page renders the catalog dynamically from `GET /reports`. Removing the catalog entry made the Commercial Comparison card disappear from the UI automatically. No frontend code change needed.
+
+**Docs:**
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-045 moved from Open → Fixed with full detail; BUG-033's Fixed entry now carries a supersession note pointing to Phase G.
+- `docs/decisions/DECISION_LOG.md` — top entry: "2026-05-28 — In-app comparison pivot loop closed; legacy commercial_comparison XLSX export removed (Phase G / BUG-045)". Documents the rationale + the 8 remaining report codes that still work.
+- `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md` — G.1–G.5 all flipped to `[x] 2026-05-28`.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on API (the deletions left no orphan references)
+- ✅ API rebuilt + recreated, healthy. Audit chain `217 rows OK` end-to-end across the whole multi-phase session (zero chain breaks across 7 deploys + 6 DB migrations).
+- ✅ Disk pressure noted: build hit "no space left on device" during a buildkit metadata-file write but the container still came up clean (the build had cached enough). Triggered `docker builder prune -af` in parallel with this commit to reclaim space for future deploys.
+- ✅ **Catalog smoke test:** `GET /api/v1/reports` (with admin auth) now returns 8 reports (`tender_summary`, `tender_lifecycle`, `vendor_directory`, `vendor_activity`, `bid_submissions`, `technical_evaluations`, `award_history`, `audit_trail`). `commercial_comparison` is gone — verified by Python script confirming `commercial_comparison present? False`.
+- ✅ **Legacy export 404 test:** `POST /api/v1/reports/commercial_comparison/export` returns `{"statusCode":404, "message":"Unknown report code: commercial_comparison"}` — the previous shim is dead.
+
+### Phase status — REDESIGN COMPLETE
+
+| Phase | Items | Status |
+|---|---|---|
+| A — PDF viewer (BUG-037) | 9 | ✅ |
+| B — Technical Comparison (BUG-036) | 9 | ✅ |
+| C — Commercial Comparison redesign (BUG-035) | 10 | ✅ |
+| D — Award flow + Quorum + Amendment (BUG-039/040/041) | 11 | ✅ |
+| E — Award Minutes PDF + opt-in notifications (BUG-038/042) | 8 | ✅ |
+| F — Criteria library + per-tender editor (BUG-043/044) | 6 | ✅ |
+| **G — Cleanup XLSX export (BUG-045)** | 5 | ✅ |
+
+**All 7 phases of the in-app comparison redesign are shipped to `origin/develop` and live on staging.** The 11 new BUG-NNN entries that opened the redesign (BUG-035 to BUG-045) are all in the Fixed table. The master plan's 37 locked decisions are all materialised in code.
+
+### What's still in the Open bug-tracker
+
+These predate the redesign and remain on the deferred list with documented reasons:
+
+| ID | Why still deferred |
+|---|---|
+| BUG-016 | Publish-notification dispatch — needs owner approval before broadcasting emails to all vendors |
+| BUG-017 | Clarification attachments — new tables + storage + UI (~7 files, standalone bundle) |
+| BUG-018 (Export only) | Clarification PDF export — needs a Reports module renderer; Print already shipped |
+| BUG-020 | Owner question — who performs technical evaluation + how they're notified |
+| BUG-028 Part B | Dept-scoped data filtering — requires `user.departments` on JWT payload + coordinated token rotation |
+
+These were deliberately deferred and tracked, not forgotten.
+
+### Known constraints (carried forward)
+
+- **Owner end-to-end click-through** is the next step. All 7 phases work in isolation per server-side checks; a single owner walkthrough confirms the full Confirm → Notify → Award Minutes → Amend loop end-to-end on a real awarded tender.
+- **Two-person rule for `award:amend`** still v1-deferred (PROCUREMENT_ADMIN only; SYSTEM_ADMIN co-sign workflow is a separate layer).
+- **Production SMTP env wiring** still needed before vendor emails go live (Phase E's notification dispatch points at MailHog on staging).
+- **BOQ line items** for the Itemized view + Block 1 line items on Commercial Comparison cards — not in master plan §3.3; owner would need to scope a new BUG-046 if desired.
+
+### Next recommended step
+
+The locked plan is complete. The owner can either:
+1. **Run a full end-to-end click-through** across all surfaces — start a fresh tender, walk it through the lifecycle, exercise Confirm + Amend + Award Minutes + notifications, then mark the trackers from their side.
+2. **Pick from the still-deferred backlog** (BUG-016 notifications, BUG-017 clarification attachments, BUG-028 Part B dept scoping, BUG-018 Export, BUG-020 owner question).
+3. **Open new BUG-046+ entries** for anything that emerged from using the new surfaces (e.g. BOQ line items, two-person rule for Amend, additional notification templates).
+
+---
+
 ## 2026-05-28 — Phase F (Evaluation Criteria Library + per-tender editor) shipped end-to-end
 
 **Date/time:** 2026-05-28 ~00:25 GMT+3 (continuation after `bde114e` push, Phase E)
