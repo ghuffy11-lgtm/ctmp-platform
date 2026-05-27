@@ -18,6 +18,82 @@ Related files:
 
 ## Decisions
 
+### 2026-05-27 — Implementation-decision locks for in-app comparison redesign (5-point owner sign-off)
+
+Date: 2026-05-27
+Decision: Five implementation choices that were left open in the master plan are now locked, unblocking the start of Phase A coding. Recorded together because owner answered them as a single batch.
+
+1. **Existing-data backfill rules (DEPLOYMENT_GAPS §B.4)** — keep existing data intact:
+   - `evaluation_criteria.weight` for pre-existing rows → equal split (100 / count of criteria per parent tender). No data destroyed; admin re-weights as needed.
+   - `evaluation_criteria.is_mandatory_gate` for pre-existing rows → `FALSE`. No new constraints imposed retroactively.
+   - `committees.required_quorum_count` for pre-existing rows → `NULL`. No quorum enforced on old committees (preserves current behaviour); admin sets per committee as needed.
+   - Pre-redesign awarded tenders → NO `awards` row backfilled. Old award flow's audit trail remains in its original form. New `awards` table only used going forward.
+2. **PDF generation library (DEPLOYMENT_GAPS §C.1)** — `puppeteer`. HTML → PDF rendering. Headless Chromium added to the Docker image (~300 MB increase accepted for iteration speed on the Award Minutes template). Author recommendation accepted.
+3. **PDF storage location (DEPLOYMENT_GAPS §D.1)** — MinIO bucket `ctmp-award-minutes` (consistent with existing bid documents pattern). Versioning ON; retention policy 10 years (compliance). Author recommendation accepted.
+4. **Phase A bundling (DEPLOYMENT_GAPS §K)** — ship the in-app PDF viewer (Phase A / BUG-037) **bundled with the Priority 1 retest-fail patch deploy**. This means: A2/A3 (serializer null), A4 (Days Left), D1 (Save button) ship alongside the full PDF viewer infrastructure (modal + provider + audit + non-PDF upload reject + new view endpoint). Retest D2 401 closes via the full Phase A implementation rather than a quick patch. F4 still defers to Phase G.
+5. **Pre-redesign awarded tenders (DEPLOYMENT_GAPS §H.3)** — show a "Pre-redesign award" placeholder on tenders that hit `Awarded` before this redesign shipped. NO retroactive backfill of `awards` rows — backfilling would risk rewriting historical audit data. New Award Minutes button is only enabled on tenders with an `awards` row (i.e., those awarded after Phase D ships).
+
+Context: After the 2026-05-27 design lock, the master plan and deployment gap analysis identified 5 implementation decisions that the project owner needed to make before code could start. All 5 came back in a single round of answers; this entry records them as locked.
+
+Options considered: Each of the 5 had 2–3 options listed in `DEPLOYMENT_GAPS_2026-05-27.md` sections B.4, C.1, D.1, K, H.3. The chosen options are the author-recommended defaults in 4 of 5 cases; the bundling decision (#4) was the owner's call.
+
+Outcome: Implementation is now unblocked. Phase A coding can begin alongside the retest-fail patch work. The 5 decisions are recorded as immutable inputs to the master plan; future agents must honour them.
+
+Impact:
+- The next deploy bundle is larger than previously planned — 4 small retest fixes + the full PDF viewer infrastructure (~14 files, 1 migration, 1 new MinIO bucket, 9 new RBAC permissions wired).
+- `puppeteer` joins the API Docker image; rebuilds will be slower until the layer is cached.
+- New `ctmp-award-minutes` MinIO bucket needs to be created on the staging server (DevOps task) before Phase E ships.
+- Pre-redesign awarded tenders display a static placeholder; no behaviour change for users viewing those tenders.
+
+Related files: `docs/specs/IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md` (§6 execution order — Phase A is now bundled with Priority 1), `docs/specs/DEPLOYMENT_GAPS_2026-05-27.md` (sections B.4, C.1, D.1, K, H.3 — to be marked RESOLVED inline), `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md` (Phase A items now start immediately after the 4 standalone retest fixes), `agents/handoffs/HANDOVER.md` (note added).
+
+### 2026-05-27 — Comparison workflow pivots from XLSX export to in-app surfaces
+
+Date: 2026-05-27
+Decision: The platform's core procurement comparison (Technical Comparison, Commercial Comparison) and document review will be performed **inside the web application** rather than via XLSX export. A new locked master plan (`docs/specs/IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md`) defines three surfaces: a redesigned Commercial Comparison page (replaces existing in place), a brand-new Technical Comparison page (read-only consolidated view), and a shared in-app PDF viewer (modal, full-screen). Reports module remains intact for other reports (Tender Summary, Audit Trail, Vendor Activity); only the `commercial_comparison` XLSX export is removed when the new in-app page ships and is verified.
+Context: After the BUG-033 XLSX export fix shipped on 2026-05-26, the project owner reviewed the result and stated: "I don't want export in Excel or comparison. What's the point of the system if it cannot provide these features? I might better create an Excel file and throw this system out." The system was effectively a queue-then-Excel pipeline for the most important committee workflow. This pivot moves comparison, scoring review, and document inspection into the web app where audit logs, permissions, and immutability already apply.
+Options considered:
+- A (chosen): In-app comparison surfaces + on-demand structured PDF Award Minutes. Keeps XLSX for analyst-friendly reports (Audit Trail, Vendor Activity) but removes it from the committee decision path. Reuses spec's existing lifecycle states.
+- B: Keep XLSX exports as primary, add a viewer-only in-app comparison page as a "secondary" view. Cheaper but does not solve the structural complaint and re-creates duplicate truth surfaces.
+- C: Full Excel-replacement using only HTML tables, no PDF anywhere. Loses the paper-trail document procurement teams need for executives and compliance binders.
+Outcome: Locked. Implementation deferred until the 21 still-Open bugs + 5 retest fails are closed (per master plan §6). Eleven new bug-tracker entries (BUG-035 through BUG-045) created as the work breakdown.
+Impact: Major shift in how the platform delivers value. Committee makes the award decision inside the system. All views are audit-logged via a new `document_view_log` table. The new Commercial Comparison page replaces the existing route in place. The existing Committee Opening page hands off attendance via a "Proceed to Comparison" button.
+Related files: `docs/specs/IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md`, `docs/specs/IN_APP_COMPARISON_FLOWCHART_2026-05-27.md`, `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md`, `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-035 through BUG-045).
+
+### 2026-05-27 — Shared modal PDF viewer pattern (no inline embed, no annotations in v1)
+
+Date: 2026-05-27
+Decision: The platform will use **one shared PDF viewer component** rendered as a **modal overlay** (full-screen, ESC closes). Used wherever a document is reviewed: Commercial Comparison cards, Technical Comparison cards, Technical Evaluation "View Full Proposal" button, and any future surface. File support is **PDF only**, enforced at vendor upload time. The viewer is **view-only** in v1 — no annotations, no private notes, no shared comments. **Every view is audit-logged** via a new `document_view_log` row written by the backend BEFORE the PDF is streamed (failing-open on audit is not permitted).
+Context: Three pages needed a document viewer (Commercial Comparison, Technical Comparison, Technical Evaluation). Three competing UI patterns were on the table: inline-embedded (PDF lives inside the card), split-pane (50% viewer on the right), modal overlay (full-screen). Inline eats too much screen space in a hybrid view; split-pane is good but adds layout complexity and was rejected on simplicity grounds. Office docs (Word/Excel) were considered but rejected — vendors export to PDF for procurement-grade documents, and adding Office support would require server-side conversion (LibreOffice headless) for negligible benefit.
+Options considered:
+- A (chosen): Modal overlay + PDF-only + view-only. Cleanest reading area, simplest implementation, reuses across pages, audit story is clear.
+- B: Inline embedded. Pros: never leaves the comparison context. Cons: eats half the card area; tiny PDFs at viewport sizes < 1440px.
+- C: Split-pane (50% viewer right, comparison left). Pros: compare-while-reading. Cons: heavier layout, mobile-hostile, hard to reuse across three different host pages.
+- D: New tab (current broken BUG-022 approach). Cons: explicitly rejected during retest — owner wants in-app.
+- E: Modal + annotation/note features. Cons: heavier persistence model, scope-creep risk. Deferred to a future version.
+Outcome: Locked. Phase A of the implementation order (first page to ship). Closes retest D2 (View Full Proposal 401) by replacing the broken `/documents` endpoint with `GET /bids/:id/envelopes/:type/documents/:docId/view` that streams inline and audit-logs.
+Impact: Vendors must upload PDF only (enforced at the bid wizard). Backend rejects non-PDF uploads. A new `document_view_log` table receives a row on every view. Permission gates: `viewer:pdf:open` (auto-granted with view of host page) and `viewer:pdf:download` (per-role tunable).
+Related files: master plan §2 section E, flowchart diagram 5, BUG-037, `apps/web-admin/src/components/viewer/PdfViewerModal.tsx` (to be created), `apps/api/src/modules/bids/bids.controller.ts` (to be modified).
+
+### 2026-05-27 — Award decision model: gate-only PASS/FAIL + lowest-PASS auto-preselect + override-with-PDF + quorum-and-chair enforcement
+
+Date: 2026-05-27
+Decision: The award decision is governed by an assembled set of rules locked in the master plan:
+- **PASS/FAIL is gate-only**: a vendor passes if and only if all mandatory-gate criteria pass. Total weighted score is for **ranking PASS vendors**, never for PASS/FAIL determination.
+- **Pre-selection**: page load auto-pre-selects the lowest commercial price among technically-PASS vendors.
+- **Zero-friction default path**: accepting the pre-selected lowest-PASS vendor requires only a single Confirm click; no text, no PDF.
+- **Override path**: picking any non-lowest vendor requires **both** mandatory text justification **and** a mandatory attached PDF document.
+- **Single-winner only**: no split awards across multiple vendors.
+- **Quorum gate**: Confirm button is disabled until (a) a configurable minimum number of committee members are marked PRESENT, AND (b) the Committee Chair (or other configurable required role) is PRESENT.
+- **No higher approval layer**: Committee Confirm is final → tender state moves to `Awarded`.
+- **Vendor notifications default OFF**: opt-in toggles at Confirm time for winner notification and loser notifications, independently.
+- **Amendment workflow**: post-award correction creates a NEW awards row that supersedes the original via `superseded_by_award_id`. Original is never deleted; both remain visible in tender history forever. Requires combined Procurement Manager + System Admin permission by default (tunable later).
+Context: The existing Commercial Comparison page forced awards to lowest price with no override path (BUG-026) and had no quorum/attendance enforcement. The owner's real workflow: Procurement Manager operates the system during a physical committee meeting where executives sit in the room and decide collectively; only the Procurement Manager clicks. The award decision must capture the meeting reality (quorum, chair present, optional override with reasoning, optional vendor notifications, ability to amend mistakes) while keeping the spec's immutability guarantee for awarded tenders (amendments are additive, never destructive).
+Options considered: Each sub-decision had its own option set discussed across questions 8, 9, 12, 13, 16 of the design session. See master plan §2 sections F and G for the round-by-round capture.
+Outcome: Locked. Phase D of the implementation order (after the new comparison pages and PDF viewer are in place). Closes BUG-026 (existing "forced to lowest" complaint).
+Impact: New `awards` table with CHECK constraint enforcing `(is_lowest = TRUE) OR (justification_text + justification_pdf BOTH present)`. New `award_minutes` table for the on-demand Award Minutes PDF (separate decision, same session). New `required_quorum_count` + `required_role_code` columns on `committees`. Two-person rule for `award:amend` permission. Per-tender configurable quorum. Existing tender lifecycle is unchanged (no new states).
+Related files: master plan §2 sections F, G, H · flowchart diagrams 4, 6 · BUG-039, BUG-040, BUG-041, BUG-042 · `apps/api/src/modules/award/` (to be extended) · `apps/web-admin/src/components/comparison/AwardConfirmDialog.tsx` (to be created).
+
 ### 2026-05-26 — Vendor portal: light theme only (no dark/light toggle), electric-blue accent retained
 
 Date: 2026-05-26

@@ -6,6 +6,126 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-27 — In-app comparison & document viewer master plan locked
+
+**Date/time:** 2026-05-27 (discussion + documentation session)
+**Agent/task:** Multi-turn design discussion with the project owner: convert the export-centric Commercial Comparison workflow into three in-app surfaces (Commercial Comparison page redesign, new Technical Comparison page, shared PDF viewer). 16 rounds of focused Q&A locked 37 distinct design decisions. Documentation pass then produced the master plan, flowchart, and per-change tracker.
+
+### What this session is
+
+Owner directive that opened the session:
+
+> "The point is main project related. Technical comparison and commercial comparison and viewing of documents all should be done in this application. I don't want export in Excel or comparison. What's the point of the system if it cannot provide these features?"
+
+This session shifted the platform from "export-then-decide-in-Excel" to "decide-in-app". No code was written; this is a **design lock** session.
+
+### Files created
+
+| File | Purpose |
+|---|---|
+| `docs/specs/IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md` | Locked master plan with 37 agreed decisions, implementation structure, file map, DB schema, RBAC matrix, execution order, future-session guardrails |
+| `docs/specs/IN_APP_COMPARISON_FLOWCHART_2026-05-27.md` | 7 Mermaid diagrams — tender lifecycle with new pages, Commercial page layout, Technical page layout, award decision flow, PDF viewer flow, amendment workflow, cross-page data dependencies |
+| `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md` | Living implementation tracker — Phase A through G, item-by-item status, stop-and-ask conditions |
+
+### Files modified
+
+| File | Change |
+|---|---|
+| `docs/qa/BUG_TRACKER_2026-05-25.md` | Added BUG-035 through BUG-045 (11 new feature entries) to Open summary table + full detail sections after BUG-034 |
+
+### The 11 new BUG-NNN entries
+
+| ID | Phase | Sev | Topic |
+|---|---|---|---|
+| BUG-035 | C | High | Commercial Comparison page full in-app redesign |
+| BUG-036 | B | High | Technical Comparison page (NEW route) |
+| BUG-037 | A | High | Shared in-app PDF viewer (modal, full-screen) |
+| BUG-038 | E | Medium | On-demand Award Minutes PDF |
+| BUG-039 | D | High | Award flow: Recommend → Confirm with justification rules (closes BUG-026) |
+| BUG-040 | D | High | Quorum + Committee Chair check before Confirm |
+| BUG-041 | D | Medium | Award amendment workflow (post-Confirm correction) |
+| BUG-042 | E | Medium | Optional vendor notifications at award (opt-in toggles) |
+| BUG-043 | F | Medium | Evaluation criteria library (admin master template) |
+| BUG-044 | F | Medium | Per-tender criteria editor (weights + gates) |
+| BUG-045 | G | Low | Cleanup: remove Commercial Comparison XLSX export |
+
+### Locked execution order (do NOT reshuffle without owner approval)
+
+Per master plan §6:
+1. **Fix the 5 failed retest items** from `docs/qa/RETEST_2026-05-26.md` (A2/A3 serializer null, A4 days-left count, D1 button layout, D2 401 auth, F4 export scope) — some auto-resolve in later phases
+2. **Close the 21 still-Open bugs** per their locked agreed approaches
+3. **Then begin the new feature work in this phase order:**
+   - Phase A — Shared PDF Viewer (BUG-037) — lands first; closes retest D2; required by Phases B+C
+   - Phase B — Technical Comparison page (BUG-036) — read-only, lower-risk
+   - Phase C — Commercial Comparison page redesign (BUG-035)
+   - Phase D — Award flow + Quorum + Amendment (BUG-039, BUG-040, BUG-041)
+   - Phase E — Award Minutes PDF + Vendor Notifications (BUG-038, BUG-042)
+   - Phase F — Criteria library + per-tender editor (BUG-043, BUG-044)
+   - Phase G — Cleanup of XLSX export (BUG-045)
+
+### Critical "do not change" decisions
+
+A future session must NOT silently change any of the following without explicit owner approval and a dated amendment block in the master plan:
+
+- PDF-only viewer (no Office docs)
+- Modal overlay viewer pattern (not inline, not split-pane, not new-tab)
+- Single-winner only (no split awards)
+- Gate-only PASS/FAIL determination (total score for ranking only)
+- Vendor notifications default OFF (opt-in toggles)
+- BUG-033 XLSX export stays working until BUG-035 ships and is verified
+- Permissions are configurable but System Admin does NOT get commercial visibility by default
+
+### Decision log additions
+
+Three new entries appended to `docs/decisions/DECISION_LOG.md` (this session):
+1. **2026-05-27 — Comparison workflow pivots from XLSX export to in-app surfaces** — the architectural pivot rationale
+2. **2026-05-27 — Shared modal PDF viewer pattern (no inline embed, no annotations in v1)** — viewer choice rationale
+3. **2026-05-27 — Award decision: gate-only PASS/FAIL + lowest-PASS auto-preselect + override-with-PDF + quorum-and-chair enforcement** — the assembled award model
+
+### What didn't happen this session
+
+- **No code written.** Owner explicitly requested discussion → documentation → no planning of implementation until the existing 21 Open bugs + 5 retest fails are cleared.
+- **No git commits.** Today's docs live only on the workstation `D:\Work\CTMP\ctmp-platform\`. Sync to staging or commit/push at owner's discretion.
+- **No deploys.** Staging unchanged from 2026-05-26 9:38 PM state.
+
+### Open questions / immediate follow-ups
+
+1. **Where to start implementation?** Master plan execution order suggests retest fails first, then 21 Open bugs, then Phase A. Owner has not yet given the go signal to begin coding.
+2. **5 retest fails should be batched into the 21 Open bug fix-sweep** unless owner wants them as a quick standalone deploy.
+3. **Some retest fails auto-resolve in new phases** — D2 (View Full Proposal 401) becomes Phase A; F4 (export scope) becomes Phase C/G. Document this overlap so we don't double-fix.
+4. **Sidebar nav** for the new Technical Comparison page is part of BUG-036's Phase B work — but adding the menu entry early (even if the page is a stub) lets owner sanity-check positioning.
+
+### Update — 2026-05-27 evening: 5 implementation-decision locks owner-approved
+
+Owner answered the 5 outstanding implementation decisions identified in `docs/specs/DEPLOYMENT_GAPS_2026-05-27.md`:
+
+1. Existing-data backfill rules — keep existing (equal weights, gates FALSE, committee quorum NULL, no awards-row backfill)
+2. PDF generation library — `puppeteer`
+3. PDF storage location — MinIO bucket `ctmp-award-minutes`
+4. Phase A bundling — ship PDF viewer infrastructure WITH the Priority 1 retest-fail patch deploy
+5. Pre-redesign awarded tenders — show placeholder, no backfill
+
+Recorded as a single decision-log entry. Deployment gap doc updated inline with ✅ RESOLVED markers.
+
+**Phase A coding is now unblocked.** The next deploy bundle is larger than the original "5 quick fixes" plan — it now contains:
+- A2/A3 (serializer null) — small fix
+- A4 (Days Left empty) — small fix
+- D1 (Save button cramped) — small UI fix
+- D2 (View Full Proposal 401) → **full Phase A** implementation: PdfViewerModal + PdfViewerProvider + view-stream endpoint + document_view_log table/migration + vendor-portal PDF-only enforcement + 2 new RBAC permissions
+- F4 (export scope) — DEFER to Phase G
+
+Estimated scope of the next deploy: ~14 files modified/created, 1 new DB migration, 1 new MinIO bucket creation (DevOps task), 2 new RBAC permissions wired, `puppeteer` not needed yet (Phase E).
+
+### Next recommended step
+
+Owner to pick the immediate next move:
+- **(a)** Begin the bundled retest-fix + Phase A deploy (per decision #4 above)
+- **(b)** Tackle the 21 still-Open bugs first per the pre-decided bundles (Tender form completeness, Commercial docs surface, Tender doc upload, Invitation workflow, Clarification overhaul, RBAC enforcement BUG-028)
+- **(c)** Sync today's documentation to staging / commit + push to `origin/develop` first
+- **(d)** Sequence the 21 Open bugs FIRST (in priority order), then come back to the retest+PhaseA bundle
+
+---
+
 ## 2026-05-26 — Vendor portal light theme + 13 bug fixes + comprehensive bug tracker
 
 **Date/time:** 2026-05-26 (session spanned ~10:00–10:00 GMT+3 across two days)

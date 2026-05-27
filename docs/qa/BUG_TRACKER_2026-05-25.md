@@ -42,6 +42,17 @@ The user reports observations in chat → this doc captures them with file:line 
 | BUG-030 | High | Bug | Vendor portal → password reset link | `/reset-password?token=…` returns 404 — route is missing on the vendor portal |
 | BUG-031 | High | Bug | Vendor portal → Clarifications dashboard | Vendor sees other vendors' (non-public) clarifications — privacy/confidentiality bug |
 | BUG-032 | Medium | Feature | Vendor portal → user-facing messages | Closed-submission and other event states need friendly messages (e.g. "Tender submission has closed") — needs a full pass of all blocked/blocked-state UX copy |
+| BUG-035 | High | Feature | Admin → Commercial Comparison page (redesign) | Replace XLSX-export page with hybrid in-app view: matrix top + expandable per-vendor cards. Locked in master plan 2026-05-27. |
+| BUG-036 | High | Feature | Admin → Technical Comparison page (NEW) | Brand-new read-only consolidated view of all vendor technical evaluations. Locked in master plan 2026-05-27. |
+| BUG-037 | High | Feature | Shared component → In-app PDF viewer | Modal full-screen PDF viewer reused across Commercial/Technical Comparison + Technical Evaluation. Closes retest D2 (401). Locked in master plan 2026-05-27. |
+| BUG-038 | Medium | Feature | Admin → Awarded tender → Award Minutes PDF | On-demand "Generate Award Minutes" PDF capturing the full decision record. Locked in master plan 2026-05-27. |
+| BUG-039 | High | Feature | Admin → Award flow (Recommend / Confirm) | Pre-selects lowest-PASS, override needs text + PDF, single-winner, Confirm → Awarded, no extra approval layer. Locked 2026-05-27. |
+| BUG-040 | High | Feature | Admin → Committee Opening → Quorum + Chair check | Hard quorum + Chair-present gate before Confirm enables. Disabled-reason chip. Locked 2026-05-27. |
+| BUG-041 | Medium | Feature | Admin → Awarded tender → Amend Award | Privileged amend workflow. New record supersedes original; both remain visible. Locked 2026-05-27. |
+| BUG-042 | Medium | Feature | Vendor portal + Notifications → Optional award notifications | Opt-in toggles at Confirm time. Winner sees "You have been awarded"; losers see "Awarded to another vendor". Default OFF. Locked 2026-05-27. |
+| BUG-043 | Medium | Feature | Admin → Settings → Evaluation criteria library | Master library of criteria (admin-maintained) for the hybrid criteria source pattern. Locked 2026-05-27. |
+| BUG-044 | Medium | Feature | Admin → Tender create/edit → Per-tender criteria editor | Per-tender add/remove/rename, weights summing to 100%, mandatory-gate flag per criterion. Locked 2026-05-27. |
+| BUG-045 | Low | Cleanup | Reports module → Remove Commercial Comparison export | Drop the XLSX `commercial_comparison` export from Reports module after BUG-035 ships and is verified. Locked 2026-05-27. |
 
 ### In progress
 *(none)*
@@ -1073,6 +1084,376 @@ The Reports & Analytics page itself (`apps/web-admin/src/app/(admin)/reports/pag
 3. **No worker/storage/Redis/renderer changes needed** — all working.
 
 **Status:** Close BUG-034 once the Commercial Comparison Export button is verified post-BUG-033 fix. The "all reports broken" perception was wrong — they all work.
+
+---
+
+## BUG-035 — Commercial Comparison page: full in-app redesign (replaces XLSX export)
+
+- **Status:** Open (locked design — to be implemented as Phase C per master plan)
+- **Severity:** High
+- **Type:** Feature
+- **Discovered:** 2026-05-27 design session
+- **Component:** Admin portal → `/commercial-comparison`
+
+**Symptom:** Existing Commercial Comparison page is an export-centric stub. Project owner directive: "What's the point of the system if it cannot provide these features? I might better create an Excel file and throw this system out." Comparison must happen IN-APP.
+
+**Agreed approach (locked in master plan, sections A1–A5):**
+- Hybrid view: matrix top + expandable per-vendor card bottom
+- Matrix toggle: Summary (vendor-per-row) ↔ Itemized (line-item-per-row)
+- ALL vendors shown including technically-FAILed (grayed-out + FAIL badge)
+- Each vendor card contains all five blocks: line-item breakdown, technical score detail (read-only), commercial documents (modal viewer), vendor profile snapshot, Recommend action
+
+**Files (see master plan §3 for full list):**
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — REPLACE
+- `apps/web-admin/src/components/comparison/CommercialMatrix.tsx` — NEW
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — NEW
+- `apps/api/src/modules/comparison/comparison.controller.ts` — NEW (`GET /tenders/:id/comparison/commercial`)
+
+**Verification:**
+- Page loads with both matrix toggles working
+- Lowest-PASS vendor visually highlighted on page load
+- FAILed vendors grayed-out but still expandable for audit
+- Vendor cards reveal all five blocks; clicking a commercial doc opens the PDF viewer modal
+- BUG-033 XLSX export remains available until this lands, then removed (see BUG-045)
+
+**Cross-refs:** `docs/specs/IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md` §2 sections A, D, F · flowchart diagrams 1, 2, 4
+
+---
+
+## BUG-036 — Technical Comparison page: NEW read-only consolidated view
+
+- **Status:** Open (locked design — to be implemented as Phase B per master plan)
+- **Severity:** High
+- **Type:** Feature
+- **Discovered:** 2026-05-27 design session
+- **Component:** Admin portal → `/technical-comparison` (NEW route)
+
+**Symptom:** No consolidated technical-comparison view exists. Evaluators score in isolation; committee has no way to see all technical evaluations side-by-side before commercial opening.
+
+**Agreed approach (locked in master plan, sections B1–B6):**
+- Brand-new page at `/technical-comparison`, separate from existing Technical Evaluation
+- Read-only — no scoring on this page; scoring stays on existing Technical Evaluation scorecard
+- Visible to evaluators (during Technical Evaluation stage) AND committee (through to award)
+- Matrix layout switchable: vendors-as-rows ↔ criteria-as-rows
+- Multi-evaluator: consensus average shown by default; expand cell to see each evaluator's individual score
+- Total score = simple average across evaluators
+- Total score is for ranking only, NOT PASS/FAIL (PASS/FAIL is gate-only, see BUG-044)
+
+**Files:**
+- `apps/web-admin/src/app/(admin)/technical-comparison/page.tsx` — NEW
+- `apps/web-admin/src/components/comparison/TechnicalMatrix.tsx` — NEW
+- `apps/web-admin/src/components/comparison/VendorTechnicalCard.tsx` — NEW
+- `apps/api/src/modules/comparison/comparison.controller.ts` — `GET /tenders/:id/comparison/technical`
+- `apps/web-admin/src/components/layout/Sidebar.tsx` — add nav entry
+
+**Verification:**
+- Page renders with all evaluators' scores aggregated to consensus
+- Expanding a cell reveals each evaluator's score + comment
+- Toggle switches matrix orientation correctly
+- Gate-flagged criteria show PASS/FAIL badge; failing a gate marks vendor row red regardless of total score
+
+**Cross-refs:** master plan §2 section B · flowchart diagrams 1, 3, 7
+
+---
+
+## BUG-037 — Shared in-app PDF viewer (modal full-screen)
+
+- **Status:** Open (locked design — to be implemented as Phase A per master plan)
+- **Severity:** High
+- **Type:** Feature
+- **Discovered:** 2026-05-27 design session (and retest D2 from 2026-05-26)
+- **Component:** Cross-cutting shared component
+
+**Symptom:** No consistent in-app document viewer. Retest D2 surfaced that the View Full Proposal button hits `/api/v1/bids/:id/envelopes/TECHNICAL/documents` and returns 401. The new comparison pages need a viewer; we should build one reusable component, not three different solutions.
+
+**Agreed approach (locked in master plan, sections E1–E5):**
+- PDF only. Enforced at vendor upload time (reject non-PDF). No Office docs, no images in v1
+- Modal overlay — full-screen, ESC closes. Not inline-embedded, not split-pane, not new-tab
+- View only — no annotations, no private notes, no shared comments
+- Every view audit-logged via new `document_view_log` table; backend writes audit row BEFORE streaming the PDF (failing-open not allowed)
+- Reused on: Commercial Comparison cards, Technical Comparison cards, Technical Evaluation View Full Proposal
+
+**Files:**
+- `apps/web-admin/src/components/viewer/PdfViewerModal.tsx` — NEW
+- `apps/web-admin/src/components/viewer/PdfViewerProvider.tsx` — NEW (React context)
+- `apps/api/src/modules/bids/bids.controller.ts` — new `GET /bids/:id/envelopes/:type/documents/:docId/view` (auth + audit + stream)
+- `database/migrations/00X_document_view_log.sql` — NEW table
+- `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx` — re-wire View Full Proposal handler to the new viewer (closes retest D2)
+
+**Verification:**
+- Opening a PDF from any of the three host pages shows a modal viewer
+- ESC closes the modal
+- `document_view_log` row is written for every open (verify in DB)
+- Uploading a non-PDF to a bid envelope is rejected with a friendly error
+- Retest D2 — View Full Proposal now opens a PDF (no 401)
+
+**Cross-refs:** master plan §2 section E · flowchart diagram 5
+
+---
+
+## BUG-038 — On-demand Award Minutes PDF
+
+- **Status:** Open (locked design — to be implemented as Phase E per master plan)
+- **Severity:** Medium
+- **Type:** Feature
+- **Discovered:** 2026-05-27 design session
+- **Component:** Admin portal → Awarded tender detail page
+
+**Symptom:** Procurement teams need a paper-trail document for executives / compliance binders / award memos. Master plan removes XLSX export of Commercial Comparison; a structured PDF replaces it for award decisions.
+
+**Agreed approach (locked in master plan, sections H1–H2):**
+- "Generate Award Minutes" button on awarded tender page (`/tenders/[id]`)
+- ON-DEMAND only — not auto-generated at Confirm
+- PDF contains: tender details, list of all bidders (PASS + FAIL), technical scores per vendor (incl. reason if FAIL), commercial prices, meeting attendees, lowest, recommended vendor, justification text, justification PDF attachment if override, timestamp, Procurement Manager name
+- Immutable, SHA-256 hashed, stored in `award_minutes` table, linked to a row in `documents`
+- Downloadable any time after Awarded state
+
+**Files:**
+- `apps/api/src/modules/award/award-minutes.service.ts` — NEW (decide pdfkit vs puppeteer at build time)
+- `apps/api/src/modules/award/award.controller.ts` — `GET /tenders/:id/award/minutes.pdf`
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — add Generate Award Minutes button
+- `database/migrations/00X_award_workflow.sql` — `award_minutes` table
+
+**Verification:**
+- Awarded tender page shows the button (and only for awarded tenders)
+- Button click → PDF downloads with all required sections
+- SHA-256 in DB matches the downloaded file's hash
+- Re-clicking generates a fresh row (history preserved)
+
+**Cross-refs:** master plan §2 section H · flowchart diagram 4
+
+---
+
+## BUG-039 — Award flow: Recommend → Confirm with justification rules
+
+- **Status:** Open (locked design — Phase D)
+- **Severity:** High
+- **Type:** Feature
+- **Discovered:** 2026-05-27 design session (closes BUG-026 too)
+- **Component:** Admin → Commercial Comparison page → AwardConfirmDialog
+
+**Symptom:** Existing Commercial Comparison page forces recommendation to lowest price; no override path; no justification capture. Per spec, committee must be able to award to anyone with documented reasoning.
+
+**Agreed approach (locked in master plan, sections F1–F5):**
+- Page load auto-pre-selects lowest commercial price among technically-PASS vendors
+- DEFAULT path (accepting pre-select) = zero-friction Confirm — no text, no PDF
+- OVERRIDE path (picking non-lowest) = mandatory text justification + mandatory attached PDF
+- Single-winner only — no split awards across vendors
+- Confirm click → tender state moves to `Awarded`
+- NO higher-authority approval layer — committee Confirm is final
+- All actions audit-logged with attendee list, justification text, justification PDF hash
+
+**Files:**
+- `apps/web-admin/src/components/comparison/AwardConfirmDialog.tsx` — NEW
+- `apps/api/src/modules/award/award.controller.ts` — `POST /tenders/:id/award/recommend` + `POST /tenders/:id/award/confirm`
+- `apps/api/src/modules/award/dto/recommend-award.dto.ts` — NEW
+- `database/migrations/00X_award_workflow.sql` — `awards` table with CHECK constraint enforcing (is_lowest = TRUE OR justification_text + justification_pdf BOTH present)
+
+**Verification:**
+- Lowest-PASS vendor visually pre-selected; Confirm without any input works for that vendor
+- Picking a non-lowest vendor surfaces required text + required PDF fields; Confirm blocked until both supplied
+- After Confirm, tender state is `Awarded`; audit log entry contains full justification
+- Closes BUG-026 (Award recommendation forced to lowest price)
+
+**Cross-refs:** master plan §2 section F · flowchart diagram 4
+
+---
+
+## BUG-040 — Quorum + Committee Chair check before Confirm
+
+- **Status:** Open (locked design — Phase D)
+- **Severity:** High
+- **Type:** Feature
+- **Discovered:** 2026-05-27 design session
+- **Component:** Admin → Committee Opening page → Commercial Comparison page
+
+**Symptom:** Currently no enforcement that minimum committee members are present or that the Chair attended before an award is recorded. Project owner: "all members or some should be present in meeting before confirm is selected."
+
+**Agreed approach (locked in master plan, sections G2–G5):**
+- Existing Committee Opening page captures attendance (PRESENT/ABSENT per member)
+- Add "Proceed to Comparison" button on Committee Opening; carries attendance over to new Commercial Comparison page (no re-entry)
+- HARD quorum gate: Confirm is disabled until (a) ≥ N members PRESENT, AND (b) the Committee Chair (or configurable required role) is PRESENT
+- Quorum count and required role are per-committee configurable (defaults: 50%+1 members, role = CHAIR)
+- Confirm button shows a clear disabled-reason chip ("Need 2 more members + Chair must be present")
+
+**Files:**
+- `apps/web-admin/src/app/(admin)/committee-opening/page.tsx` — add Proceed to Comparison button + hand off
+- `apps/web-admin/src/components/comparison/QuorumStatus.tsx` — NEW chip
+- `apps/api/src/modules/comparison/comparison.controller.ts` — `GET /tenders/:id/quorum` returning `{ hasQuorum, requiredCount, presentCount, chairPresent, missingRoles[] }`
+- `apps/api/src/modules/committee/committee.service.ts` — `checkQuorum(tenderId)`
+- `database/migrations/00X_award_workflow.sql` — add `required_quorum_count` and `required_role_code` to committees
+
+**Verification:**
+- Committee with attendance below quorum: Confirm disabled with correct reason chip
+- Committee with quorum but Chair ABSENT: Confirm disabled with "Chair must be present"
+- Both conditions met: Confirm enabled
+- Audit log entry for the award includes attendance roster
+
+**Cross-refs:** master plan §2 section G · flowchart diagrams 1, 4
+
+---
+
+## BUG-041 — Award amendment workflow (post-Confirm correction)
+
+- **Status:** Open (locked design — Phase D)
+- **Severity:** Medium
+- **Type:** Feature
+- **Discovered:** 2026-05-27 design session
+- **Component:** Admin → Awarded tender detail page → Amend Award action
+
+**Symptom:** Once a tender is Awarded, the spec mandates immutability — but real-life mistakes (wrong vendor, withdrawal, calculation error, legal objection) need a documented correction path that does not retroactively rewrite history.
+
+**Agreed approach (locked in master plan, section F7):**
+- Privileged role(s) only: Procurement Manager + System Admin both required (default — configurable later)
+- Amend Award form requires: new recommended vendor, mandatory reason (text), mandatory superseding PDF
+- Creates a NEW row in `awards` table; original is marked with `superseded_by_award_id` pointing to the new row
+- Original record is NEVER deleted — both visible in tender history forever
+- Audit log captures the amendment with references to both award IDs
+- Optional vendor notifications about the amendment (same opt-in pattern as award)
+
+**Files:**
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — Amend Award button on awarded tenders
+- `apps/web-admin/src/components/comparison/AmendAwardDialog.tsx` — NEW
+- `apps/api/src/modules/award/award.controller.ts` — `POST /tenders/:id/award/amend`
+- `apps/api/src/modules/award/dto/amend-award.dto.ts` — NEW
+- `database/migrations/00X_award_workflow.sql` — `superseded_by_award_id` self-reference in `awards`
+
+**Verification:**
+- Awarded tender shows Amend Award button only to users with both `award:amend` perms
+- Submitting an amendment requires text + PDF + new vendor
+- Tender history shows both original (struck-through label) and current amendment
+- Audit log entry references both award IDs
+
+**Cross-refs:** master plan §2 section F7 · flowchart diagram 6
+
+---
+
+## BUG-042 — Optional vendor notifications at award
+
+- **Status:** Open (locked design — Phase E)
+- **Severity:** Medium
+- **Type:** Feature
+- **Discovered:** 2026-05-27 design session
+- **Component:** Admin → AwardConfirmDialog → Vendor portal
+
+**Symptom:** Currently no winner/loser notification system. Project owner: "default i no notification" but option for opt-in is needed.
+
+**Agreed approach (locked in master plan, sections F6, B):**
+- Two opt-in toggles at award Confirm time:
+  - "Notify winning vendor automatically" (default OFF)
+  - "Notify losing vendors automatically" (default OFF)
+- When opted-in:
+  - Winner sees "You have been awarded TDR-XXXX" in portal + email
+  - Losers see status "Awarded to another vendor" + optional reason (committee can fill per-vendor, defaults blank)
+- Manual re-trigger endpoint for the case Procurement Manager forgets the toggle at Confirm time
+
+**Files:**
+- `apps/web-admin/src/components/comparison/AwardConfirmDialog.tsx` — add toggles
+- `apps/api/src/modules/notifications/notifications.service.ts` — `notifyAwardWinner()`, `notifyAwardLoser()`
+- `apps/api/src/modules/award/award.controller.ts` — `POST /tenders/:id/award/notify` (manual re-trigger)
+- `apps/web-vendor/src/app/(portal)/bids/[bidId]/page.tsx` — award-state UI
+
+**Verification:**
+- Default behaviour at Confirm: no notifications fire
+- Toggling winner-on: winner receives portal notification + email
+- Toggling losers-on: each losing vendor sees the "Awarded to another vendor" state
+- Manual re-trigger works for already-awarded tenders
+
+**Cross-refs:** master plan §2 section F6 · flowchart diagram 4
+
+---
+
+## BUG-043 — Evaluation criteria library (admin master template)
+
+- **Status:** Open (locked design — Phase F)
+- **Severity:** Medium
+- **Type:** Feature
+- **Discovered:** 2026-05-27 design session
+- **Component:** Admin → Settings → Evaluation Criteria (NEW)
+
+**Symptom:** No master template for evaluation criteria; every tender starts from scratch. Owner wants a hybrid model where a library exists, but per-tender customisation is allowed.
+
+**Agreed approach (locked in master plan, section C1):**
+- New admin page at `/settings/evaluation-criteria`
+- CRUD for library entries: name, description, default weight, default is-gate flag, is-active
+- Library entries appear as defaults when starting per-tender criteria selection (BUG-044)
+- Editing a library entry does NOT retroactively change criteria already attached to existing tenders (snapshot semantics at the per-tender level)
+
+**Files:**
+- `apps/web-admin/src/app/(admin)/settings/evaluation-criteria/page.tsx` — NEW CRUD UI
+- `apps/api/src/modules/evaluation-criteria/` — NEW or extend existing module
+- `database/migrations/00X_award_workflow.sql` — `evaluation_criteria_library` table
+
+**Verification:**
+- Admin can create, edit, deactivate library entries
+- Library entries appear as defaults when configuring a tender's criteria
+- Library edits do not retroactively change existing tender criteria
+
+**Cross-refs:** master plan §2 section C1
+
+---
+
+## BUG-044 — Per-tender criteria editor (weights, gates, customisation)
+
+- **Status:** Open (locked design — Phase F)
+- **Severity:** Medium
+- **Type:** Feature
+- **Discovered:** 2026-05-27 design session
+- **Component:** Admin → Tender create / Tender edit (pre-Publish)
+
+**Symptom:** Per-tender criteria cannot be customised. Need add/remove/rename, weights summing to 100%, and a mandatory-gate flag per criterion.
+
+**Agreed approach (locked in master plan, sections C1–C5):**
+- During tender create or edit (before Publish), procurement officer selects from library + adds/removes/renames criteria
+- Each criterion has: name, description, weight (numeric), is-mandatory-gate (boolean)
+- Validation: weights MUST sum to exactly 100% before tender can move past Internal Review
+- Typical tender has 5–10 criteria
+- PASS/FAIL determination is GATE-ONLY: pass all gated criteria = overall PASS; fail any gate = overall FAIL
+- Total weighted score is for ranking only, NOT for PASS/FAIL determination
+
+**Files:**
+- `apps/web-admin/src/app/(admin)/tenders/[id]/edit/page.tsx` — add criteria editor section
+- `apps/api/src/modules/tenders/dto/update-tender.dto.ts` — extend with criteria array
+- `apps/api/src/modules/evaluation-criteria/evaluation-criteria.service.ts` — validation logic
+- `database/migrations/00X_award_workflow.sql` — `is_mandatory_gate` BOOLEAN and `weight` DECIMAL(5,2) on `evaluation_criteria`
+
+**Verification:**
+- Tender create form supports 5–10 criteria via library or custom
+- Weights validation: cannot save if sum ≠ 100
+- Gate-flagged criterion failing → overall FAIL regardless of total score (verify in Technical Evaluation + Comparison)
+- Total score visible but does not change PASS/FAIL
+
+**Cross-refs:** master plan §2 section C
+
+---
+
+## BUG-045 — Cleanup: remove Commercial Comparison XLSX export from Reports module
+
+- **Status:** Open (locked design — Phase G, deferred)
+- **Severity:** Low
+- **Type:** Cleanup
+- **Discovered:** 2026-05-27 design session
+- **Component:** Reports & Analytics module
+
+**Symptom:** Once BUG-035 ships the new in-app Commercial Comparison page, the XLSX export shipped in BUG-033 is redundant. Master plan removes it.
+
+**Agreed approach (locked in master plan, section H5):**
+- After BUG-035 is verified live on staging, remove:
+  - `commercial_comparison` report code from `reports.service.ts`
+  - The Commercial Comparison card from Reports & Analytics page
+- Tender Summary, Audit Trail, Vendor Activity reports remain unchanged (Q15A — A-iv)
+- BUG-033 fix stays working until this cleanup; do not remove prematurely
+
+**Files:**
+- `apps/api/src/modules/reports/reports.service.ts` — remove `commercial_comparison` branch
+- `apps/web-admin/src/app/(admin)/reports/page.tsx` — remove the report card
+
+**Verification:**
+- Reports page no longer shows Commercial Comparison card
+- Other reports continue to function
+- DB cleanup: orphaned `report_jobs` rows with code `commercial_comparison` remain in history (don't delete; they're audit data)
+
+**Cross-refs:** master plan §2 sections H4–H6 · BUG-033 (predecessor) · BUG-035 (successor)
 
 ---
 
