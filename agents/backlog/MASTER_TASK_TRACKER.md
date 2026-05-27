@@ -416,6 +416,65 @@ These items emerged during Phase 7 QA work but are out of scope for Phase 7 comp
   - Impact: Test can safely add same user twice (deduplicated to single entry); Unique(sessionId, userId) constraint no longer violated.
   - CI run in progress to verify all 27 tests pass.
 
+## Phase 9 — Bug-fix sweep + In-app comparison redesign (2026-05-27 → 2026-05-28)
+
+**Status:** COMPLETE. All 7 phases of the in-app comparison redesign (A–G) shipped end-to-end; the 11 new BUG-NNN entries opened by the 2026-05-27 master plan (BUG-035 → BUG-045) are all in the Fixed table; the legacy `commercial_comparison` XLSX export is removed.
+
+### Locked plan (2026-05-27 master plan)
+- [x] Locked master plan + flowchart + tracker + deployment-gaps documents written.
+  - Key files: `docs/specs/IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md`, `docs/specs/IN_APP_COMPARISON_FLOWCHART_2026-05-27.md`, `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md`, `docs/specs/DEPLOYMENT_GAPS_2026-05-27.md`.
+  - 37 owner-locked design decisions + 5 implementation-decision locks (2026-05-27 evening).
+
+### Priority-1 retest fails (closed 2026-05-27 afternoon)
+- [x] Retest A4 (BUG-005) — daysLeft serializer emits the field; `/api/v1/tenders` returns `daysLeft` numeric.
+- [x] Retest D1 (BUG-021 second pass) — Save Evaluation moved to its own row, full-width; verified `space-y-4 mb-6` + `w-full bg-accent` in compiled chunk.
+- [x] Retest D2 (BUG-022 second pass) — admin 401 fixed by switching `OptionalVendorOrUserGuard` on the bid documents list endpoint.
+- [-] Retest A2 / A3 — auto-resolve once BUG-008 form completeness ships (which it did).
+- [-] Retest F4 (BUG-033) — deferred to Phase G removal.
+
+### Priority-2 bug bundles (closed 2026-05-27)
+- [x] Bundle 1: Tender form completeness — BUG-008, BUG-009, BUG-010, BUG-011. Prisma rename `tenderType → procurementType` + `budgetEstimate → estimatedBudget`; DTO whitelist; status guards; publish gate. Verified live.
+- [x] Bundle 2: Tender RFQ document upload pipeline — BUG-004, BUG-012, BUG-014. New `TenderStorageService` + multipart endpoints + Upload/Delete/Download UI + publish gate ≥1 doc.
+- [x] Bundle 3: Commercial documents surface — BUG-023 (+ partial BUG-025 closed by Phase C). NEW `CommercialDocumentsList` component embedded in Committee Opening.
+- [x] Bundle 4: Clarification overhaul — BUG-017 deferred; BUG-018 Print shipped (Export deferred); BUG-019 timeline drawer; BUG-031 per-reply visibility (migration 010).
+- [x] Bundle 5: Invitation workflow — BUG-015. Visibility selector + Manage Invited Vendors panel + 3 endpoints + publish gate ≥3 invitees.
+
+### Priority-2 standalones (closed 2026-05-27)
+- [x] BUG-028 Part A — Sidebar gating per master plan §I. Part B (dept-scoped data filtering) deferred — needs JWT payload extension.
+- [x] BUG-030 — Vendor portal `/reset-password` page + email template `resetUrl` wiring.
+- [x] BUG-032 — Vendor blocked-state registry + `MessageBanner` component.
+
+### Phase A — In-app PDF Viewer (2026-05-27 afternoon)
+- [x] BUG-037. Migration 009 `document_view_log` table + viewer permissions. `audit.logDocumentView()` writes both queryable index + hash-chained audit row BEFORE streaming. `GET /bids/:id/envelopes/:type/documents/:docId/view` with `OptionalVendorOrUserGuard`. `PdfViewerProvider` + `PdfViewerModal` mounted in admin layout. Technical Evaluation rewired. Vendor portal `FileDropZone` PDF-only (mime + magic bytes).
+
+### Phase B — Technical Comparison page (2026-05-27 evening)
+- [x] BUG-036. NEW `comparison` NestJS module. `GET /tenders/:id/comparison/technical` aggregates per-vendor consensus (avg) + per-evaluator detail. Migration 011 seeds `comparison:technical:view` + Phase C/D sibling permissions. NEW `/technical-comparison` route with `TechnicalMatrix` (vendor↔criterion toggle) + `VendorTechnicalCard`. Sidebar entry gated.
+
+### Phase C — Commercial Comparison redesign (2026-05-27 evening +)
+- [x] BUG-035 (closes BUG-025 + BUG-026 supersession path). `commercialComparison()` service method. `GET /tenders/:id/comparison/commercial` gated by `comparison:commercial:view`. Pre-computes `lowestPassBidId`. NEW `CommercialMatrix` (Summary↔Itemized toggle, lowest-PASS highlight, FAIL grayed) + `VendorComparisonCard` (5 blocks per master plan §A5). Replaced `/commercial-comparison` page in place.
+
+### Phase D — Award flow + Quorum + Amendment (2026-05-27 late evening)
+- [x] BUG-039 (closes BUG-026), BUG-040, BUG-041. Migration 012 adds `awards` table (with CHECK constraint enforcing override=text+PDF), `award_minutes` table, committee_sessions quorum columns, `award:amend` permission. NEW `AwardStorageService` (`award-justifications` namespace) + 15-min PDF holding tank. `POST /award/justification-document`, `POST /award/confirm`, `POST /award/amend`, `GET /awards`, `GET /quorum`. NEW `QuorumStatus`, `AwardConfirmDialog`, `AmendAwardDialog`. Commercial Comparison rewired; Amend Award button on tender detail (Awarded status only).
+
+### Phase E — Award Minutes PDF + opt-in notifications (2026-05-27 late evening +)
+- [x] BUG-038, BUG-042. NEW `award-minutes.service.ts` via puppeteer-core + system chromium (api.Dockerfile updated with chromium-alpine + fonts; ~250MB image growth). `GET /award/minutes.pdf` always-fresh per master plan H2. Migration 013 seeds `award:minutes:generate` + `notification:vendor:trigger` permissions + 2 NotificationTemplate rows (`TENDER_AWARDED_WINNER`, `TENDER_AWARDED_LOSER`). `AwardService.dispatchAwardNotifications()` auto-called from `confirmAward()` when opt-ins TRUE (best-effort). `POST /award/notify` for manual re-trigger. Vendor portal `/bids/[bidId]` shows emerald/slate award-outcome banners.
+
+### Phase F — Criteria library + per-tender editor (2026-05-28)
+- [x] BUG-043, BUG-044. NEW `evaluation-criteria` module. Migration 014 creates `evaluation_criteria_library` table + 2 permissions + 6 starter seeds. CRUD endpoints for library + `PUT /tenders/:id/criteria` (atomic replace with weights=100% validation). NEW `/settings/evaluation-criteria` admin page + sidebar entry. NEW `TenderCriteriaEditor` mounted in `/tenders/[id]/edit`. Technical Evaluation scorecard rewired to fetch per-tender criteria.
+
+### Phase G — Cleanup legacy XLSX export (2026-05-28)
+- [x] BUG-045. Removed `commercial_comparison` from REPORT_CATALOG + render switch case + private render method in the Reports module. Frontend card disappeared automatically (catalog rendered dynamically). BUG-033 marked superseded. DECISION_LOG entry closing the in-app comparison pivot loop.
+
+### Open / explicitly deferred at the end of Phase 9
+- [ ] BUG-016 — Publish-notification dispatch. Needs owner approval before broadcasting emails to vendors.
+- [ ] BUG-017 — Clarification attachments. New DB tables + storage service + UI; ~7 file standalone bundle.
+- [ ] BUG-018 (Export only) — Clarification PDF export. Depends on the Reports module renderer.
+- [ ] BUG-020 — Owner question (who performs technical evaluation + how notified). Needs owner answer, not code.
+- [ ] BUG-028 Part B — Dept-scoped data filtering. Requires `user.departments` on the JWT payload + coordinated token rotation.
+
+### Phase 9 commit chain (origin/develop)
+`3e54f5e` (2026-05-26 baseline) → `6262263` → `257a831` → `8500eaf` (Phase B) → `42c817a` (Phase C) → `2f99060` (Phase D) → `85e9715` (Phase E) → `bde114e` → `c12f5f5` (Phase F) → `fc9e484` (Phase G — current head).
+
 ## Post-Completion / Post-Launch Items
 
 Work explicitly deferred until after the project is complete. Tracked here so it isn't forgotten; do NOT pull into a pre-launch phase without an explicit re-prioritization decision.
