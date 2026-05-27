@@ -12,11 +12,13 @@ import {
   Loader2,
   Lock,
 } from 'lucide-react';
-import { get, post } from '@/lib/api';
+import { get } from '@/lib/api';
 import { getAccessToken, hasPermission } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { CommercialMatrix, type CommercialMatrixVendor } from '@/components/comparison/CommercialMatrix';
 import { VendorComparisonCard, type CardVendor } from '@/components/comparison/VendorComparisonCard';
+import { AwardConfirmDialog } from '@/components/comparison/AwardConfirmDialog';
+import { QuorumStatus, type QuorumState } from '@/components/comparison/QuorumStatus';
 
 interface TenderListItem {
   id: string;
@@ -93,7 +95,8 @@ function CommercialComparisonContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedBidId, setSelectedBidId] = useState<string | null>(null);
-  const [recommending, setRecommending] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<{ bidId: string; isLowestPass: boolean } | null>(null);
+  const [quorum, setQuorum] = useState<QuorumState | null>(null);
 
   // Permission check up front. Component also gates server-side via the
   // endpoint's `comparison:commercial:view` guard — defense in depth.
@@ -175,45 +178,15 @@ function CommercialComparisonContent() {
     }, 50);
   }
 
-  async function handleRecommend(bidId: string, isLowestPass: boolean) {
-    if (!selectedTenderId) return;
-    // Phase C v1 stop-gap until Phase D ships the proper AwardConfirmDialog.
-    // Override (non-lowest-PASS) prompts for written justification per F2.
-    let justification = '';
-    if (!isLowestPass) {
-      const entered = window.prompt(
-        'This is NOT the lowest-PASS vendor. Phase D will also require an attached PDF. For now, provide a written justification (min 100 characters):',
-      );
-      if (entered == null) return;
-      if (entered.trim().length < 100) {
-        alert('Justification must be at least 100 characters.');
-        return;
-      }
-      justification = entered.trim();
-    } else {
-      if (!confirm('Recommend the lowest-PASS vendor for award? This will be subject to the final Confirm step (Phase D).')) {
-        return;
-      }
-      justification = 'Lowest commercial price among technically-PASS vendors (auto-selected default).';
-    }
+  // Phase D: the Recommend button on each card opens the AwardConfirmDialog
+  // — that dialog handles quorum gating, PDF upload, notification opt-ins.
+  function handleRecommend(bidId: string, isLowestPass: boolean) {
+    setConfirmTarget({ bidId, isLowestPass });
+  }
 
-    setRecommending(true);
-    try {
-      const token = getAccessToken();
-      await post(
-        `/tenders/${selectedTenderId}/award-recommendation`,
-        { recommendedBidId: bidId, justification },
-        token,
-      );
-      alert(
-        'Award recommendation submitted. The final Confirm flow with quorum check + notification opt-ins ships in Phase D.',
-      );
-      await loadComparison(selectedTenderId);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to recommend');
-    } finally {
-      setRecommending(false);
-    }
+  function handleConfirmed() {
+    setConfirmTarget(null);
+    if (selectedTenderId) loadComparison(selectedTenderId);
   }
 
   const matrixVendors = useMemo<CommercialMatrixVendor[]>(
@@ -326,6 +299,7 @@ function CommercialComparisonContent() {
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <QuorumStatus tenderId={comparison.tender.id} onLoaded={setQuorum} />
               <Link
                 href={`/audit-log?tenderId=${comparison.tender.id}`}
                 className="px-3 py-1.5 text-xs font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg flex items-center gap-1.5"
@@ -384,14 +358,30 @@ function CommercialComparisonContent() {
             </p>
           </div>
 
-          {recommending && (
-            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-              <div className="bg-card border border-border rounded-xl px-6 py-4 flex items-center gap-3">
-                <Loader2 className="w-5 h-5 animate-spin text-accent" />
-                <p className="text-sm text-text-primary">Submitting recommendation…</p>
-              </div>
-            </div>
-          )}
+          <AwardConfirmDialog
+            open={!!confirmTarget}
+            tenderId={comparison.tender.id}
+            vendor={
+              confirmTarget
+                ? (() => {
+                    const v = comparison.vendors.find(x => x.bidId === confirmTarget.bidId);
+                    return v
+                      ? {
+                          bidId: v.bidId,
+                          vendorId: v.vendorId,
+                          vendorName: v.vendorName,
+                          commercialTotal: v.commercialTotal,
+                          currency: v.currency,
+                        }
+                      : null;
+                  })()
+                : null
+            }
+            isLowestPass={confirmTarget?.isLowestPass ?? false}
+            quorum={quorum}
+            onClose={() => setConfirmTarget(null)}
+            onConfirmed={handleConfirmed}
+          />
         </div>
       )}
     </div>

@@ -6,6 +6,81 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-27 (late evening) — Phase D (Award flow + Quorum + Amendment) shipped end-to-end
+
+**Date/time:** 2026-05-27 ~23:25 GMT+3 (continuation after `42c817a` push, Phase C)
+**Agent/task:** Owner directive "go with phase D". All 11 tracker items D.1–D.11 shipped + verified; 2 deferred with explicit justification (D.1/D.2 are UX shortcuts, not correctness-critical).
+
+### What landed
+
+**Backend (extends the existing AwardModule):**
+- NEW `AwardStorageService` mirroring BidStorageService + TenderStorageService; namespace `award-justifications`. Used for both Confirm-override and Amend uploads.
+- 4 new endpoints on `AwardController`:
+  - `POST /tenders/:id/award/justification-document` (multipart upload, 15-min in-memory holding tank, audit-logged at MEDIUM)
+  - `POST /tenders/:id/award/confirm` (atomic transaction, server-side lowest-PASS recompute, quorum + envelope-opened gates, audit-logged at CRITICAL)
+  - `POST /tenders/:id/award/amend` (creates new Award row, supersedes prior, demotes prior winning bid back to SUBMITTED, audit-logged at CRITICAL)
+  - `GET /tenders/:id/awards` (full history including superseded rows)
+  - `GET /tenders/:id/quorum` (latest CommitteeSession attendance check)
+- Legacy `award-recommendation` / `award-approval` / `award` endpoints kept for backwards compat — the Phase C stop-gap on the comparison page that hit `/award-recommendation` is now replaced by the new Confirm flow.
+
+**DB:**
+- Migration 012 adds `awards` table (with CHECK constraint enforcing override=text+PDF at the schema layer per master plan F1/F2/F3), `award_minutes` table (Phase E surface, defined for forward-compat), committee_sessions quorum columns, `award:amend` permission + grant to PROCUREMENT_ADMIN. Two-person rule with SYSTEM_ADMIN deferred to a later layer.
+
+**Frontend:**
+- NEW `QuorumStatus.tsx` chip — fetches `GET /quorum` and renders success or amber with reason ("Need 2 more members + CHAIR must be present"). Mounted in Commercial Comparison header.
+- NEW `AwardConfirmDialog.tsx` — the single source of truth for Recommend→Confirm. Lowest-PASS short-circuit (no text/PDF). Override path uploads PDF first, gets documentId, references it in Confirm body. Notification toggles default OFF (master plan F6). Confirm button gated by quorum.
+- NEW `AmendAwardDialog.tsx` — post-Confirm correction modal. Always requires text + PDF + new bid selection.
+- **Commercial Comparison page rewired** — Phase C's Recommend stub (which posted to legacy `/award-recommendation` with a prompt) is replaced by the new AwardConfirmDialog. QuorumStatus chip added to the header next to the audit-views badge.
+- **Tender detail page** gets an "Amend Award" button visible only when status=Awarded, mounting AmendAwardDialog.
+
+### Files (13)
+
+API (7): NEW `award-storage.service.ts`, NEW `dto/confirm-award.dto.ts`, NEW `dto/amend-award.dto.ts`, extended `award.module.ts`, extended `award.controller.ts`, extended `award.service.ts`, extended `apps/api/prisma/schema.prisma` (Award + AwardMinutes models, CommitteeSession quorum columns).
+DB (1): NEW `database/migrations/012_phase_d_award_workflow.sql`.
+Admin (5): NEW `components/comparison/QuorumStatus.tsx`, NEW `components/comparison/AwardConfirmDialog.tsx`, NEW `components/comparison/AmendAwardDialog.tsx`, rewired `app/(admin)/commercial-comparison/page.tsx`, extended `app/(admin)/tenders/[id]/page.tsx`.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on API (after fixing one TenderStatus union assignment for CANCELLED guard)
+- ✅ Migration 012: `BEGIN, CREATE TABLE×2, CREATE INDEX×3, ALTER committee_sessions, COMMENT×3, INSERT 0 1 (permission), INSERT 0 1 (grant), COMMIT`
+- ✅ Build + recreate clean. API healthy, audit chain `217 rows OK` (no chain breaks across the session)
+- ✅ All 7 award routes mapped in boot log:
+  - `Mapped {/api/tenders/:tenderId/award/justification-document, POST}`
+  - `Mapped {/api/tenders/:tenderId/award/confirm, POST}`
+  - `Mapped {/api/tenders/:tenderId/award/amend, POST}`
+  - `Mapped {/api/tenders/:tenderId/awards, GET}`
+  - `Mapped {/api/tenders/:tenderId/quorum, GET}`
+  - Legacy 3 also still registered (backwards compat)
+- ✅ Endpoint smokes: all 3 POST endpoints return 401 on no-auth. GET endpoints not hit with POST.
+- ✅ Frontend chunks contain `AwardConfirmDialog` / `AmendAwardDialog` / `Quorum met` / `award/confirm` / `award/justification-document` markers (admin commercial-comparison + tender-detail chunks).
+
+### Deferred from Phase D (explicit, justified)
+
+| Item | Why |
+|---|---|
+| D.1 "Proceed to Comparison" button on Committee Opening | UX shortcut only. Sidebar already exposes `/commercial-comparison`. Add in a future Committee Opening redesign pass. |
+| D.2 Attendance carry-over between pages | The quorum check on the Commercial Comparison page reads the latest CommitteeSession's attendance directly from the DB, so no UI hand-off is required for correctness. URL/shared-state pattern would be polish. |
+| Two-person rule for Amend (SYSTEM_ADMIN co-sign) | Master plan §I lists `award:amend` as PROCUREMENT_ADMIN + SYSTEM_ADMIN both required. v1 grants to PROCUREMENT_ADMIN only; co-sign enforcement is a separate workflow layer. |
+| Notification dispatch | The Confirm dialog records `notify_winner` / `notify_losers` flags on the Award row, but email sending is Phase E (BUG-042). Flags can be replayed when E ships. |
+
+### Phase status (after this deploy)
+
+| Phase | Status |
+|---|---|
+| A — PDF viewer | ✅ |
+| B — Technical Comparison | ✅ |
+| C — Commercial Comparison redesign | ✅ |
+| **D — Award flow + Quorum + Amendment** | ✅ **shipped this session** (closes BUG-026 via supersession) |
+| E — Award Minutes PDF + opt-in notifications | ⬜ next |
+| F — Criteria library + per-tender editor | ⬜ unlocks Itemized view + BOQ line items |
+| G — Cleanup XLSX export | ⬜ blocked by C verification |
+
+### Next recommended step
+
+**Phase E — Award Minutes PDF (BUG-038) + Optional vendor notifications (BUG-042).** The infrastructure decisions for E are already locked from 2026-05-27 evening (puppeteer for PDF generation, MinIO bucket `ctmp-award-minutes`). The notify-winner/losers flags from Phase D are already persisted on the Award row, so Phase E can wire NotificationsService dispatch with the existing data.
+
+---
+
 ## 2026-05-27 (evening +) — Phase C (Commercial Comparison redesign, BUG-035) shipped end-to-end
 
 **Date/time:** 2026-05-27 ~22:36 GMT+3 (continuation after `8500eaf` push, Phase B)

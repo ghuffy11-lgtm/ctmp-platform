@@ -670,6 +670,40 @@ model TenderClarification {
   @@map("tender_clarifications")
 }
 
+model Award {
+  id                          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenderId                    String    @map("tender_id") @db.Uuid
+  recommendedVendorId         String    @map("recommended_vendor_id") @db.Uuid
+  recommendedBidId            String    @map("recommended_bid_id") @db.Uuid
+  isLowest                    Boolean   @map("is_lowest")
+  justificationText           String?   @map("justification_text") @db.Text
+  justificationPdfStorageKey  String?   @map("justification_pdf_storage_key") @db.Text
+  justificationPdfSha256      String?   @map("justification_pdf_sha256") @db.Char(64)
+  justificationPdfFilename    String?   @map("justification_pdf_filename") @db.VarChar(255)
+  notifyWinner                Boolean   @default(false) @map("notify_winner")
+  notifyLosers                Boolean   @default(false) @map("notify_losers")
+  confirmedBy                 String    @map("confirmed_by") @db.Uuid
+  confirmedAt                 DateTime  @default(now()) @map("confirmed_at")
+  supersededByAwardId         String?   @map("superseded_by_award_id") @db.Uuid
+  supersededAt                DateTime? @map("superseded_at")
+
+  @@index([tenderId])
+  @@index([supersededByAwardId])
+  @@map("awards")
+}
+
+model AwardMinutes {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  awardId       String   @map("award_id") @db.Uuid
+  pdfStorageKey String   @map("pdf_storage_key") @db.Text
+  sha256        String   @db.Char(64)
+  generatedBy   String   @map("generated_by") @db.Uuid
+  generatedAt   DateTime @default(now()) @map("generated_at")
+
+  @@index([awardId])
+  @@map("award_minutes")
+}
+
 model TenderClarificationReply {
   id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   clarificationId  String   @map("clarification_id") @db.Uuid
@@ -812,17 +846,19 @@ model LateSubmissionException {
 // =============================================================================
 
 model CommitteeSession {
-  id          String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenderId    String                 @map("tender_id") @db.Uuid
-  scheduledAt DateTime               @map("scheduled_at")
-  location    String?                @db.VarChar(255)
-  status      CommitteeSessionStatus @default(SCHEDULED)
-  openedBy    String?                @map("opened_by") @db.Uuid
-  openedAt    DateTime?              @map("opened_at")
-  minutesText String?                @map("minutes_text") @db.Text
-  createdBy   String                 @map("created_by") @db.Uuid
-  createdAt   DateTime               @default(now()) @map("created_at")
-  updatedAt   DateTime               @default(now()) @map("updated_at")
+  id                  String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenderId            String                 @map("tender_id") @db.Uuid
+  scheduledAt         DateTime               @map("scheduled_at")
+  location            String?                @db.VarChar(255)
+  status              CommitteeSessionStatus @default(SCHEDULED)
+  openedBy            String?                @map("opened_by") @db.Uuid
+  openedAt            DateTime?              @map("opened_at")
+  minutesText         String?                @map("minutes_text") @db.Text
+  requiredQuorumCount Int?                   @map("required_quorum_count")
+  requiredRoleCode    String?                @default("CHAIR") @map("required_role_code") @db.VarChar(50)
+  createdBy           String                 @map("created_by") @db.Uuid
+  createdAt           DateTime               @default(now()) @map("created_at")
+  updatedAt           DateTime               @default(now()) @map("updated_at")
 
   tender           Tender                    @relation(fields: [tenderId], references: [id], onDelete: Cascade)
   openedByUser     User?                     @relation("CommitteeSessionOpenedBy", fields: [openedBy], references: [id])

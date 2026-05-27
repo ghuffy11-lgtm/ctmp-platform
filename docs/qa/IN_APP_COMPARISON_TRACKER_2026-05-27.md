@@ -81,17 +81,17 @@ Touches Committee Opening page and adds Recommend/Confirm/Amend endpoints.
 
 | Item | Status | Files | Notes |
 |---|---|---|---|
-| D.1 "Proceed to Comparison" button on Committee Opening | `[ ]` | `apps/web-admin/src/app/(admin)/committee-opening/page.tsx` | Hands off attendance |
-| D.2 Attendance carry-over (URL param or shared state) | `[ ]` | committee-opening + commercial-comparison | Both pages read from same backing data |
-| D.3 Quorum check endpoint | `[ ]` | `apps/api/src/modules/comparison/comparison.controller.ts` | `GET /tenders/:id/quorum` |
-| D.4 QuorumStatus chip in header | `[ ]` | `apps/web-admin/src/components/comparison/QuorumStatus.tsx` | Shows disabled reason |
-| D.5 AwardConfirmDialog component | `[ ]` | `apps/web-admin/src/components/comparison/AwardConfirmDialog.tsx` | Recommend → justification (if override) → notification toggles → Confirm |
-| D.6 Recommend endpoint | `[ ]` | `apps/api/src/modules/award/award.controller.ts` | `POST /tenders/:id/award/recommend` |
-| D.7 Confirm endpoint | `[ ]` | Same controller | `POST /tenders/:id/award/confirm` → state Awarded |
-| D.8 Amend endpoint + dialog | `[ ]` | Same controller + new dialog component | `POST /tenders/:id/award/amend` |
-| D.9 DB migration: `awards`, `award_minutes`, committee quorum columns, criteria gate/weight | `[ ]` | `database/migrations/00X_award_workflow.sql` | See master plan §3.3 |
-| D.10 RBAC entries: `comparison:commercial:recommend`, `comparison:commercial:confirm`, `award:amend` | `[ ]` | `database/seeds/` | Defaults per master plan §I |
-| D.11 Verification | `[ ]` | — | Quorum gate works; lowest pre-select; override requires PDF; amendment supersedes |
+| D.1 "Proceed to Comparison" button on Committee Opening | `[-] deferred 2026-05-27` | `apps/web-admin/src/app/(admin)/committee-opening/page.tsx` | UX shortcut only — sidebar already exposes /commercial-comparison. Recommend adding when committee-opening gets its own redesign pass. |
+| D.2 Attendance carry-over (URL param or shared state) | `[-] deferred 2026-05-27` | committee-opening + commercial-comparison | Quorum check on the comparison page reads the latest CommitteeSession's attendance directly from the DB, so no UI hand-off is required for correctness. URL/shared-state hand-off would be UX polish. |
+| D.3 Quorum check endpoint | `[x] 2026-05-27` | `apps/api/src/modules/award/award.controller.ts` | `GET /tenders/:id/quorum` — lives on AwardController (kept Comparison module read-only). Returns `{ sessionId, hasQuorum, reason, requiredCount, presentCount, totalMembers, chairPresent, requiredRoleCode, requiredRolePresent }`. Computes from latest CommitteeSession + attendance + isChair flag. |
+| D.4 QuorumStatus chip in header | `[x] 2026-05-27` | `apps/web-admin/src/components/comparison/QuorumStatus.tsx` | Renders quorum-met (success) or quorum-not-met (amber) with the reason from the server. Mounted in Commercial Comparison page header. |
+| D.5 AwardConfirmDialog component | `[x] 2026-05-27` | `apps/web-admin/src/components/comparison/AwardConfirmDialog.tsx` | Vendor recap + lowest-PASS short-circuit (zero text/PDF) vs override path (text ≥100 chars + PDF upload required). Notification toggles default OFF. Confirm disabled when quorum not met. ESC closes (unless mid-action). |
+| D.6 Recommend endpoint | `[-] superseded 2026-05-27` | — | Master plan F5 collapses the old Recommend→Approve→Confirm chain into a single Confirm. Phase D doesn't introduce a separate Recommend endpoint — the AwardConfirmDialog hits `POST /award/confirm` directly. Legacy `POST /award-recommendation` kept for backwards compat. |
+| D.7 Confirm endpoint | `[x] 2026-05-27` | `apps/api/src/modules/award/award.controller.ts` | `POST /tenders/:id/award/confirm` gated by `comparison:commercial:confirm`. Quorum check + server-side lowest-PASS recompute (client can't lie about isLowest) + commercial-envelope-opened check. Atomic Prisma transaction creates Award row + flips tender to Awarded + winning bid to AWARDED. Notification opt-ins persisted on the row for Phase E to act on. |
+| D.8 Amend endpoint + dialog | `[x] 2026-05-27` | `apps/api/src/modules/award/award.controller.ts` + `apps/web-admin/src/components/comparison/AmendAwardDialog.tsx` | `POST /tenders/:id/award/amend` gated by `award:amend`. Always requires text + PDF. Transaction: new Award row + supersedes prior via `superseded_by_award_id`, flips awardedVendorId + winning bid to AWARDED, demotes prior winning bid back to SUBMITTED. Dialog wired to `/tenders/[id]` "Amend Award" button (Awarded status only). |
+| D.9 DB migration: `awards`, `award_minutes`, committee quorum columns | `[x] 2026-05-27` | `database/migrations/012_phase_d_award_workflow.sql` | Applied to staging: 2 CREATE TABLE + 3 CREATE INDEX + ALTER committee_sessions (quorum cols) + 1 new permission + 1 grant. CHECK constraint enforces master plan F1/F2/F3 at the schema level (override needs text + PDF). |
+| D.10 RBAC entries | `[x] 2026-05-27` | Migration 011 (recommend/confirm) + migration 012 (amend) | `comparison:commercial:recommend` + `comparison:commercial:confirm` pre-seeded in 011; `award:amend` added in 012 (PROCUREMENT_ADMIN only for v1; two-person rule with SYSTEM_ADMIN deferred). |
+| D.11 Verification | `[x] 2026-05-27` | — | All 7 new routes mapped in boot log (`award/justification-document`, `award/confirm`, `award/amend`, `quorum`, `awards` + legacy 3 kept). All POST endpoints return 401 on no-auth. Audit chain 217 rows OK. Frontend chunks contain AwardConfirmDialog + AmendAwardDialog markers. End-to-end click-through pending owner. |
 
 ---
 

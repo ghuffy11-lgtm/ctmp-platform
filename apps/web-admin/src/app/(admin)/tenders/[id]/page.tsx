@@ -7,6 +7,7 @@ import { get, post, del } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { ManageInvitedVendors } from '@/components/ManageInvitedVendors';
+import { AmendAwardDialog } from '@/components/comparison/AmendAwardDialog';
 import {
   AlertCircle,
   ChevronRight,
@@ -116,6 +117,7 @@ export default function TenderDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
+  const [amendOpen, setAmendOpen] = useState(false);
   const docInputRef = useRef<HTMLInputElement>(null);
 
   async function loadTender() {
@@ -309,18 +311,28 @@ export default function TenderDetailPage() {
             </button>
           )}
           {tender.status === 'Awarded' && (
-            <button
-              onClick={() => {
-                if (confirm('Issue formal award? This closes the tender and notifies the winning vendor.')) {
-                  handleAction('award');
-                }
-              }}
-              disabled={actionLoading !== null}
-              className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
-            >
-              <Check className="w-4 h-4" />
-              {actionLoading === 'award' ? 'Issuing…' : 'Issue Award'}
-            </button>
+            <>
+              <button
+                onClick={() => setAmendOpen(true)}
+                className="px-4 py-2 border border-amber-300 text-amber-700 text-sm font-semibold rounded-lg hover:bg-amber-50 transition-colors flex items-center gap-1.5"
+                title="Amend the confirmed award — creates a new record that supersedes the active one"
+              >
+                <Pencil className="w-4 h-4" />
+                Amend Award
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm('Issue formal award? This closes the tender and notifies the winning vendor.')) {
+                    handleAction('award');
+                  }
+                }}
+                disabled={actionLoading !== null}
+                className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                {actionLoading === 'award' ? 'Issuing…' : 'Issue Award'}
+              </button>
+            </>
           )}
           {EDITABLE_STATUSES.includes(tender.status) && (
             <Link
@@ -605,6 +617,14 @@ export default function TenderDetailPage() {
           </div>
         </div>
       )}
+
+      <AmendAwardDialog
+        open={amendOpen}
+        tenderId={tender.id}
+        currentVendorName={tender.title}
+        onClose={() => setAmendOpen(false)}
+        onAmended={() => { setAmendOpen(false); loadTender(); }}
+      />
 
       {/* Stub tabs */}
       {tab !== 'overview' && (
