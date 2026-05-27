@@ -26,8 +26,6 @@ The user reports observations in chat → this doc captures them with file:line 
 | BUG-018 | Medium | Bug | Admin → Clarifications | Print shipped; Export disabled with tooltip ("Coming in next release — depends on Reports module renderer") |
 | BUG-020 | — | Question | Admin → Technical Evaluation | Who is supposed to perform technical evaluation? How are they notified that envelopes are open? |
 | BUG-028 | Critical | Feature | Admin RBAC enforcement | Part A (Sidebar gating) shipped; Part B (dept-scoped data filtering) deferred — needs JWT payload extension to carry `user.departments` |
-| BUG-038 | Medium | Feature | Admin → Awarded tender → Award Minutes PDF | On-demand "Generate Award Minutes" PDF capturing the full decision record. Locked in master plan 2026-05-27. |
-| BUG-042 | Medium | Feature | Vendor portal + Notifications → Optional award notifications | Opt-in toggles at Confirm time. Winner sees "You have been awarded"; losers see "Awarded to another vendor". Default OFF. Locked 2026-05-27. |
 | BUG-043 | Medium | Feature | Admin → Settings → Evaluation criteria library | Master library of criteria (admin-maintained) for the hybrid criteria source pattern. Locked 2026-05-27. |
 | BUG-044 | Medium | Feature | Admin → Tender create/edit → Per-tender criteria editor | Per-tender add/remove/rename, weights summing to 100%, mandatory-gate flag per criterion. Locked 2026-05-27. |
 | BUG-045 | Low | Cleanup | Reports module → Remove Commercial Comparison export | Drop the XLSX `commercial_comparison` export from Reports module after BUG-035 ships and is verified. Locked 2026-05-27. |
