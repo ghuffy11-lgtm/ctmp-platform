@@ -28,6 +28,7 @@ import { LateSubmissionsModule } from './modules/late-submissions/late-submissio
 import { TechnicalEvaluationModule } from './modules/technical-evaluation/technical-evaluation.module';
 import { CommitteeModule } from './modules/committee/committee.module';
 import { CommercialEvaluationModule } from './modules/commercial-evaluation/commercial-evaluation.module';
+import { ComparisonModule } from './modules/comparison/comparison.module';
 import { AwardModule } from './modules/award/award.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -61,6 +62,7 @@ import { SystemSettingsModule } from './modules/system-settings/system-settings.
     TechnicalEvaluationModule,
     CommitteeModule,
     CommercialEvaluationModule,
+    ComparisonModule,
     AwardModule,
     AuditModule,
     NotificationsModule,

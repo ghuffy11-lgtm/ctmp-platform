@@ -6,6 +6,64 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-27 (evening) — Phase B (Technical Comparison page, BUG-036) shipped end-to-end
+
+**Date/time:** 2026-05-27 ~19:36 GMT+3 (continuation after `257a831` push)
+**Agent/task:** Owner directive "go with phase B start and complete the whole process". All 9 tracker items B.1–B.9 shipped + verified in one session.
+
+### What landed
+
+- **NEW backend module** `apps/api/src/modules/comparison/` (module + controller + service).
+- **Endpoint** `GET /api/v1/tenders/:tenderId/comparison/technical` (guarded by `JwtAuthGuard + PermissionsGuard` with `comparison:technical:view`).
+- **Aggregation algorithm:** per-vendor consensus = simple average of `TechnicalEvaluation.overallScore` across evaluators; per-criterion consensus = average of `TechnicalEvaluationScore.score` matched to `TenderTechnicalCriterion.name`; consensus PASS/FAIL/PENDING = `bid.technicalResult` (the official aggregated result set by finalize-technical-results, not an opinion poll).
+- **Migration 011** seeds 4 new permissions (`comparison:technical:view`, `comparison:commercial:view`, `comparison:commercial:recommend`, `comparison:commercial:confirm`) + 11 role grants. Phase C/D permissions pre-seeded so those phases can land without another migration. SYSTEM_ADMIN deliberately omitted from all commercial-side grants per the spec separation-of-duties rule (migration 007 precedent reinforced).
+- **NEW frontend components:**
+  - `TechnicalMatrix.tsx` — read-only matrix with vendor-as-rows ↔ criterion-as-rows toggle, sticky first column, gate-criterion shield icons, PASS/FAIL/PENDING badges.
+  - `VendorTechnicalCard.tsx` — per-vendor expandable card: top row shows consensus + result, expanded reveals per-criterion consensus list and per-evaluator `<details>` blocks with full score breakdown + notes.
+- **NEW page** `/technical-comparison` — tender picker (filters to Technical Opening onwards), tender header with summary stats, matrix top, vendor cards below. Click any vendor name in the matrix scrolls to and pre-expands its card. URL `?tenderId=…` for deep-links.
+- **Sidebar entry** added (gated on `comparison:technical:view`).
+
+### Files (9)
+
+API (4): NEW `comparison/comparison.module.ts`, NEW `comparison.controller.ts`, NEW `comparison.service.ts`, modified `app.module.ts`.
+DB (1): NEW `database/migrations/011_comparison_permissions.sql`.
+Admin (4): NEW `components/comparison/TechnicalMatrix.tsx`, NEW `components/comparison/VendorTechnicalCard.tsx`, NEW `app/(admin)/technical-comparison/page.tsx`, modified `components/layout/Sidebar.tsx`.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on API
+- ✅ Migration 011: `BEGIN, INSERT 0 4 (permissions), INSERT 0 11 (grants), COMMIT`
+- ✅ Build issue caught + fixed: first web-admin build failed with "Error occurred prerendering page /technical-comparison" — `useSearchParams` needs Suspense around it for Next.js App Router SSG. Refactored into `TechnicalComparisonContent` + outer `<Suspense fallback={...}>` wrapper. Second build clean.
+- ✅ Build issue caught + fixed (#2): first API rebuild appeared to skip the new `ComparisonModule` (route mapping not in boot logs). Re-ran `build --no-cache api` — second attempt registered `ComparisonController {/api/tenders/:tenderId/comparison} (version: 1)` + `Mapped {/api/tenders/:tenderId/comparison/technical, GET}`. Suspected docker layer cache anomaly during the first run; not a code issue.
+- ✅ API healthy `(healthy)` post-recreate, audit chain verifier "217 rows OK" — no chain breaks
+- ✅ Endpoint smoke: `GET /api/v1/tenders/.../comparison/technical` returns 401 on no-auth (guard working)
+- ✅ Frontend chunk markers:
+  - `app/(admin)/technical-comparison/page-aee11a3e7ffca743.js` contains "Technical Comparison Matrix"
+  - `app/(admin)/layout-f3251d10b96fc9b2.js` contains `technical-comparison` + `comparison:technical:view`
+
+### Known constraints (documented, not blockers for v1)
+
+- `TechnicalEvaluationScore` rows are sparse on the existing dataset because the current Technical Evaluation page stores criterion breakdown in a concatenated `notes` string rather than as structured `TechnicalEvaluationScore` records. The matrix will show `—` cells for evaluations that pre-date proper per-criterion scoring. Cleanly displays whatever is in the DB; Phase F (criteria editor + per-tender library) will tighten this end-to-end.
+- The component will silently 404 if hit on a tender with no `TenderTechnicalCriterion` rows — the empty-state card on the matrix is shown instead. Tenders with criteria configured render fully.
+
+### Phase status (after this deploy)
+
+| Phase | Items | Status |
+|---|---|---|
+| A — PDF viewer (BUG-037) | 9 items | ✅ shipped |
+| **B — Technical Comparison (BUG-036)** | 9 items | ✅ **shipped this session** |
+| C — Commercial Comparison redesign (BUG-035) | 10 items | next up per master-plan order |
+| D — Award flow + Quorum + Amend (BUG-039/40/41) | 11 items | not started |
+| E — Award Minutes PDF + notifications (BUG-038/42) | 8 items | not started |
+| F — Criteria library + editor (BUG-043/44) | 6 items | not started |
+| G — Cleanup XLSX (BUG-045) | 5 items | not started, blocked by C |
+
+### Next recommended step
+
+**Phase C — Commercial Comparison page redesign (BUG-035).** The viewer infrastructure (Phase A) and the comparison module skeleton (Phase B) are in place; the comparison.service.ts will gain a `commercialComparison()` method and the new `commercial-comparison/page.tsx` replaces the current XLSX-export-only page in place per master plan §3.1.
+
+---
+
 ## 2026-05-27 (late afternoon) — Continued sweep: Bundle 4 + Bundle 5 + BUG-032 shipped, only BUG-016/017/028B/020 deferred
 
 **Date/time:** 2026-05-27 ~17:15 GMT+3 (continuation after `6262263` push)

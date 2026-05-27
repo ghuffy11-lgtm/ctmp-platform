@@ -38,6 +38,7 @@ const navItems: Array<{
   { href: '/approvals', label: 'Approvals', icon: CheckCircle2, anyPermission: ['tender:approve', 'award:approve'] },
   { href: '/clarifications', label: 'Clarifications', icon: MessageSquare, anyPermission: ['clarification:view_internal', 'clarification:reply'] },
   { href: '/technical-evaluation', label: 'Technical Evaluation', icon: BarChart3, permission: 'technical:evaluate' },
+  { href: '/technical-comparison', label: 'Technical Comparison', icon: BarChart3, permission: 'comparison:technical:view' },
   { href: '/committee-opening', label: 'Committee & Commercial', icon: Scale, anyPermission: ['committee:open_commercial', 'committee:record_attendance', 'commercial:view'] },
   { href: '/commercial-comparison', label: 'Commercial Comparison', icon: ArrowLeftRight, permission: 'commercial:view' },
   { href: '/vendors', label: 'Vendor Management', icon: Building2, permission: 'vendor:view' },

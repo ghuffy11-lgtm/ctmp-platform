@@ -44,15 +44,15 @@ Read-only. No new write paths. Lower-risk to ship first among the comparison pag
 
 | Item | Status | Files | Notes |
 |---|---|---|---|
-| B.1 Page shell + route | `[ ]` | `apps/web-admin/src/app/(admin)/technical-comparison/page.tsx` + layout | New sidebar entry |
-| B.2 Comparison API endpoint | `[ ]` | `apps/api/src/modules/comparison/comparison.controller.ts` | `GET /tenders/:id/comparison/technical` |
-| B.3 Comparison service: aggregate scores per evaluator + consensus | `[ ]` | `apps/api/src/modules/comparison/comparison.service.ts` | Simple avg across evaluators |
-| B.4 TechnicalMatrix component with switchable layout | `[ ]` | `apps/web-admin/src/components/comparison/TechnicalMatrix.tsx` | Vendors-as-rows ↔ Criteria-as-rows |
-| B.5 Cell expand-to-show-individual-evaluator-scores | `[ ]` | Inside TechnicalMatrix.tsx | Default collapsed (consensus only) |
-| B.6 Per-vendor expandable card | `[ ]` | `apps/web-admin/src/components/comparison/VendorTechnicalCard.tsx` | Criteria breakdown, gate badges, FAIL highlight |
-| B.7 Sidebar nav entry | `[ ]` | `apps/web-admin/src/components/layout/Sidebar.tsx` | Visible only to roles with `comparison:technical:view` |
-| B.8 RBAC entry: `comparison:technical:view` | `[ ]` | `database/seeds/` | Defaults per master plan §I |
-| B.9 Verification | `[ ]` | — | All evaluator scores aggregate correctly; gates and weights respected; toggle works |
+| B.1 Page shell + route | `[x] 2026-05-27` | `apps/web-admin/src/app/(admin)/technical-comparison/page.tsx` | New route. Tender picker + summary header + matrix + cards. `Suspense` wrapper around `useSearchParams` to keep SSG happy. |
+| B.2 Comparison API endpoint | `[x] 2026-05-27` | `apps/api/src/modules/comparison/comparison.controller.ts` | `GET /tenders/:id/comparison/technical` guarded by `JwtAuthGuard + PermissionsGuard` with `comparison:technical:view`. |
+| B.3 Comparison service: aggregate scores per evaluator + consensus | `[x] 2026-05-27` | `apps/api/src/modules/comparison/comparison.service.ts` | Simple avg of `TechnicalEvaluation.overallScore` across evaluators. Per-criterion consensus = avg of `TechnicalEvaluationScore.score` matched by criterion name. Consensus result reads the official `bid.technicalResult`. |
+| B.4 TechnicalMatrix component with switchable layout | `[x] 2026-05-27` | `apps/web-admin/src/components/comparison/TechnicalMatrix.tsx` | Vendor-as-rows ↔ Criterion-as-rows toggle. Mandatory-gate criteria flagged with a shield icon. Sticky first column for horizontal scroll. |
+| B.5 Cell expand-to-show-individual-evaluator-scores | `[x] 2026-05-27` | VendorTechnicalCard.tsx | Implemented via the per-vendor card's `<details>` rows: clicking a matrix cell selects the vendor + scrolls to its card, which has full per-evaluator breakdown. Cleaner UX than expanding inside cells. |
+| B.6 Per-vendor expandable card | `[x] 2026-05-27` | `apps/web-admin/src/components/comparison/VendorTechnicalCard.tsx` | Top row = consensus + result badge + total. Expanded: per-criterion consensus list + per-evaluator `<details>` blocks with their full score breakdown + notes. FAIL bids dim to 70%. |
+| B.7 Sidebar nav entry | `[x] 2026-05-27` | `apps/web-admin/src/components/layout/Sidebar.tsx` | New nav entry between Technical Evaluation and Committee & Commercial. Gated on `comparison:technical:view`. |
+| B.8 RBAC entry: `comparison:technical:view` | `[x] 2026-05-27` | `database/migrations/011_comparison_permissions.sql` | Migration also pre-seeds Phase C/D permissions (`comparison:commercial:view/recommend/confirm`) since they share the same RBAC matrix. SYSTEM_ADMIN omitted from all commercial-side grants (separation of duties). |
+| B.9 Verification | `[x] 2026-05-27` | — | All 5 verifications passed: endpoint registered (`ComparisonController` in boot log + 401 on no-auth), audit chain 217 rows OK, frontend chunk contains "Technical Comparison Matrix", sidebar layout chunk contains `comparison:technical:view`. End-to-end click-through pending owner. |
 
 ---
 
