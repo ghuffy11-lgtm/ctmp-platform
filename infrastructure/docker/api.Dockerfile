@@ -11,6 +11,10 @@ WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY apps/api/package.json apps/api/
 COPY packages packages/
+# Skip puppeteer's bundled chromium download — runtime uses the system
+# chromium from alpine packages (much smaller than puppeteer's bundle).
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 FROM base AS build
@@ -25,7 +29,22 @@ RUN pnpm exec nest build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apk add --no-cache wget
+# Phase E (BUG-038): puppeteer-core uses system chromium for Award Minutes
+# PDF generation. The font packages are required so generated PDFs render
+# Latin/Arabic glyphs correctly.
+RUN apk add --no-cache \
+    wget \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    font-noto \
+    font-noto-arabic
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 COPY --from=build /repo/node_modules /app/node_modules
 COPY --from=build /repo/packages /app/packages
 COPY --from=build /repo/apps/api/node_modules /app/apps/api/node_modules

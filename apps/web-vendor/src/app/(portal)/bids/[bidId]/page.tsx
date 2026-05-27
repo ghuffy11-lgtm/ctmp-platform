@@ -119,6 +119,32 @@ export default function VendorBidDetailPage({ params }: { params: Promise<{ bidI
         </Link>
       )}
 
+      {/* Phase E (BUG-042): award outcome — visible only after the tender has been awarded. */}
+      {bid.status === 'AWARDED' && (
+        <div className="rounded-3xl bg-emerald-50 border border-emerald-200 px-6 py-5 flex items-start gap-4">
+          <div className="text-3xl">🏆</div>
+          <div>
+            <p className="text-base font-bold text-emerald-900">You have been awarded</p>
+            <p className="text-sm text-emerald-900/80 mt-1 leading-relaxed">
+              Congratulations — your bid for <strong>{bid.tenderReference}</strong> has been awarded. The procurement
+              team will be in touch about contract execution.
+            </p>
+          </div>
+        </div>
+      )}
+      {bid.status !== 'AWARDED' && bid.status !== 'DRAFT' && (bid.tenderStatus === 'Awarded' || bid.tenderStatus === 'Tender Closed') && (
+        <div className="rounded-3xl bg-slate-50 border border-slate-200 px-6 py-5 flex items-start gap-4">
+          <div className="text-2xl">📄</div>
+          <div>
+            <p className="text-base font-bold text-slate-900">Awarded to another vendor</p>
+            <p className="text-sm text-slate-700 mt-1 leading-relaxed">
+              Thank you for participating in <strong>{bid.tenderReference}</strong>. After technical and commercial
+              evaluation, the award was made to another vendor. We hope to see your bid on future opportunities.
+            </p>
+          </div>
+        </div>
+      )}
+
       {receipt && (
         <div className="bg-card border border-border rounded-xl p-5 space-y-3">
           <h2 className="text-sm font-bold text-text-primary">Submission Receipt</h2>

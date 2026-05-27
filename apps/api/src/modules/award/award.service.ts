@@ -1,8 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { AuditRiskLevel, BidStatus, EnvelopeType, EnvelopeStatus, TenderStatus, TechnicalResult } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AwardStorageService } from './award-storage.service';
 import { AwardRecommendationDto } from './dto/award-recommendation.dto';
 import { AwardApprovalDto } from './dto/award-approval.dto';
@@ -26,6 +28,8 @@ interface PendingJustification {
 
 @Injectable()
 export class AwardService {
+  private readonly logger = new Logger(AwardService.name);
+
   // In-memory holding tank for uploaded justification PDFs. The client uploads
   // first, gets back a `documentId`, then references it in the Confirm/Amend
   // request body. Entries auto-expire after 15 minutes so abandoned uploads
@@ -37,6 +41,8 @@ export class AwardService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly storage: AwardStorageService,
+    private readonly notifications: NotificationsService,
+    private readonly config: ConfigService,
   ) {}
 
   private static gcPending() {
@@ -312,11 +318,170 @@ export class AwardService {
       riskLevel: AuditRiskLevel.CRITICAL,
     });
 
-    // Notification dispatch is deferred to Phase E (BUG-042). The flags are
-    // persisted on the Award row so Phase E can act on them retroactively
-    // (or NotificationsService can be wired in here when ready).
+    // Phase E (BUG-042): fire vendor notifications when opted in. Best-effort —
+    // we DO NOT roll back the Confirm if SMTP fails. Failures are audit-logged.
+    if (award.notifyWinner || award.notifyLosers) {
+      try {
+        await this.dispatchAwardNotifications(award.id, userId);
+      } catch (err) {
+        this.logger.error(`Notification dispatch on Confirm ${award.id} failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
 
     return award;
+  }
+
+  /**
+   * Phase E (BUG-042): fan out vendor notifications for an Award. Reads the
+   * notify_winner / notify_losers flags off the Award row. Manual re-trigger
+   * endpoint reuses this so a Procurement Manager who forgot the opt-in at
+   * Confirm time can still send the emails later.
+   */
+  async dispatchAwardNotifications(awardId: string, userId: string) {
+    const award = await this.prisma.award.findUnique({
+      where: { id: awardId },
+    });
+    if (!award) throw new NotFoundException('Award not found');
+
+    const tender = await this.prisma.tender.findUnique({
+      where: { id: award.tenderId },
+      select: { id: true, reference: true, title: true },
+    });
+    if (!tender) throw new NotFoundException('Tender not found');
+
+    const vendorPortalUrl = this.config.get<string>('vendor.portalUrl') ?? 'https://vn.hadiclinic.com.kw:4201';
+    const confirmedByUser = await this.prisma.user.findUnique({
+      where: { id: award.confirmedBy },
+      select: { displayName: true },
+    });
+
+    const results: Array<{ to: string; templateCode: string; outcome: string }> = [];
+
+    if (award.notifyWinner) {
+      const winningBid = await this.prisma.bid.findUnique({
+        where: { id: award.recommendedBidId },
+        include: {
+          vendor: {
+            select: {
+              id: true,
+              companyName: true,
+              vendorUsers: {
+                where: { status: 'ACTIVE' },
+                select: { email: true, isPrimaryContact: true },
+              },
+            },
+          },
+        },
+      });
+      const recipients = this.pickPrimary(winningBid?.vendor.vendorUsers ?? []);
+      for (const email of recipients) {
+        try {
+          await this.notifications.sendEmail(email, 'TENDER_AWARDED_WINNER', {
+            tenderReference: tender.reference,
+            tenderTitle: tender.title,
+            vendorName: winningBid?.vendor.companyName ?? '',
+            bidId: award.recommendedBidId,
+            confirmedAt: award.confirmedAt.toISOString(),
+            confirmedByName: confirmedByUser?.displayName ?? '',
+            vendorPortalUrl,
+          });
+          results.push({ to: email, templateCode: 'TENDER_AWARDED_WINNER', outcome: 'sent' });
+        } catch (err) {
+          results.push({ to: email, templateCode: 'TENDER_AWARDED_WINNER', outcome: `error: ${err instanceof Error ? err.message : err}` });
+        }
+      }
+    }
+
+    if (award.notifyLosers) {
+      const losingBids = await this.prisma.bid.findMany({
+        where: {
+          tenderId: tender.id,
+          NOT: { id: award.recommendedBidId },
+        },
+        include: {
+          vendor: {
+            select: {
+              id: true,
+              companyName: true,
+              vendorUsers: {
+                where: { status: 'ACTIVE' },
+                select: { email: true, isPrimaryContact: true },
+              },
+            },
+          },
+        },
+      });
+      for (const lb of losingBids) {
+        const recipients = this.pickPrimary(lb.vendor.vendorUsers);
+        for (const email of recipients) {
+          try {
+            await this.notifications.sendEmail(email, 'TENDER_AWARDED_LOSER', {
+              tenderReference: tender.reference,
+              tenderTitle: tender.title,
+              vendorName: lb.vendor.companyName,
+              bidId: lb.id,
+              vendorPortalUrl,
+            });
+            results.push({ to: email, templateCode: 'TENDER_AWARDED_LOSER', outcome: 'sent' });
+          } catch (err) {
+            results.push({ to: email, templateCode: 'TENDER_AWARDED_LOSER', outcome: `error: ${err instanceof Error ? err.message : err}` });
+          }
+        }
+      }
+    }
+
+    await this.audit.log({
+      eventType: 'AWARD_NOTIFICATIONS_DISPATCHED',
+      entityType: 'Award',
+      entityId: award.id,
+      tenderId: tender.id,
+      actorUserId: userId,
+      afterValue: {
+        notifyWinner: award.notifyWinner,
+        notifyLosers: award.notifyLosers,
+        count: results.length,
+        outcomes: results,
+      },
+      riskLevel: AuditRiskLevel.MEDIUM,
+    });
+
+    return {
+      awardId: award.id,
+      notifyWinner: award.notifyWinner,
+      notifyLosers: award.notifyLosers,
+      results,
+    };
+  }
+
+  // Re-trigger via toggles supplied in the body. Updates the Award row's
+  // flags BEFORE dispatch so a future retry has the latest opt-in state.
+  async triggerAwardNotifications(
+    tenderId: string,
+    flags: { notifyWinner?: boolean; notifyLosers?: boolean },
+    userId: string,
+  ) {
+    const active = await this.prisma.award.findFirst({
+      where: { tenderId, supersededByAwardId: null },
+      orderBy: { confirmedAt: 'desc' },
+    });
+    if (!active) throw new NotFoundException('No active award found for this tender');
+
+    if (flags.notifyWinner !== undefined || flags.notifyLosers !== undefined) {
+      await this.prisma.award.update({
+        where: { id: active.id },
+        data: {
+          notifyWinner: flags.notifyWinner ?? active.notifyWinner,
+          notifyLosers: flags.notifyLosers ?? active.notifyLosers,
+        },
+      });
+    }
+    return this.dispatchAwardNotifications(active.id, userId);
+  }
+
+  private pickPrimary(users: Array<{ email: string; isPrimaryContact: boolean }>): string[] {
+    if (users.length === 0) return [];
+    const primary = users.filter(u => u.isPrimaryContact).map(u => u.email);
+    return primary.length > 0 ? primary : users.map(u => u.email);
   }
 
   async amendAward(tenderId: string, dto: AmendAwardDto, userId: string) {

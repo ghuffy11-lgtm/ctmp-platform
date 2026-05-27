@@ -1,11 +1,13 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AwardService } from './award.service';
+import { AwardMinutesService } from './award-minutes.service';
 import { AwardRecommendationDto } from './dto/award-recommendation.dto';
 import { AwardApprovalDto } from './dto/award-approval.dto';
 import { ConfirmAwardDto } from './dto/confirm-award.dto';
@@ -18,7 +20,10 @@ const MAX_JUSTIFICATION_BYTES = 25 * 1024 * 1024;
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('tenders/:tenderId')
 export class AwardController {
-  constructor(private readonly awardService: AwardService) {}
+  constructor(
+    private readonly awardService: AwardService,
+    private readonly minutesService: AwardMinutesService,
+  ) {}
 
   // --- Legacy 2-step flow kept for backwards compat with anything still wired
   // to the old endpoints. Phase D's single-Confirm flow below supersedes both
@@ -113,5 +118,39 @@ export class AwardController {
   @ApiOperation({ operationId: 'listAwards', summary: 'List the full award history for a tender' })
   list(@Param('tenderId') tenderId: string) {
     return this.awardService.listAwards(tenderId);
+  }
+
+  // --- Phase E (BUG-038, BUG-042) ---
+
+  // On-demand Award Minutes PDF. Re-clicking always generates a fresh row +
+  // file per master plan H2 — the audit trail keeps every copy.
+  @Get('award/minutes.pdf')
+  @RequirePermissions('award:minutes:generate')
+  @ApiOperation({ operationId: 'getAwardMinutes', summary: 'Generate and stream the Award Minutes PDF for the active award' })
+  async getMinutes(
+    @Param('tenderId') tenderId: string,
+    @CurrentUser('id') userId: string,
+    @Res() res: Response,
+  ) {
+    const result = await this.minutesService.generate(tenderId, userId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', String(result.buffer.length));
+    res.setHeader('Content-Disposition', `inline; filename="${result.filename}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Award-Minutes-Sha256', result.sha256);
+    res.end(result.buffer);
+  }
+
+  // Manual re-trigger for vendor notifications — if the Procurement Manager
+  // forgot to opt in at Confirm time, or wants to resend.
+  @Post('award/notify')
+  @RequirePermissions('notification:vendor:trigger')
+  @ApiOperation({ operationId: 'triggerAwardNotifications', summary: 'Manually (re-)send vendor award notifications' })
+  triggerNotifications(
+    @Param('tenderId') tenderId: string,
+    @Body() body: { notifyWinner?: boolean; notifyLosers?: boolean },
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.awardService.triggerAwardNotifications(tenderId, body ?? {}, userId);
   }
 }

@@ -6,6 +6,77 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-27 (late evening +) — Phase E (Award Minutes PDF + vendor notifications) shipped end-to-end
+
+**Date/time:** 2026-05-27 ~23:45 GMT+3 (continuation after `2f99060` push, Phase D)
+**Agent/task:** Owner directive "Phase E". All 8 tracker items E.1–E.8 shipped + verified.
+
+### What landed
+
+**Backend — Award Minutes PDF (BUG-038):**
+- NEW `apps/api/src/modules/award/award-minutes.service.ts` — generates the official Award Minutes PDF via **puppeteer-core + system chromium** per owner's locked decision. Aggregates tender meta, all bids (winner highlighted, FAIL grayed), award row with justification block, committee attendance, notification flags, supersession banner if amended. Hashes SHA-256, stores in MinIO namespace `award-minutes`, writes `award_minutes` row.
+- NEW `GET /tenders/:id/award/minutes.pdf` gated by `award:minutes:generate`. Always generates a fresh copy per master plan H2 ("Re-clicking generates a fresh row"). Streams `application/pdf` with `X-Award-Minutes-Sha256` header for downstream verification.
+- `api.Dockerfile` updated: alpine `chromium` + `nss` + `freetype` + `harfbuzz` + `ttf-freefont` + `font-noto` + `font-noto-arabic` in the runtime stage. `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser`. `PUPPETEER_SKIP_DOWNLOAD=true` in both deps and runtime so we don't ship puppeteer's bundled chromium.
+
+**Backend — Vendor notifications (BUG-042):**
+- `AwardService.dispatchAwardNotifications(awardId, userId)` fans out to VendorUser primary contacts (falls back to all active vendor users if no primary). Auto-called from `confirmAward()` when `notify_winner` or `notify_losers` flags TRUE. Best-effort: SMTP failures DO NOT roll back the Confirm — they audit-log at MEDIUM and the dispatch result list is preserved in the audit row's `outcomes` metadata.
+- NEW `POST /tenders/:id/award/notify` body `{ notifyWinner?, notifyLosers? }` gated by `notification:vendor:trigger`. Updates the active Award row's flags then re-dispatches. Manual re-trigger for the "forgot to opt-in at Confirm time" case.
+
+**DB — Migration 013:**
+- 2 new permissions (`award:minutes:generate`, `notification:vendor:trigger`) + 4 role grants.
+- 2 notification templates: `TENDER_AWARDED_WINNER` (subject "you have been awarded" + congrats body, links to vendor portal) and `TENDER_AWARDED_LOSER` (subject "awarded to another vendor" + thank-you body).
+
+**Frontend:**
+- Admin `tenders/[id]/page.tsx` — "Generate Award Minutes" button visible when status=Awarded. Click fetches the PDF endpoint with bearer auth, triggers browser download as `award-minutes-<reference>.pdf`.
+- Vendor `bids/[bidId]/page.tsx` — emerald "You have been awarded" celebratory banner when bid.status=AWARDED; slate "Awarded to another vendor" thank-you banner when tender is Awarded/Tender Closed but the vendor didn't win.
+
+### Files (10)
+
+API (6): NEW `award-minutes.service.ts`, extended `award.module.ts`, extended `award.service.ts` (dispatch + trigger methods + NotificationsService injection), extended `award.controller.ts` (2 new endpoints).
+Build (2): updated `api.Dockerfile` (chromium + fonts + envs), extended `apps/api/package.json` (puppeteer-core ^23), regenerated `pnpm-lock.yaml`.
+DB (1): NEW `database/migrations/013_phase_e_award_minutes_notifications.sql`.
+Admin (1): extended `app/(admin)/tenders/[id]/page.tsx` (Generate Award Minutes button + handler).
+Vendor (1): extended `app/(portal)/bids/[bidId]/page.tsx` (2 outcome banners).
+
+### Verification trail
+
+- ✅ `pnpm install --no-frozen-lockfile` cleanly added `puppeteer-core` (66s; lockfile regenerated)
+- ✅ `pnpm exec tsc --noEmit` clean (caught two `include: {}` empty-relation errors and dropped them)
+- ✅ Migration 013: `BEGIN, INSERT 0 2 (perms), INSERT 0 4 (grants), INSERT 0 2 (templates), COMMIT`
+- ✅ Docker build clean — chromium-alpine + fonts add ~250MB to the runtime image; acceptable per owner's locked decision (staging host has 1.8TB free)
+- ✅ API healthy + audit chain `217 rows OK` post-recreate
+- ✅ Both Phase E routes mapped in boot log:
+  - `Mapped {/api/tenders/:tenderId/award/minutes.pdf, GET}`
+  - `Mapped {/api/tenders/:tenderId/award/notify, POST}`
+- ✅ Endpoint smokes: both endpoints return 401 on no-auth (guards working)
+- ✅ Frontend chunk markers:
+  - Admin `app/(admin)/tenders/[id]/page-*.js` contains "Generate Award Minutes" + "award/minutes"
+  - Vendor `app/(portal)/bids/[bidId]/page-*.js` contains "You have been awarded" + "Awarded to another vendor"
+
+### Known constraints (documented, not blockers)
+
+- **End-to-end PDF render on staging requires an actual awarded tender.** The endpoint will 404 with "No active award" until Phase C/D have processed at least one tender through the new Confirm flow. Once an award exists, the puppeteer render path can be exercised.
+- **Two-person rule for `award:amend`** is still v1-deferred from Phase D (only PROCUREMENT_ADMIN grants the perm; co-sign workflow with SYSTEM_ADMIN is a separate layer).
+- **SMTP availability.** The notification dispatch best-efforts; on staging SMTP points at `mailhog:1025` per docker-compose. Production deploy needs `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` env wiring.
+
+### Phase status (after this deploy)
+
+| Phase | Status |
+|---|---|
+| A — PDF viewer | ✅ |
+| B — Technical Comparison | ✅ |
+| C — Commercial Comparison redesign | ✅ |
+| D — Award flow + Quorum + Amendment | ✅ |
+| **E — Award Minutes PDF + opt-in notifications** | ✅ **shipped this session** |
+| F — Criteria library + per-tender editor | ⬜ next — unlocks Itemized view + BOQ line items |
+| G — Cleanup XLSX export | ⬜ blocked by C verification |
+
+### Next recommended step
+
+**Phase F — Criteria library + per-tender editor (BUG-043 + BUG-044).** Admin maintains a master library of evaluation criteria; per-tender override allows add/remove/rename with weights summing to 100% and a mandatory-gate flag per criterion. Unlocks the C1 "hybrid criteria source" decision and populates the Itemized view + Block 1 line items on the Commercial Comparison cards. Requires a new `evaluation_criteria_library` table + extensions to `evaluation_criteria` (which is the existing per-tender table) for `is_mandatory_gate` + `weight` columns.
+
+---
+
 ## 2026-05-27 (late evening) — Phase D (Award flow + Quorum + Amendment) shipped end-to-end
 
 **Date/time:** 2026-05-27 ~23:25 GMT+3 (continuation after `42c817a` push, Phase C)

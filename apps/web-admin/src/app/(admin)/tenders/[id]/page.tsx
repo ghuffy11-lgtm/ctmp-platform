@@ -118,7 +118,35 @@ export default function TenderDetailPage() {
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
   const [amendOpen, setAmendOpen] = useState(false);
+  const [generatingMinutes, setGeneratingMinutes] = useState(false);
   const docInputRef = useRef<HTMLInputElement>(null);
+
+  // Phase E (BUG-038): on-demand Award Minutes PDF.
+  async function handleGenerateMinutes() {
+    if (!tender) return;
+    setGeneratingMinutes(true);
+    try {
+      const token = getAccessToken();
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const res = await fetch(`${apiBase}/api/v1/tenders/${tender.id}/award/minutes.pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Award Minutes generation failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `award-minutes-${tender.referenceNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to generate Award Minutes');
+    } finally {
+      setGeneratingMinutes(false);
+    }
+  }
 
   async function loadTender() {
     setLoading(true);
@@ -312,6 +340,15 @@ export default function TenderDetailPage() {
           )}
           {tender.status === 'Awarded' && (
             <>
+              <button
+                onClick={handleGenerateMinutes}
+                disabled={generatingMinutes}
+                className="px-4 py-2 border border-border text-text-secondary text-sm font-semibold rounded-lg hover:bg-bg transition-colors disabled:opacity-60 flex items-center gap-1.5"
+                title="Generate the official Award Minutes PDF — a new copy is written every time"
+              >
+                <FileText className="w-4 h-4" />
+                {generatingMinutes ? 'Generating…' : 'Generate Award Minutes'}
+              </button>
               <button
                 onClick={() => setAmendOpen(true)}
                 className="px-4 py-2 border border-amber-300 text-amber-700 text-sm font-semibold rounded-lg hover:bg-amber-50 transition-colors flex items-center gap-1.5"

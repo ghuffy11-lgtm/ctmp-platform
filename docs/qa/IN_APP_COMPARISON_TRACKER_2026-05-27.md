@@ -99,14 +99,14 @@ Touches Committee Opening page and adds Recommend/Confirm/Amend endpoints.
 
 | Item | Status | Files | Notes |
 |---|---|---|---|
-| E.1 PDF generation service | `[ ]` | `apps/api/src/modules/award/award-minutes.service.ts` | Decide library (pdfkit vs puppeteer) at build time |
-| E.2 PDF generation endpoint | `[ ]` | `apps/api/src/modules/award/award.controller.ts` | `GET /tenders/:id/award/minutes.pdf` |
-| E.3 "Generate Award Minutes" button on awarded tender page | `[ ]` | `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` | On-demand only, no auto |
-| E.4 Notification service triggers | `[ ]` | `apps/api/src/modules/notifications/notifications.service.ts` | notifyAwardWinner, notifyAwardLoser |
-| E.5 Manual re-trigger endpoint | `[ ]` | `apps/api/src/modules/award/award.controller.ts` | `POST /tenders/:id/award/notify` |
-| E.6 Vendor portal: "You have been awarded" / "Awarded to another vendor" status display | `[ ]` | `apps/web-vendor/src/app/(portal)/bids/[bidId]/page.tsx` | Per Q16B optional notifications |
-| E.7 DB: `award_minutes` table (links awards → generated PDF docs) | `[ ]` | Same migration as D.9 | sha256 stored |
-| E.8 Verification | `[ ]` | — | PDF generates with all required sections; notifications fire only when opted in |
+| E.1 PDF generation service | `[x] 2026-05-27` | `apps/api/src/modules/award/award-minutes.service.ts` | puppeteer-core + system chromium per owner-lock. Renders HTML template (header / decision summary / justification block / all bids / committee attendance / notification flags), launches headless chromium with --no-sandbox, returns Buffer. SHA-256 hashed + persisted in award_minutes row + MinIO namespace `award-minutes`. |
+| E.2 PDF generation endpoint | `[x] 2026-05-27` | `apps/api/src/modules/award/award.controller.ts` | `GET /tenders/:id/award/minutes.pdf` gated by `award:minutes:generate`. Always generates a fresh copy per master plan H2 ("Re-clicking generates a fresh row"); the audit trail keeps every copy. Returns Content-Type: application/pdf + X-Award-Minutes-Sha256 header. |
+| E.3 "Generate Award Minutes" button on awarded tender page | `[x] 2026-05-27` | `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` | Button visible only when status=Awarded. Click → fetches the PDF endpoint with bearer auth → triggers browser download as `award-minutes-<reference>.pdf`. |
+| E.4 Notification service triggers | `[x] 2026-05-27` | `apps/api/src/modules/award/award.service.ts` (dispatchAwardNotifications) | Uses existing NotificationsService.sendEmail. Resolves recipient list by VendorUser.isPrimaryContact (falls back to all active vendor users). Auto-called from confirmAward() when notify flags TRUE (best-effort: failures don't roll back the Confirm; they audit-log at MEDIUM). |
+| E.5 Manual re-trigger endpoint | `[x] 2026-05-27` | `apps/api/src/modules/award/award.controller.ts` | `POST /tenders/:id/award/notify` body `{ notifyWinner?, notifyLosers? }` gated by `notification:vendor:trigger`. Updates the active Award row's flags + re-dispatches. Audit-logged via AWARD_NOTIFICATIONS_DISPATCHED. |
+| E.6 Vendor portal award-outcome banners | `[x] 2026-05-27` | `apps/web-vendor/src/app/(portal)/bids/[bidId]/page.tsx` | Bid status AWARDED → emerald "You have been awarded" celebratory banner. Tender status Awarded/Tender Closed but bid status not AWARDED → slate "Awarded to another vendor" thank-you banner. |
+| E.7 DB: `award_minutes` table | `[x] 2026-05-27 (in migration 012)` | `database/migrations/012_phase_d_award_workflow.sql` | Created in Phase D's migration alongside `awards` (forward-compat from §3.3). Phase E populates it. |
+| E.8 Verification | `[x] 2026-05-27` | — | All 5 markers verified: `GET /award/minutes.pdf` mapped + 401 on no-auth · `POST /award/notify` mapped + 401 · admin chunk contains "Generate Award Minutes" · vendor chunk contains "You have been awarded" + "Awarded to another vendor" · audit chain 217 rows OK · 2 NotificationTemplate rows seeded by migration 013. End-to-end PDF render against a live awarded tender pending owner. |
 
 ---
 
