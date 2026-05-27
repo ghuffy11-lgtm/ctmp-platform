@@ -66,6 +66,14 @@ export function patch<T>(path: string, body: unknown, token?: string) {
   });
 }
 
+export function put<T>(path: string, body: unknown, token?: string) {
+  return request<T>(path, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
 export function del<T>(path: string, token?: string) {
   return request<T>(path, {
     method: 'DELETE',

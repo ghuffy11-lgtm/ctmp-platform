@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { get, patch } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { TenderCriteriaEditor } from '@/components/TenderCriteriaEditor';
 import {
   AlertCircle,
   ChevronRight,
@@ -377,6 +378,15 @@ export default function EditTenderPage() {
             {saving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
+      </div>
+
+      {/* Phase F (BUG-044): Per-tender criteria editor — visible whenever the
+          tender exists; backend rejects saves at non-editable statuses anyway. */}
+      <div className="mt-6">
+        <TenderCriteriaEditor
+          tenderId={tenderId}
+          editable={['Draft', 'Internal Review', 'Approved'].includes(tender.status)}
+        />
       </div>
     </div>
   );

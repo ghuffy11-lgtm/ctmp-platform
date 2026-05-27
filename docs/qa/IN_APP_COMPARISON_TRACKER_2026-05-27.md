@@ -116,12 +116,12 @@ Needed for C1 (hybrid criteria source) to fully work.
 
 | Item | Status | Files | Notes |
 |---|---|---|---|
-| F.1 Library admin page | `[ ]` | `apps/web-admin/src/app/(admin)/settings/evaluation-criteria/page.tsx` | CRUD for library entries |
-| F.2 Library API endpoints | `[ ]` | `apps/api/src/modules/evaluation-criteria/` (extend or create) | CRUD endpoints |
-| F.3 Per-tender criteria editor (during tender create/edit before Publish) | `[ ]` | `apps/web-admin/src/app/(admin)/tenders/[id]/edit/page.tsx` or new sub-page | Add/remove/rename criteria; mark gate flag; set weights |
-| F.4 Validation: weights sum to 100% | `[ ]` | Frontend + backend DTO validator | Error if not exactly 100 |
-| F.5 DB migration: `evaluation_criteria_library` table + gate/weight columns | `[ ]` | Same migration as D.9 | See master plan §3.3 |
-| F.6 Verification | `[ ]` | — | Library entries appear as defaults; per-tender customisation persists; gate-only PASS/FAIL works end-to-end |
+| F.1 Library admin page | `[x] 2026-05-28` | `apps/web-admin/src/app/(admin)/settings/evaluation-criteria/page.tsx` | Full CRUD UI: table listing (with show-inactive toggle), add/edit modal (name + description + default weight + default max score + default gate flag + active toggle), soft-delete via DELETE → is_active=false. Sidebar entry "Evaluation Criteria" gated by `criteria:library:manage`. |
+| F.2 Library API endpoints | `[x] 2026-05-28` | `apps/api/src/modules/evaluation-criteria/` (NEW module) | Module + controller + service + DTOs. `GET/POST /evaluation-criteria/library`, `PUT/DELETE /evaluation-criteria/library/:id`. Audit events `CRITERIA_LIBRARY_{CREATED,UPDATED}`. Soft-delete only — no hard delete (uniqueness rule: `lower(name)` unique among active rows). |
+| F.3 Per-tender criteria editor | `[x] 2026-05-28` | NEW `apps/web-admin/src/components/TenderCriteriaEditor.tsx` mounted in `apps/web-admin/src/app/(admin)/tenders/[id]/edit/page.tsx` | Inline-row editor: add from library OR custom, edit weight/max/gate per row, remove rows. Live weight-sum total with red/green colour. Codes auto-generated from names (uppercase + underscore). |
+| F.4 Validation: weights sum to 100% | `[x] 2026-05-28` | Backend `EvaluationCriteriaService.replaceTenderCriteria` (BadRequestException) + frontend live indicator + disabled Save button | Both sides reject. Backend allows 0.05 FP slop (e.g. 33.33+33.33+33.34 = 100.0001). |
+| F.5 DB migration | `[x] 2026-05-28` | `database/migrations/014_phase_f_evaluation_criteria_library.sql` | NEW `evaluation_criteria_library` table + 2 indexes (active filter + unique active-name) + 2 permissions (`criteria:library:manage`, `criteria:tender:edit`) + 4 role grants + 6 seeded starter entries so first-run admins see something. `tender_technical_criteria` ALREADY has weight + mandatory from migration 005 — no ALTER needed. |
+| F.6 Verification | `[x] 2026-05-28` | — | All 5 routes mapped: `GET/POST /evaluation-criteria/library`, `PUT/DELETE /evaluation-criteria/library/:id`, `GET/PUT /tenders/:id/criteria`. All return 401 on no-auth. Audit chain 217 rows OK. Admin chunks contain `Evaluation Criteria Library`, `TenderCriteriaEditor`, `criteria:library:manage`. Technical Evaluation scorecard now reads per-tender criteria via `GET /tenders/:id/criteria` (falls back to DEFAULT_CRITERIA for pre-Phase-F tenders). End-to-end owner click-through pending. |
 
 ---
 

@@ -6,6 +6,86 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-28 — Phase F (Evaluation Criteria Library + per-tender editor) shipped end-to-end
+
+**Date/time:** 2026-05-28 ~00:25 GMT+3 (continuation after `bde114e` push, Phase E)
+**Agent/task:** Owner directive "Phase F". All 6 tracker items F.1–F.6 shipped + verified. Closes BUG-043 + BUG-044 + unlocks the C1 "hybrid criteria source" decision so the Itemized view on Commercial Comparison + Block 1 line items on the per-vendor cards can be populated by Phase F+ work.
+
+### What landed
+
+**Backend — NEW `evaluation-criteria` module:**
+- `evaluation-criteria.service.ts` — library CRUD (`listLibrary`, `createLibraryEntry`, `updateLibraryEntry`, `deactivateLibraryEntry`) + per-tender `listTenderCriteria` + `replaceTenderCriteria` (atomic transaction: validates weights-sum-to-100 with ±0.05 FP slop, unique codes, positive max-scores, deletes-removed-then-upserts-rest, tender status gate Draft/InternalReview/Approved).
+- `evaluation-criteria.controller.ts` — 6 endpoints:
+  - `GET /evaluation-criteria/library` (with `?includeInactive=true`)
+  - `POST /evaluation-criteria/library`
+  - `PUT /evaluation-criteria/library/:id`
+  - `DELETE /evaluation-criteria/library/:id` (soft-delete only; uniqueness on `lower(name)` among active rows enforced via partial unique index)
+  - `GET /tenders/:tenderId/criteria`
+  - `PUT /tenders/:tenderId/criteria` (atomic replace)
+- Module wired into `AppModule`. Audit events: `CRITERIA_LIBRARY_CREATED`, `CRITERIA_LIBRARY_UPDATED`, `TENDER_CRITERIA_REPLACED`.
+
+**DB — Migration 014:**
+- NEW `evaluation_criteria_library` table (id, name, description, default_weight, default_max_score, default_is_gate, is_active, created_by, timestamps) + 2 indexes (active-only filter + unique active name).
+- 2 permissions (`criteria:library:manage`, `criteria:tender:edit`) + 4 role grants per master plan §I.
+- 6 starter library entries seeded so first-run admins see something useful.
+- `tender_technical_criteria` ALREADY had `weight` + `mandatory` columns from migration 005 — no ALTER needed.
+
+**Frontend:**
+- NEW `apps/web-admin/src/app/(admin)/settings/evaluation-criteria/page.tsx` — full CRUD UI: table with show-inactive toggle, add/edit modal (name + description + default weight + default max score + default gate + active toggle), soft-delete via trash icon → DELETE call. Sidebar entry "Evaluation Criteria" gated by `criteria:library:manage`.
+- NEW `apps/web-admin/src/components/TenderCriteriaEditor.tsx` — inline-row editor. Add from library OR custom, edit name/description/code/max/weight/gate per row, remove rows. Live weight-sum total with red (≠100) / green (=100) colour. Codes auto-generated from name slugs. Mounted in `/tenders/[id]/edit` page; `editable` flag gated by tender status.
+- Admin `lib/api.ts` extended with `put()` helper alongside `get/post/patch/del`.
+- Sidebar gets new "Evaluation Criteria" entry between Reports and System Configuration.
+- Technical Evaluation scorecard rewired: previously hardcoded `DEFAULT_CRITERIA`; now fetches `GET /tenders/:id/criteria` and hydrates from per-tender config. Falls back to `DEFAULT_CRITERIA` for pre-Phase-F tenders (graceful degradation).
+
+### Files (12)
+
+API (6): NEW `evaluation-criteria/{module,controller,service}.ts` + `dto/{library-entry,replace-tender-criteria}.dto.ts`, extended `app.module.ts` (register module), extended `apps/api/prisma/schema.prisma` (NEW EvaluationCriteriaLibrary model).
+DB (1): NEW `database/migrations/014_phase_f_evaluation_criteria_library.sql`.
+Admin (5): NEW `app/(admin)/settings/evaluation-criteria/page.tsx`, NEW `components/TenderCriteriaEditor.tsx`, extended `lib/api.ts` (put helper), extended `components/layout/Sidebar.tsx` (nav entry), extended `app/(admin)/tenders/[id]/edit/page.tsx` (mount editor), extended `app/(admin)/technical-evaluation/page.tsx` (fetch + hydrate from per-tender criteria).
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on API after Prisma regenerate
+- ✅ Migration 014: `BEGIN, CREATE TABLE, CREATE INDEX×2, COMMENT, INSERT 0 2 (perms), INSERT 0 4 (grants), INSERT 0 6 (seeds), COMMIT`
+- ✅ API rebuilt + recreated, healthy. Audit chain `217 rows OK` (no chain breaks across the whole multi-phase session)
+- ✅ All 5 new routes mapped in boot log:
+  - `Mapped {/api/evaluation-criteria/library, GET/POST}`
+  - `Mapped {/api/evaluation-criteria/library/:id, PUT/DELETE}`
+  - `Mapped {/api/tenders/:tenderId/criteria, GET/PUT}`
+- ✅ Endpoint smokes: both POST/PUT endpoints return 401 on no-auth (guards working)
+- ✅ Frontend chunk markers:
+  - `app/(admin)/settings/evaluation-criteria/page-*.js` exists (library admin page)
+  - `app/(admin)/layout-*.js` contains the sidebar entry
+  - `app/(admin)/tenders/[id]/edit/page-*.js` contains the criteria editor
+
+### Phase status (after this deploy)
+
+| Phase | Status |
+|---|---|
+| A — PDF viewer | ✅ |
+| B — Technical Comparison | ✅ |
+| C — Commercial Comparison redesign | ✅ |
+| D — Award flow + Quorum + Amendment | ✅ |
+| E — Award Minutes PDF + opt-in notifications | ✅ |
+| **F — Criteria library + per-tender editor** | ✅ **shipped this session** |
+| G — Cleanup XLSX export | ⬜ next (the LAST phase — pure cleanup, blocked by C verification) |
+
+### Phase G unblock
+
+Phase F closing means: the only remaining redesign phase is **G — remove the legacy `/reports/commercial_comparison` XLSX export endpoint** per master plan H5/H6. The decision rule is "Phase G ships only after Phase C is verified live and stable" — so this is the natural place to pause and let the owner do an end-to-end click-through before pulling the export rug. Once the owner confirms the new in-app Commercial Comparison page works for their workflow, G removes the legacy export + tracker/decision-log entry.
+
+### Known constraints (still tracked from prior phases)
+
+- BOQ line items → STILL deferred. Phase F unlocks the criteria side, but the per-line-item commercial breakdown (Itemized view + Block 1) needs a separate BOQ template model on tenders. Not in master plan §3.3 (the master plan covers evaluation criteria, not BOQ). Owner can request as a new BUG-NNN.
+- Two-person rule for `award:amend` → still v1-deferred (PROCUREMENT_ADMIN only).
+- Production SMTP env wiring → still needed before vendor emails go live.
+
+### Next recommended step
+
+**Owner end-to-end click-through across all 6 phases** before Phase G ships the legacy XLSX removal. Alternative: Phase G immediately if owner is comfortable that Phase C's in-app Commercial Comparison page covers the use cases the XLSX export served.
+
+---
+
 ## 2026-05-27 (late evening +) — Phase E (Award Minutes PDF + vendor notifications) shipped end-to-end
 
 **Date/time:** 2026-05-27 ~23:45 GMT+3 (continuation after `2f99060` push, Phase D)

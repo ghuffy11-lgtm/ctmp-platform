@@ -45,6 +45,7 @@ const navItems: Array<{
   { href: '/reports', label: 'Reports', icon: FileText, permission: 'reports:view' },
   { href: '/audit-log', label: 'Audit Log', icon: History, permission: 'audit:view' },
   { href: '/security-alerts', label: 'Security Alerts', icon: ShieldCheck, permission: 'audit:view' },
+  { href: '/settings/evaluation-criteria', label: 'Evaluation Criteria', icon: Settings, permission: 'criteria:library:manage' },
   { href: '/settings', label: 'System Configuration', icon: Settings, permission: 'system:configure' },
 ];
 

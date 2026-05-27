@@ -1255,6 +1255,21 @@ model SystemSetting {
 // TENDER TECHNICAL EVALUATION CRITERIA (added in migration 005)
 // =============================================================================
 
+model EvaluationCriteriaLibrary {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String   @db.VarChar(200)
+  description     String?  @db.Text
+  defaultWeight   Decimal? @map("default_weight") @db.Decimal(5, 2)
+  defaultMaxScore Decimal  @default(100.0) @map("default_max_score") @db.Decimal(8, 2)
+  defaultIsGate   Boolean  @default(false) @map("default_is_gate")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdBy       String?  @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @map("updated_at")
+
+  @@map("evaluation_criteria_library")
+}
+
 model TenderTechnicalCriterion {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenderId    String   @map("tender_id") @db.Uuid

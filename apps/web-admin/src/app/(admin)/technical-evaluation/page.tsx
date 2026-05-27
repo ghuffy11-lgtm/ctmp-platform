@@ -56,9 +56,8 @@ interface TechnicalEvaluation {
   score?: number;
 }
 
-// Pending API addition: tender criteria config. Hardcoded for now to match
-// stitch design. Replace with GET /tenders/{tenderId}/technical-criteria when
-// endpoint lands.
+// Fallback used when the tender has no per-tender criteria configured yet
+// (pre-Phase F tenders). New tenders should use the editor on /tenders/[id]/edit.
 const DEFAULT_CRITERIA: Omit<CriterionScore, 'score' | 'passed'>[] = [
   {
     criterion: 'Compliance with Technical Specs',
@@ -82,6 +81,16 @@ const DEFAULT_CRITERIA: Omit<CriterionScore, 'score' | 'passed'>[] = [
   },
 ];
 
+interface TenderCriterion {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  maxScore: number;
+  weight: number | null;
+  mandatory: boolean;
+}
+
 const PASS_THRESHOLD = 70;
 
 // Tenders where technical evaluation is active: envelopes opened, scoring in progress.
@@ -94,8 +103,8 @@ function formatDate(iso: string | null) {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function emptyCriteria(): CriterionScore[] {
-  return DEFAULT_CRITERIA.map(c => ({ ...c, score: '', passed: false }));
+function emptyCriteria(template?: Omit<CriterionScore, 'score' | 'passed'>[]): CriterionScore[] {
+  return (template ?? DEFAULT_CRITERIA).map(c => ({ ...c, score: '', passed: false }));
 }
 
 // ─── Skeletons ────────────────────────────────────────────────────────────────
@@ -122,6 +131,7 @@ export default function TechnicalEvaluationPage() {
   const [selectedBidId, setSelectedBidId] = useState<string | null>(null);
 
   const [evaluations, setEvaluations] = useState<TechnicalEvaluation[]>([]);
+  const [tenderCriteria, setTenderCriteria] = useState<Omit<CriterionScore, 'score' | 'passed'>[]>(DEFAULT_CRITERIA);
   const [criteria, setCriteria] = useState<CriterionScore[]>(emptyCriteria);
   const [recommendation, setRecommendation] = useState<'PASS' | 'FAIL'>('FAIL');
   const [notes, setNotes] = useState('');
@@ -154,7 +164,7 @@ export default function TechnicalEvaluationPage() {
     fetchTenders();
   }, []);
 
-  // ─── Fetch bids + existing evaluations for selected tender ──────────────────
+  // ─── Fetch bids + existing evaluations + per-tender criteria ─────────────
   const fetchTenderData = useCallback(async (tenderId: string) => {
     setBidsLoading(true);
     setBids([]);
@@ -164,7 +174,7 @@ export default function TechnicalEvaluationPage() {
       const token = getAccessToken();
       // GAP: GET /tenders/{tenderId}/bids not yet in OpenAPI contract.
       // Calling it speculatively; falls back to empty list.
-      const [bidsRes, evalsRes] = await Promise.all([
+      const [bidsRes, evalsRes, criteriaRes] = await Promise.all([
         get<TenderBidsResponse>(`/tenders/${tenderId}/bids?pageSize=100`, token).catch(
           () => ({ items: [], total: 0 } as TenderBidsResponse),
         ),
@@ -172,9 +182,21 @@ export default function TechnicalEvaluationPage() {
           `/tenders/${tenderId}/technical-evaluations`,
           token,
         ).catch(() => ({ items: [] })),
+        get<TenderCriterion[]>(`/tenders/${tenderId}/criteria`, token).catch(() => [] as TenderCriterion[]),
       ]);
       setBids(bidsRes.items ?? []);
       setEvaluations(evalsRes.items ?? []);
+      // Phase F (BUG-044): hydrate the scorecard from per-tender criteria when
+      // configured. Fall back to DEFAULT_CRITERIA for pre-Phase-F tenders.
+      if (Array.isArray(criteriaRes) && criteriaRes.length > 0) {
+        setTenderCriteria(criteriaRes.map(c => ({
+          criterion: c.name,
+          description: c.description ?? '',
+          maxScore: c.maxScore,
+        })));
+      } else {
+        setTenderCriteria(DEFAULT_CRITERIA);
+      }
       if ((bidsRes.items ?? []).length > 0) {
         setSelectedBidId(bidsRes.items[0].id);
       }
@@ -187,13 +209,13 @@ export default function TechnicalEvaluationPage() {
     if (selectedTenderId) fetchTenderData(selectedTenderId);
   }, [selectedTenderId, fetchTenderData]);
 
-  // ─── Reset scorecard when bid changes ───────────────────────────────────────
+  // ─── Reset scorecard when bid or per-tender criteria change ─────────────────
   useEffect(() => {
-    setCriteria(emptyCriteria());
+    setCriteria(emptyCriteria(tenderCriteria));
     setRecommendation('FAIL');
     setNotes('');
     setSubmitError(null);
-  }, [selectedBidId]);
+  }, [selectedBidId, tenderCriteria]);
 
   // ─── Derived ────────────────────────────────────────────────────────────────
   const selectedTender = tenders.find(t => t.id === selectedTenderId) ?? null;
