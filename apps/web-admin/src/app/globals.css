@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* BUG-018: print-friendly layout. Hide sidebar / top nav / right toolbelt
+   so the visible content (threads, reports, tender detail) prints clean. */
+@media print {
+  aside, nav[role='navigation'], .print\:hidden { display: none !important; }
+  main { padding: 0 !important; }
+  body { background: #fff !important; color: #000 !important; }
+  .print\:break-inside-avoid { break-inside: avoid; page-break-inside: avoid; }
+}
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 

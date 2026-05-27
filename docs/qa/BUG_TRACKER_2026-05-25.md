@@ -21,11 +21,9 @@ The user reports observations in chat → this doc captures them with file:line 
 
 | ID | Sev | Type | Component | One-line symptom |
 |---|---|---|---|---|
-| BUG-015 | High | Feature | Admin → Tender → Publish | No vendor-selection step for private/invited tenders; no way to scope invitation list |
-| BUG-016 | — | Question | Admin → Tender → Publish | Unclear how publication notices reach vendors (all vendors? Department-scoped? Email broadcast?) |
-| BUG-017 | Medium | Feature | Admin → Clarifications | No option to attach supporting documents on a clarification reply |
-| BUG-018 | Medium | Bug | Admin → Clarifications | Print & Export buttons don't respond when clicked |
-| BUG-019 | Low | Bug | Admin → Clarifications right sidebar | Timeline icon doesn't work (Tender Detail and Refresh icons work) |
+| BUG-016 | High | Feature | Admin → Tender → Publish | Notification dispatch on publish — deferred; needs new notification templates + recipient enumeration (depends on existing notifications module) |
+| BUG-017 | Medium | Feature | Admin → Clarifications | Attachments on questions + replies — deferred; needs new DB tables + storage service + UI |
+| BUG-018 | Medium | Bug | Admin → Clarifications | Print shipped; Export disabled with tooltip ("Coming in next release — depends on Reports module renderer") |
 | BUG-020 | — | Question | Admin → Technical Evaluation | Who is supposed to perform technical evaluation? How are they notified that envelopes are open? |
 | BUG-025 | High | Bug | Admin → Commercial Comparison | (Component built; embed deferred to Phase C, which replaces this page in place) |
 | BUG-026 | High | Feature | Admin → Commercial Comparison | Award recommendation forced to lowest price (Superseded by Phase D / BUG-039) |
@@ -77,6 +75,10 @@ The user reports observations in chat → this doc captures them with file:line 
 | BUG-028 | Critical (Part A only) | Feature | Admin RBAC sidebar | 2026-05-27 | **Part A shipped.** Sidebar nav items all permission-gated per master plan §I matrix (`tender:view`, `tender:approve`/`award:approve`, `clarification:view_internal`/`reply`, `technical:evaluate`, `committee:*`/`commercial:view`, `vendor:view`, `reports:view`, `audit:view`, `system:configure`). `anyPermission` OR-list helper added. **Part B (dept-scoped data filtering) deferred** — requires `user.departments` on JWT payload. |
 | BUG-030 | High | Bug | Vendor portal → password reset | 2026-05-27 | NEW `apps/web-vendor/src/app/reset-password/page.tsx` (mirrors verify-email pattern: token from query, password + confirm fields, 12-char min, POST to `/vendor-auth/reset-password`). Backend `vendor-auth.service.ts` now emits `resetUrl` template var built from `vendor.portalUrl` config. |
 | BUG-031 | High | Bug | Vendor portal Clarifications privacy | 2026-05-27 | Migration 010 moves `is_public` from `tender_clarifications` → `tender_clarification_replies` (with backfill of parent flag to all replies). `clarifications.service.ts` rewrites the vendor filter: own threads OR threads with `replies.some.isPublic=true`; non-public replies and the asking-vendor's identity are redacted from non-owning vendor callers (§4 of agreed approach). |
+| BUG-019 | Low | Bug | Admin → Clarifications right sidebar | 2026-05-27 | Timeline icon now opens `<TenderTimelineDrawer>` — fetches the existing `GET /tenders/:id/audit-logs`, renders chronologically with expandable before/after detail per event. ESC closes. Disabled when no tender selected. Component reusable for tender detail page later. |
+| BUG-018 (Print) | Medium | Bug | Admin → Clarifications | 2026-05-27 | Print button wired to `window.print()`. Added `@media print` rules in `globals.css` (hides sidebars + nav so threads print clean) plus `print:hidden` utility class. Export button disabled with explanatory tooltip — full Export needs the Reports module renderer (deferred). |
+| BUG-015 | High | Feature | Admin → Tender invitation workflow | 2026-05-27 | Full end-to-end: visibility selector on create form (PUBLIC default), new `Manage Invited Vendors` panel on detail page (renders only for INVITATION_ONLY), three new endpoints (`POST/GET/DELETE /tenders/:id/invited-vendors`), status-based add/remove gates (add allowed Draft→Clarification Period, remove allowed Draft/InternalReview/Approved only), publish gate requires ≥3 invitees for INVITATION_ONLY, vendor `findAll`/`findOne` filter rewritten to OR PUBLIC with INVITATION_ONLY + invited-membership. Audit events `TENDER_VENDOR_INVITED/UNINVITED` (HIGH risk). |
+| BUG-032 | Medium | Feature | Vendor portal blocked-state messaging | 2026-05-27 | NEW central registry `apps/web-vendor/src/lib/vendor-messages.ts` (12 states + `blockedStateForTender(status)` helper) + `<MessageBanner>` component with info/warning/danger severities. Vendor tender detail page now renders the appropriate banner instead of the generic "Bidding only available during Published or Clarification Period" copy. Remaining pages (dashboard, bid wizard, login) can adopt the registry incrementally — wiring is mechanical. |
 
 ### Not a bug / closed without fix
 

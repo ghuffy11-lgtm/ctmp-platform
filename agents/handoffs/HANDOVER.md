@@ -6,6 +6,65 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-27 (late afternoon) — Continued sweep: Bundle 4 + Bundle 5 + BUG-032 shipped, only BUG-016/017/028B/020 deferred
+
+**Date/time:** 2026-05-27 ~17:15 GMT+3 (continuation after `6262263` push)
+**Agent/task:** Owner directive "push and continue" — picked up the remaining deferred bugs.
+
+### Shipped after the prior commit (`6262263`)
+
+| Bug | Component | What |
+|---|---|---|
+| BUG-018 (Print) | `clarifications/page.tsx` + `globals.css` | Print button wired to `window.print()`; new `@media print` rules hide sidebar/nav/`.print:hidden`; Export button explicitly disabled with explanatory tooltip — full Export requires the Reports module renderer. |
+| BUG-019 | NEW `components/TenderTimelineDrawer.tsx` + `clarifications/page.tsx` | Side drawer hitting existing `GET /tenders/:id/audit-logs`. Expandable per-event detail. ESC closes. Disabled when no tender selected. |
+| BUG-032 | NEW `apps/web-vendor/src/lib/vendor-messages.ts` + `components/ui/MessageBanner.tsx` + vendor `tenders/[id]` page | Central blocked-state registry covering 12 states + `blockedStateForTender(status)` helper. `<MessageBanner>` component with info/warning/danger severities. Vendor tender detail now renders the contextual banner instead of generic "Bidding only available during Published or Clarification Period". |
+| BUG-015 | New `dto/invite-vendor.dto.ts` + tenders service/controller + new `components/ManageInvitedVendors.tsx` + create form Visibility radio + tender detail panel | End-to-end INVITATION_ONLY workflow. Visibility radio on create (PUBLIC default, locked once saved). Manage Invited Vendors panel renders only when `visibility === 'INVITATION_ONLY'`. Three new endpoints (`POST/GET/DELETE /tenders/:id/invited-vendors`). Status-based add/remove gates: add allowed Draft→Clarification Period, remove restricted to Draft/InternalReview/Approved only (post-publish removal would be unfair to a vendor already preparing). Publish gate now requires ≥3 invitees for INVITATION_ONLY. Vendor `findAll` + `findOne` rewritten so vendors only see PUBLIC tenders OR INVITATION_ONLY tenders where they appear in `tender_vendors`. Audit events `TENDER_VENDOR_INVITED/UNINVITED` (HIGH risk). |
+
+### Still deferred (post-this-session)
+
+| ID | Why |
+|---|---|
+| BUG-016 | Notification dispatch on Publish — requires seeding 2 new notification templates (`TENDER_PUBLISHED_PUBLIC` + `TENDER_INVITATION`) + recipient enumeration in `publish()` and `inviteVendor()`. Risk: emails go live to vendors at deploy time. Owner should approve before broadcast. |
+| BUG-017 | Clarification attachments — needs new `clarification_documents` + `clarification_reply_documents` tables, storage service, visibility-aware download, UI on both portals. ~7 files. |
+| BUG-018 (Export) | Clarifications PDF export — depends on the Reports module renderer (new report code + pdfkit renderer). Bundle with a Reports-module session. |
+| BUG-020 | Owner answer needed (who performs technical evaluation, how they're notified). Document + close. |
+| BUG-028 Part B | Department-scoped data filtering — requires `user.departments` on JWT payload + coordinated token rotation across all live sessions. One dedicated session. |
+| BUG-026 | Superseded by Phase D / BUG-039 — close when Phase D ships. |
+
+### Disk pressure encountered (handled)
+
+Mid-deploy, `docker compose build` errored with "no space left on device" — staging host hit 47.84GB build cache + 75GB images. Cleared via `docker builder prune -af` (recovered 47.84GB cache + 44GB unused images, ending at 30.75GB images / 0GB cache). Add to runbook: prune build cache when `docker system df` shows >30GB reclaimable. Lesson: rebuilding 3 services 4× in one session accumulates cache fast.
+
+### Verification trail (this continuation)
+
+- ✅ Pre-deploy `pnpm exec tsc --noEmit` passed
+- ✅ `docker builder prune -af` ran clean before the re-attempt
+- ✅ 3-service rebuild succeeded post-prune
+- ✅ Containers recreated, all `Up 10 seconds (healthy)` afterwards
+- ✅ Audit chain verifier: 217 rows OK (no chain breaks across the whole session)
+- ✅ New `GET /tenders/:id/invited-vendors` route returns 401 on no-auth (registered correctly)
+- ✅ Vendor chunk contains `blockedStateForTender` / `TENDER_SUBMISSION_CLOSED` markers
+- ✅ Admin clarifications chunk contains "Tender Timeline" + tender detail chunk contains "Invited Vendors"
+
+### Files touched this continuation
+
+API (4): `dto/create-tender.dto.ts`, NEW `dto/invite-vendor.dto.ts`, `tenders.service.ts`, `tenders.controller.ts`
+Admin (4): NEW `TenderTimelineDrawer.tsx`, NEW `ManageInvitedVendors.tsx`, `globals.css`, `clarifications/page.tsx`, `tenders/new/page.tsx`, `tenders/[id]/page.tsx`
+Vendor (3): NEW `lib/vendor-messages.ts`, NEW `components/ui/MessageBanner.tsx`, `(portal)/tenders/[id]/page.tsx`
+
+### Total scoreboard for 2026-05-27 (end of day)
+
+**Closed in code (21 items):** retest fails A4/D1/D2 · Phase A (BUG-037) · BUG-005 · BUG-021 · BUG-022 · BUG-008/009/010/011 (form completeness) · BUG-004/012/014 (RFQ upload pipeline) · BUG-023 (+ partial 025) · BUG-028 Part A · BUG-030 · BUG-031 · BUG-018 (Print) · BUG-019 · BUG-015 · BUG-032
+**Open / deferred (6 items + 1 superseded):** BUG-016 · BUG-017 · BUG-018 (Export) · BUG-020 · BUG-025 (Phase C will subsume) · BUG-026 (superseded by Phase D) · BUG-028 Part B
+
+### Next recommended step
+
+1. **Owner end-to-end click-through** on staging — single pass across all surfaces; update tracker statuses from the owner side.
+2. **Commit + push this continuation** as a follow-up to `6262263`.
+3. **Next session:** Phase B (Technical Comparison page, BUG-036) per master-plan execution order, OR tackle the deferred bugs (BUG-016 notifications next — owner approval needed, BUG-028 Part B JWT extension is the heaviest remaining work).
+
+---
+
 ## 2026-05-27 (afternoon) — Priority-1 retest fixes + Phase A + four Priority-2 bundles + 2 standalones shipped
 
 **Date/time:** 2026-05-27 ~15:55 GMT+3 (end of single ~4 hour session)

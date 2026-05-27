@@ -73,11 +73,21 @@ export class TendersService {
     }
     if (query.departmentId) where.departmentId = query.departmentId;
 
-    // Vendor visibility filter: only PUBLIC visibility + PUBLISHED/CLARIFICATION_PERIOD status
+    // BUG-015 vendor visibility: PUBLIC tenders OR INVITATION_ONLY tenders where the
+    // caller appears in tender_vendors. Only PUBLISHED / CLARIFICATION_PERIOD statuses
+    // are vendor-visible regardless of visibility mode.
     if (user?.vendorId) {
       where.AND = [
-        { visibility: TenderVisibility.PUBLIC },
         { status: { in: [TenderStatus.PUBLISHED, TenderStatus.CLARIFICATION_PERIOD] } },
+        {
+          OR: [
+            { visibility: TenderVisibility.PUBLIC },
+            {
+              visibility: TenderVisibility.INVITATION_ONLY,
+              tenderVendors: { some: { vendorId: user.vendorId } },
+            },
+          ],
+        },
       ];
     }
 
@@ -119,10 +129,15 @@ export class TendersService {
     });
     if (!tender) throw new NotFoundException('Tender not found');
 
-    // Vendor visibility: only PUBLIC visibility + PUBLISHED/CLARIFICATION_PERIOD status
+    // BUG-015 vendor visibility on detail: PUBLIC OR (INVITATION_ONLY + invited).
+    // Must also be in PUBLISHED / CLARIFICATION_PERIOD.
     if (user?.vendorId) {
       const allowedStatuses = [TenderStatus.PUBLISHED, TenderStatus.CLARIFICATION_PERIOD] as TenderStatus[];
-      if (tender.visibility !== TenderVisibility.PUBLIC || !allowedStatuses.includes(tender.status)) {
+      const isPublicAllowed = tender.visibility === TenderVisibility.PUBLIC;
+      const isInvited =
+        tender.visibility === TenderVisibility.INVITATION_ONLY &&
+        (tender.tenderVendors ?? []).some((tv: any) => tv.vendor.id === user.vendorId);
+      if ((!isPublicAllowed && !isInvited) || !allowedStatuses.includes(tender.status)) {
         throw new ForbiddenException('Tender not accessible to vendor');
       }
     }
@@ -143,6 +158,9 @@ export class TendersService {
         category: dto.category ?? null,
         procurementType: dto.procurementType ?? null,
         estimatedBudget: dto.estimatedBudget != null ? new Prisma.Decimal(dto.estimatedBudget) : null,
+        // BUG-015: visibility is locked at create time. Default PUBLIC; switch to INVITATION_ONLY
+        // requires picking ≥3 invited vendors before Publish (enforced in publish()).
+        visibility: dto.visibility === 'INVITATION_ONLY' ? TenderVisibility.INVITATION_ONLY : TenderVisibility.PUBLIC,
         status: TenderStatus.DRAFT,
         createdBy: userId,
         owningUserId: userId,
@@ -245,16 +263,17 @@ export class TendersService {
   }
 
   async publish(id: string, userId: string) {
-    // BUG-008/010/012: procurementType + estimatedBudget + ≥1 RFQ document
-    // MUST be set before a tender can be published.
+    // BUG-008/010/012/015: prerequisites — procurementType + estimatedBudget + ≥1 RFQ doc.
+    // INVITATION_ONLY adds ≥3 invited vendors.
     const tender = await this.prisma.tender.findUnique({
       where: { id },
       select: {
         id: true,
         status: true,
+        visibility: true,
         procurementType: true,
         estimatedBudget: true,
-        _count: { select: { tenderDocuments: true } },
+        _count: { select: { tenderDocuments: true, tenderVendors: true } },
       },
     });
     if (!tender) throw new NotFoundException('Tender not found');
@@ -262,12 +281,130 @@ export class TendersService {
     if (!tender.procurementType) missing.push('procurementType');
     if (tender.estimatedBudget == null) missing.push('estimatedBudget');
     if (tender._count.tenderDocuments === 0) missing.push('at least one RFQ document');
+    if (
+      tender.visibility === TenderVisibility.INVITATION_ONLY &&
+      tender._count.tenderVendors < 3
+    ) {
+      missing.push(`at least 3 invited vendors (currently ${tender._count.tenderVendors})`);
+    }
     if (missing.length > 0) {
       throw new BadRequestException(
         `Cannot publish: missing required field(s) — ${missing.join(', ')}. Set them on the edit form and try again.`,
       );
     }
     return this.transition(id, userId, TenderStatus.APPROVED, TenderStatus.PUBLISHED, 'TENDER_PUBLISHED', AuditRiskLevel.MEDIUM);
+  }
+
+  // BUG-015: invitation workflow ---------------------------------------------
+  // Add-yes / remove-no after Publish, until Submission Closed:
+  //   Draft / Internal Review / Approved → full add + remove
+  //   Published / Clarification Period   → add only, remove rejected (vendor may
+  //                                        already be preparing — removal is unfair)
+  //   Submission Closed and beyond       → frozen, all writes rejected.
+  private static readonly INVITE_ADD_STATUSES: TenderStatus[] = [
+    TenderStatus.DRAFT,
+    TenderStatus.INTERNAL_REVIEW,
+    TenderStatus.APPROVED,
+    TenderStatus.PUBLISHED,
+    TenderStatus.CLARIFICATION_PERIOD,
+  ];
+  private static readonly INVITE_REMOVE_STATUSES: TenderStatus[] = [
+    TenderStatus.DRAFT,
+    TenderStatus.INTERNAL_REVIEW,
+    TenderStatus.APPROVED,
+  ];
+
+  async listInvitedVendors(tenderId: string) {
+    const rows = await this.prisma.tenderVendor.findMany({
+      where: { tenderId },
+      include: { vendor: { select: { id: true, companyName: true, status: true } } },
+      orderBy: { invitedAt: 'desc' },
+    });
+    return rows.map(r => ({
+      vendorId: r.vendor.id,
+      vendorName: r.vendor.companyName,
+      vendorStatus: r.vendor.status,
+      invitedAt: r.invitedAt.toISOString(),
+      invitedBy: r.invitedBy ?? null,
+    }));
+  }
+
+  async inviteVendor(tenderId: string, vendorId: string, userId: string) {
+    const tender = await this.prisma.tender.findUnique({
+      where: { id: tenderId },
+      select: { id: true, status: true, visibility: true },
+    });
+    if (!tender) throw new NotFoundException('Tender not found');
+    if (tender.visibility !== TenderVisibility.INVITATION_ONLY) {
+      throw new BadRequestException('Invitations only apply to INVITATION_ONLY tenders.');
+    }
+    if (!TendersService.INVITE_ADD_STATUSES.includes(tender.status)) {
+      throw new BadRequestException(`Invitations are frozen once tender reaches ${tender.status}.`);
+    }
+    const vendor = await this.prisma.vendor.findUnique({
+      where: { id: vendorId },
+      select: { id: true, companyName: true, status: true },
+    });
+    if (!vendor) throw new NotFoundException('Vendor not found');
+    if (vendor.status !== 'APPROVED') {
+      throw new BadRequestException(`Only APPROVED vendors can be invited (vendor is ${vendor.status}).`);
+    }
+    try {
+      await this.prisma.tenderVendor.create({
+        data: { tenderId, vendorId, invitedBy: userId },
+      });
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        throw new BadRequestException('Vendor already invited.');
+      }
+      throw err;
+    }
+    await this.audit.log({
+      eventType: 'TENDER_VENDOR_INVITED',
+      entityType: 'TenderVendor',
+      entityId: vendorId,
+      tenderId,
+      vendorId,
+      actorUserId: userId,
+      afterValue: { vendorName: vendor.companyName },
+      riskLevel: AuditRiskLevel.HIGH,
+    });
+    return { ok: true };
+  }
+
+  async uninviteVendor(tenderId: string, vendorId: string, userId: string) {
+    const tender = await this.prisma.tender.findUnique({
+      where: { id: tenderId },
+      select: { id: true, status: true, visibility: true },
+    });
+    if (!tender) throw new NotFoundException('Tender not found');
+    if (tender.visibility !== TenderVisibility.INVITATION_ONLY) {
+      throw new BadRequestException('Invitations only apply to INVITATION_ONLY tenders.');
+    }
+    if (!TendersService.INVITE_REMOVE_STATUSES.includes(tender.status)) {
+      throw new BadRequestException(
+        `Removing invitees is only allowed before Publish — current status: ${tender.status}.`,
+      );
+    }
+    const existing = await this.prisma.tenderVendor.findUnique({
+      where: { tenderId_vendorId: { tenderId, vendorId } },
+      include: { vendor: { select: { companyName: true } } },
+    });
+    if (!existing) throw new NotFoundException('Invitee not found');
+    await this.prisma.tenderVendor.delete({
+      where: { tenderId_vendorId: { tenderId, vendorId } },
+    });
+    await this.audit.log({
+      eventType: 'TENDER_VENDOR_UNINVITED',
+      entityType: 'TenderVendor',
+      entityId: vendorId,
+      tenderId,
+      vendorId,
+      actorUserId: userId,
+      beforeValue: { vendorName: existing.vendor.companyName },
+      riskLevel: AuditRiskLevel.HIGH,
+    });
+    return { ok: true };
   }
 
   async uploadDocument(tenderId: string, file: MulterFile, userId: string) {
@@ -546,6 +683,7 @@ export class TendersService {
       departmentId: t.departmentId ?? null,
       departmentName: t.department?.name ?? '',
       departmentCode: t.department?.code ?? null,
+      visibility: t.visibility ?? 'PUBLIC',
       category: t.category ?? null,
       procurementType: t.procurementType ?? null,
       estimatedBudget: t.estimatedBudget != null ? Number(t.estimatedBudget) : null,

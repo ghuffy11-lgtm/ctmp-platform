@@ -12,6 +12,7 @@ import { TendersService } from './tenders.service';
 import { CreateTenderDto } from './dto/create-tender.dto';
 import { UpdateTenderDto } from './dto/update-tender.dto';
 import { ListTendersDto } from './dto/list-tenders.dto';
+import { InviteVendorDto } from './dto/invite-vendor.dto';
 
 const MAX_TENDER_DOC_BYTES = 50 * 1024 * 1024;
 
@@ -91,6 +92,36 @@ export class TendersController {
     @CurrentUser('id') userId: string,
   ) {
     return this.tendersService.deleteDocumentEntry(id, documentId, userId);
+  }
+
+  // BUG-015: invitation workflow endpoints.
+  @Get(':id/invited-vendors')
+  @RequirePermissions('tender:view')
+  @ApiOperation({ operationId: 'listInvitedVendors', summary: 'List vendors invited to an INVITATION_ONLY tender' })
+  listInvitedVendors(@Param('id') id: string) {
+    return this.tendersService.listInvitedVendors(id);
+  }
+
+  @Post(':id/invited-vendors')
+  @RequirePermissions('tender:edit')
+  @ApiOperation({ operationId: 'inviteVendor', summary: 'Invite a vendor to bid on an INVITATION_ONLY tender' })
+  inviteVendor(
+    @Param('id') id: string,
+    @Body() dto: InviteVendorDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.inviteVendor(id, dto.vendorId, userId);
+  }
+
+  @Delete(':id/invited-vendors/:vendorId')
+  @RequirePermissions('tender:edit')
+  @ApiOperation({ operationId: 'uninviteVendor', summary: 'Remove a vendor invitation (only allowed before Publish)' })
+  uninviteVendor(
+    @Param('id') id: string,
+    @Param('vendorId') vendorId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.uninviteVendor(id, vendorId, userId);
   }
 
   @Post(':id/submit-for-approval')

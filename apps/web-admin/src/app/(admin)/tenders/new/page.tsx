@@ -33,6 +33,7 @@ interface FormData {
   category: string;
   procurementType: string;
   estimatedBudget: string;
+  visibility: 'PUBLIC' | 'INVITATION_ONLY';
   submissionDeadlineDate: string;
   submissionDeadlineTime: string;
   clarificationDeadlineDate: string;
@@ -46,6 +47,7 @@ const EMPTY_FORM: FormData = {
   category: '',
   procurementType: '',
   estimatedBudget: '',
+  visibility: 'PUBLIC',
   submissionDeadlineDate: '',
   submissionDeadlineTime: '',
   clarificationDeadlineDate: '',
@@ -118,6 +120,7 @@ export default function CreateTenderPage() {
       if (form.estimatedBudget && !Number.isNaN(Number(form.estimatedBudget))) {
         payload.estimatedBudget = Number(form.estimatedBudget);
       }
+      payload.visibility = form.visibility;
       const result = await post<{ id: string }>('/tenders', payload, token);
       router.push(`/tenders/${result.id}`);
     } catch (err) {
@@ -236,6 +239,31 @@ export default function CreateTenderPage() {
               </div>
               <p className="text-xs text-slate-400">Optional now — required before Publish.</p>
             </div>
+          </div>
+
+          {/* BUG-015: visibility — locked once saved. */}
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-slate-700">Visibility</label>
+            <div className="flex flex-wrap gap-6 mt-1">
+              {(['PUBLIC', 'INVITATION_ONLY'] as const).map((v) => (
+                <label key={v} className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="visibility"
+                    value={v}
+                    checked={form.visibility === v}
+                    onChange={() => update('visibility', v)}
+                    className="w-4 h-4 accent-blue-600"
+                  />
+                  <span className="text-sm text-slate-700">
+                    {v === 'PUBLIC' ? 'Public — open to all approved vendors' : 'Invitation only — select vendors after save'}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-slate-400">
+              Locked once saved. Invitation-only tenders require at least 3 invited vendors before Publish.
+            </p>
           </div>
 
           <div className="flex flex-col gap-2">

@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsDateString, IsOptional, IsUUID, IsNumber, Min } from 'class-validator';
+import { IsString, IsNotEmpty, IsDateString, IsOptional, IsUUID, IsNumber, IsIn, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateTenderDto {
@@ -40,4 +40,11 @@ export class CreateTenderDto {
   @Min(0)
   @IsOptional()
   estimatedBudget?: number;
+
+  @ApiPropertyOptional({ enum: ['PUBLIC', 'INVITATION_ONLY'], description: 'Visibility. Locked once tender is created.' })
+  @IsString()
+  @IsIn(['PUBLIC', 'INVITATION_ONLY'])
+  @IsOptional()
+  visibility?: 'PUBLIC' | 'INVITATION_ONLY';
 }
+

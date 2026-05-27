@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { get, post, del } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { ManageInvitedVendors } from '@/components/ManageInvitedVendors';
 import {
   AlertCircle,
   ChevronRight,
@@ -47,6 +48,7 @@ interface TenderDetail {
   submissionDeadline: string | null;
   departmentName: string;
   departmentCode: string;
+  visibility?: 'PUBLIC' | 'INVITATION_ONLY';
   createdAt: string;
   bidCount: number;
   daysLeft: number | null;
@@ -534,6 +536,10 @@ export default function TenderDetailPage() {
 
           {/* Right Column */}
           <div className="col-span-12 lg:col-span-4 space-y-5">
+            {/* BUG-015: Manage Invited Vendors panel — only for INVITATION_ONLY tenders. */}
+            {tender.visibility === 'INVITATION_ONLY' && (
+              <ManageInvitedVendors tenderId={tender.id} tenderStatus={tender.status} />
+            )}
             {/* Stats Bento */}
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-card border border-border p-5 rounded-xl">

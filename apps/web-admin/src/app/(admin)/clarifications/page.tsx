@@ -1,5 +1,7 @@
 'use client';
 
+import { TenderTimelineDrawer } from '@/components/TenderTimelineDrawer';
+
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { get, post } from '@/lib/api';
@@ -343,6 +345,7 @@ export default function ClarificationsPage() {
   const [tab, setTab] = useState<ClarificationTab>('ALL');
   const [sort, setSort] = useState<SortOrder>('NEWEST');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
 
   // ─── Fetch tenders eligible for clarifications (Published + Clarification Period) ──
   useEffect(() => {
@@ -528,10 +531,18 @@ export default function ClarificationsPage() {
                   >
                     <RefreshCw className="w-5 h-5" />
                   </button>
-                  <button className="p-2 rounded-lg hover:bg-bg border border-border transition-colors text-text-secondary" title="Print">
+                  <button
+                    onClick={() => window.print()}
+                    className="p-2 rounded-lg hover:bg-bg border border-border transition-colors text-text-secondary print:hidden"
+                    title="Print"
+                  >
                     <Printer className="w-5 h-5" />
                   </button>
-                  <button className="p-2 rounded-lg hover:bg-bg border border-border transition-colors text-text-secondary" title="Export">
+                  <button
+                    disabled
+                    title="Export (Coming in next release — depends on Reports module renderer)"
+                    className="p-2 rounded-lg border border-border text-text-secondary/40 cursor-not-allowed print:hidden"
+                  >
                     <Download className="w-5 h-5" />
                   </button>
                 </div>
@@ -621,7 +632,9 @@ export default function ClarificationsPage() {
               <FileText className="w-5 h-5" />
             </Link>
             <button
-              className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-bg text-text-secondary hover:text-accent transition-colors"
+              onClick={() => setTimelineOpen(true)}
+              disabled={!selectedTender}
+              className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-bg text-text-secondary hover:text-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               title="Timeline"
             >
               <Calendar className="w-5 h-5" />
@@ -637,6 +650,13 @@ export default function ClarificationsPage() {
           </>
         )}
       </div>
+
+      <TenderTimelineDrawer
+        tenderId={selectedTender?.id ?? null}
+        tenderReference={selectedTender?.referenceNumber}
+        open={timelineOpen}
+        onClose={() => setTimelineOpen(false)}
+      />
     </div>
   );
 }

@@ -8,6 +8,8 @@ import { getAccessToken } from '@/lib/auth';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Loading, ErrorBanner } from '@/components/ui/Empty';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { MessageBanner } from '@/components/ui/MessageBanner';
+import { blockedStateForTender, vendorMessage } from '@/lib/vendor-messages';
 
 interface TenderDetail {
   id: string;
@@ -171,10 +173,17 @@ export default function VendorTenderDetailPage({ params }: { params: Promise<{ i
                 START BID
               </Link>
             ) : (
-              <div className="rounded-3xl border border-slate-900/10 bg-slate-900/5 p-5 text-sm text-slate-900/70 leading-relaxed">
-                Bidding is only available during <strong className="text-slate-900">Published</strong>{' '}
-                or <strong className="text-slate-900">Clarification Period</strong>.
-              </div>
+              (() => {
+                const state = blockedStateForTender(tender.status);
+                return state ? (
+                  <MessageBanner
+                    message={vendorMessage(state, {
+                      deadline: tender.submissionDeadline ?? undefined,
+                      tenderRef: tender.referenceNumber,
+                    })}
+                  />
+                ) : null;
+              })()
             )}
             {tender.documents && tender.documents.length > 0 && (
               <button className="btn-ghost w-full rounded-3xl py-4 text-sm">
