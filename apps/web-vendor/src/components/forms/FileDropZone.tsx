@@ -23,6 +23,19 @@ interface FileDropZoneProps {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
+// Master plan rule E1: PDF only. Backend additionally checks the magic header.
+const PDF_MIME = 'application/pdf';
+
+function validatePdf(file: File): string | null {
+  if (file.type && file.type !== PDF_MIME) {
+    return 'Only PDF files are accepted. Other formats are not supported.';
+  }
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    return 'Only PDF files are accepted. The selected file is not a PDF.';
+  }
+  return null;
+}
+
 export function FileDropZone({ bidId, envelopeType, onUploaded, disabled }: FileDropZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -30,6 +43,11 @@ export function FileDropZone({ bidId, envelopeType, onUploaded, disabled }: File
   const [dragOver, setDragOver] = useState(false);
 
   async function uploadFile(file: File) {
+    const reason = validatePdf(file);
+    if (reason) {
+      setError(reason);
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
@@ -90,6 +108,7 @@ export function FileDropZone({ bidId, envelopeType, onUploaded, disabled }: File
         <input
           ref={inputRef}
           type="file"
+          accept="application/pdf,.pdf"
           onChange={handleFileSelect}
           disabled={disabled || uploading}
           className="hidden"
@@ -98,10 +117,10 @@ export function FileDropZone({ bidId, envelopeType, onUploaded, disabled }: File
           {uploading ? 'hourglass_top' : 'upload_file'}
         </span>
         <p className="text-sm font-semibold text-text-primary">
-          {uploading ? 'Uploading…' : 'Drop file here or click to browse'}
+          {uploading ? 'Uploading…' : 'Drop a PDF here or click to browse'}
         </p>
         <p className="text-[11px] text-text-secondary mt-1">
-          Max 50 MB. SHA-256 checksum computed server-side.
+          PDF only · Max 50 MB · SHA-256 checksum computed server-side.
         </p>
       </div>
       {error && <p className="text-xs text-danger">{error}</p>}

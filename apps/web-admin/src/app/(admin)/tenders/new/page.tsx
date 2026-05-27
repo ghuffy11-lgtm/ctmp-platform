@@ -20,9 +20,19 @@ const STEPS = [
   'Documents & Attachments',
 ];
 
+const CATEGORIES = [
+  'Construction', 'IT Services', 'Healthcare', 'Engineering',
+  'Services', 'Insurance', 'Consulting', 'Supply',
+];
+
+const PROCUREMENT_TYPES = ['Open Tender', 'Restricted', 'Single Source'];
+
 interface FormData {
   title: string;
   departmentId: string;
+  category: string;
+  procurementType: string;
+  estimatedBudget: string;
   submissionDeadlineDate: string;
   submissionDeadlineTime: string;
   clarificationDeadlineDate: string;
@@ -33,6 +43,9 @@ interface FormData {
 const EMPTY_FORM: FormData = {
   title: '',
   departmentId: '',
+  category: '',
+  procurementType: '',
+  estimatedBudget: '',
   submissionDeadlineDate: '',
   submissionDeadlineTime: '',
   clarificationDeadlineDate: '',
@@ -93,13 +106,19 @@ export default function CreateTenderPage() {
         clarificationDeadline = new Date(`${clarificationDate}T${clTime}:00`).toISOString();
       }
 
-      const result = await post<{ id: string }>('/tenders', {
+      const payload: Record<string, unknown> = {
         title,
         description: description || undefined,
         departmentId,
         submissionDeadline,
         ...(clarificationDeadline ? { clarificationDeadline } : {}),
-      }, token);
+      };
+      if (form.category) payload.category = form.category;
+      if (form.procurementType) payload.procurementType = form.procurementType;
+      if (form.estimatedBudget && !Number.isNaN(Number(form.estimatedBudget))) {
+        payload.estimatedBudget = Number(form.estimatedBudget);
+      }
+      const result = await post<{ id: string }>('/tenders', payload, token);
       router.push(`/tenders/${result.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save tender');
@@ -185,6 +204,58 @@ export default function CreateTenderPage() {
                 <option key={d.id} value={d.id}>{d.name} ({d.code})</option>
               ))}
             </select>
+          </div>
+
+          {/* Category + Procurement Type + Estimated Budget — BUG-008/010 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-slate-700">Category</label>
+              <select
+                value={form.category}
+                onChange={(e) => update('category', e.target.value)}
+                className="px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm bg-white"
+              >
+                <option value="">Select Category</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-slate-700">Estimated Budget (KWD)</label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-500">KWD</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.estimatedBudget}
+                  onChange={(e) => update('estimatedBudget', e.target.value)}
+                  placeholder="e.g. 100000"
+                  className="w-full pl-14 pr-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm"
+                />
+              </div>
+              <p className="text-xs text-slate-400">Optional now — required before Publish.</p>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-slate-700">Procurement Type</label>
+            <div className="flex flex-wrap gap-6 mt-1">
+              {PROCUREMENT_TYPES.map((type) => (
+                <label key={type} className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="procurementType"
+                    value={type}
+                    checked={form.procurementType === type}
+                    onChange={() => update('procurementType', type)}
+                    className="w-4 h-4 accent-blue-600"
+                  />
+                  <span className="text-sm text-slate-700">{type}</span>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-slate-400">Optional now — required before Publish.</p>
           </div>
 
           {/* Submission Deadline */}

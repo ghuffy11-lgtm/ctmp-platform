@@ -381,6 +381,49 @@ export class AuditService implements OnModuleInit {
     };
   }
 
+  /**
+   * Record a document-view event. Two writes happen in sequence and BOTH must
+   * succeed before the caller is allowed to stream the file (master plan rule:
+   * audit-log writes BEFORE the PDF is streamed; failing-open is forbidden):
+   *
+   *   1. document_view_log — queryable view-history index used by the "N views
+   *      logged" badge in Phases B and C.
+   *   2. audit_logs — the cryptographic hash chain entry (via this.log()).
+   *
+   * Vendor self-views of their own bid are intentionally NOT recorded here —
+   * audit-logging is for non-owner access. Callers gate that.
+   */
+  async logDocumentView(input: {
+    userId: string;
+    bidDocumentId: string;
+    tenderId?: string;
+    bidId?: string;
+    viewContext: string;
+  }): Promise<void> {
+    const ctx = this.requestContext.get();
+    await this.prisma.documentViewLog.create({
+      data: {
+        userId: input.userId,
+        bidDocumentId: input.bidDocumentId,
+        tenderId: input.tenderId ?? null,
+        bidId: input.bidId ?? null,
+        viewContext: input.viewContext,
+        ipAddress: ctx?.ipAddress ?? null,
+        userAgent: ctx?.userAgent ?? null,
+      },
+    });
+    await this.log({
+      eventType: 'BID_DOCUMENT_VIEWED',
+      entityType: 'BidDocument',
+      entityId: input.bidDocumentId,
+      actorUserId: input.userId,
+      tenderId: input.tenderId,
+      bidId: input.bidId,
+      metadata: { viewContext: input.viewContext },
+      riskLevel: AuditRiskLevel.LOW,
+    });
+  }
+
   async acknowledgeAlert(id: bigint, acknowledgedBy: string): Promise<void> {
     try {
       await this.prisma.securityAlert.update({

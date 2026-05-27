@@ -22,19 +22,29 @@ import {
 
 const POLL_MS = 60_000;
 
-const navItems = [
+// BUG-028: every nav item except Dashboard is permission-gated. The `permission`
+// field is matched against the JWT's permission list — SYSTEM_ADMIN has all
+// permissions by role definition so they see everything. `anyPermission` is
+// an OR-list for items reachable by multiple roles.
+const navItems: Array<{
+  href: string;
+  label: string;
+  icon: any;
+  permission?: string;
+  anyPermission?: string[];
+}> = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/tenders', label: 'Tenders', icon: Gavel },
-  { href: '/approvals', label: 'Approvals', icon: CheckCircle2 },
-  { href: '/clarifications', label: 'Clarifications', icon: MessageSquare },
-  { href: '/technical-evaluation', label: 'Technical Evaluation', icon: BarChart3 },
-  { href: '/committee-opening', label: 'Committee & Commercial', icon: Scale },
+  { href: '/tenders', label: 'Tenders', icon: Gavel, permission: 'tender:view' },
+  { href: '/approvals', label: 'Approvals', icon: CheckCircle2, anyPermission: ['tender:approve', 'award:approve'] },
+  { href: '/clarifications', label: 'Clarifications', icon: MessageSquare, anyPermission: ['clarification:view_internal', 'clarification:reply'] },
+  { href: '/technical-evaluation', label: 'Technical Evaluation', icon: BarChart3, permission: 'technical:evaluate' },
+  { href: '/committee-opening', label: 'Committee & Commercial', icon: Scale, anyPermission: ['committee:open_commercial', 'committee:record_attendance', 'commercial:view'] },
   { href: '/commercial-comparison', label: 'Commercial Comparison', icon: ArrowLeftRight, permission: 'commercial:view' },
-  { href: '/vendors', label: 'Vendor Management', icon: Building2 },
-  { href: '/reports', label: 'Reports', icon: FileText },
-  { href: '/audit-log', label: 'Audit Log', icon: History },
+  { href: '/vendors', label: 'Vendor Management', icon: Building2, permission: 'vendor:view' },
+  { href: '/reports', label: 'Reports', icon: FileText, permission: 'reports:view' },
+  { href: '/audit-log', label: 'Audit Log', icon: History, permission: 'audit:view' },
   { href: '/security-alerts', label: 'Security Alerts', icon: ShieldCheck, permission: 'audit:view' },
-  { href: '/settings', label: 'System Configuration', icon: Settings },
+  { href: '/settings', label: 'System Configuration', icon: Settings, permission: 'system:configure' },
 ];
 
 export function Sidebar() {
@@ -66,9 +76,12 @@ export function Sidebar() {
     };
   }, [token, canViewAudit]);
 
-  const visibleItems = navItems.filter(
-    (item) => !item.permission || (token && hasPermission(token, item.permission)),
-  );
+  const visibleItems = navItems.filter((item) => {
+    if (!token) return !item.permission && !item.anyPermission;
+    if (item.permission && !hasPermission(token, item.permission)) return false;
+    if (item.anyPermission && !item.anyPermission.some((p) => hasPermission(token, p))) return false;
+    return true;
+  });
 
   return (
     <aside className="w-[260px] h-screen fixed left-0 top-0 bg-white border-r border-slate-200 flex flex-col z-50">

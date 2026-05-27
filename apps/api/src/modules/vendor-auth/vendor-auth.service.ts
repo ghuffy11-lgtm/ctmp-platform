@@ -222,7 +222,10 @@ export class VendorAuthService {
       },
     });
 
-    await this.notifications.sendEmail(user.email, 'vendor-reset-password', { token: rawToken });
+    // BUG-030: pass the full reset URL so templates can render a clickable link.
+    const portalUrl = this.config.get<string>('vendor.portalUrl') ?? 'https://vn.hadiclinic.com.kw:4201';
+    const resetUrl = `${portalUrl.replace(/\/$/, '')}/reset-password?token=${rawToken}`;
+    await this.notifications.sendEmail(user.email, 'vendor-reset-password', { token: rawToken, resetUrl });
   }
 
   // ---------------------------------------------------------- resetPassword

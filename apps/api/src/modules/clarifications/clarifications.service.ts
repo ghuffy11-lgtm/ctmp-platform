@@ -12,11 +12,12 @@ export class ClarificationsService {
     const isVendor = !!user?.vendorId;
     const where: Prisma.TenderClarificationWhereInput = { tenderId };
     if (isVendor) {
-      // Vendor sees: own clarifications (all) + others' clarifications only when a public reply exists.
+      // BUG-031: vendor sees own threads (always) OR threads where at least
+      // one reply is_public = TRUE. No more parent-level public flag — the
+      // old default-true on the parent leaked everyone's questions to everyone.
       where.OR = [
         { vendorId: user.vendorId },
-        { isPublic: true },
-        { replies: { some: {} }, isPublic: true },
+        { replies: { some: { isPublic: true } } },
       ];
     }
     const items = await this.prisma.tenderClarification.findMany({
@@ -32,24 +33,32 @@ export class ClarificationsService {
       take: 200,
     });
     return {
-      items: items.map(c => ({
-        id: c.id,
-        tenderId: c.tenderId,
-        vendorId: c.vendorId ?? null,
-        vendorName: c.vendor?.companyName ?? null,
-        vendorCompany: c.vendor?.companyName ?? null,
-        question: c.question,
-        status: c.status,
-        createdAt: c.createdAt.toISOString(),
-        replies: c.replies.map(r => ({
-          id: r.id,
-          clarificationId: r.clarificationId,
-          reply: r.answer,
-          visibility: c.isPublic ? 'GENERAL_PUBLIC' : 'PRIVATE_TO_VENDOR',
-          repliedAt: r.createdAt.toISOString(),
-          repliedByName: r.repliedByUser.displayName,
-        })),
-      })),
+      items: items.map(c => {
+        const isOwnThread = isVendor && c.vendorId === user.vendorId;
+        // Vendor on someone else's thread only sees the public replies (not private).
+        const visibleReplies = isVendor && !isOwnThread
+          ? c.replies.filter(r => r.isPublic)
+          : c.replies;
+        return {
+          id: c.id,
+          tenderId: c.tenderId,
+          // BUG-031 §4: redact other vendors' identity from non-owning vendor callers.
+          vendorId: isVendor && !isOwnThread ? null : (c.vendorId ?? null),
+          vendorName: isVendor && !isOwnThread ? null : (c.vendor?.companyName ?? null),
+          vendorCompany: isVendor && !isOwnThread ? null : (c.vendor?.companyName ?? null),
+          question: c.question,
+          status: c.status,
+          createdAt: c.createdAt.toISOString(),
+          replies: visibleReplies.map(r => ({
+            id: r.id,
+            clarificationId: r.clarificationId,
+            reply: r.answer,
+            visibility: r.isPublic ? 'GENERAL_PUBLIC' : 'PRIVATE_TO_VENDOR',
+            repliedAt: r.createdAt.toISOString(),
+            repliedByName: r.repliedByUser.displayName,
+          })),
+        };
+      }),
       total: items.length,
       page: 1,
       pageSize: 200,
@@ -93,20 +102,18 @@ export class ClarificationsService {
     });
     if (!clarification) throw new NotFoundException('Clarification not found');
 
-    // Update visibility on the parent if reply is public, mark status ANSWERED, append reply.
+    // BUG-031: visibility now lives on the reply itself.
     const [, reply] = await this.prisma.$transaction([
       this.prisma.tenderClarification.update({
         where: { id: clarificationId },
-        data: {
-          status: ClarificationStatus.ANSWERED,
-          isPublic: dto.isPublic || clarification.isPublic,
-        },
+        data: { status: ClarificationStatus.ANSWERED },
       }),
       this.prisma.tenderClarificationReply.create({
         data: {
           clarificationId,
           answer: dto.reply,
           repliedByUserId: user.id,
+          isPublic: dto.isPublic ?? false,
         },
       }),
     ]);

@@ -1,5 +1,7 @@
 'use client';
 
+import { CommercialDocumentsList } from '@/components/CommercialDocumentsList';
+
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { get, post } from '@/lib/api';
@@ -580,12 +582,13 @@ export default function CommitteeOpeningPage() {
                           <th className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-text-secondary">Technical</th>
                           <th className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-text-secondary">Envelope</th>
                           <th className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-text-secondary">Checksum</th>
+                          <th className="px-5 py-3 text-xs font-bold uppercase tracking-wider text-text-secondary">Commercial Documents</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
                         {records.length === 0 ? (
                           <tr>
-                            <td colSpan={4} className="px-5 py-8 text-center text-sm text-text-secondary">
+                            <td colSpan={5} className="px-5 py-8 text-center text-sm text-text-secondary">
                               No envelope records yet. Opening will populate this list.
                             </td>
                           </tr>
@@ -619,6 +622,9 @@ export default function CommitteeOpeningPage() {
                                     : <Clock className="w-4 h-4" />}
                                   {r.checksumVerified ? 'VERIFIED' : 'PENDING'}
                                 </span>
+                              </td>
+                              <td className="px-5 py-3 max-w-xs">
+                                <CommercialDocumentsList bidId={r.bidId} envelopeStatus={r.envelopeStatus} compact />
                               </td>
                             </tr>
                           ))

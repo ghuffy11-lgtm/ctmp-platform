@@ -1,10 +1,35 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { TenderStatus, TenderVisibility, AuditRiskLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { TenderStorageService } from './tender-storage.service';
 import { CreateTenderDto } from './dto/create-tender.dto';
 import { UpdateTenderDto } from './dto/update-tender.dto';
 import { ListTendersDto } from './dto/list-tenders.dto';
+
+interface MulterFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+// BUG-012 locked: PDF + Office docs. Server-side mime allow-list.
+const ALLOWED_TENDER_DOC_MIMES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
+
+// Statuses in which RFQ documents may be added or removed. Mirrors EDITABLE_STATUSES on the UI.
+const TENDER_DOC_EDITABLE: TenderStatus[] = [
+  TenderStatus.DRAFT,
+  TenderStatus.INTERNAL_REVIEW,
+  TenderStatus.APPROVED,
+];
 
 // External API uses human-readable status names; DB enum uses SNAKE_UPPER.
 const STATUS_API_TO_DB: Record<string, TenderStatus> = {
@@ -38,6 +63,7 @@ export class TendersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly tenderStorage: TenderStorageService,
   ) {}
 
   async findAll(query: ListTendersDto, user?: any) {
@@ -114,6 +140,9 @@ export class TendersService {
         departmentId: dto.departmentId,
         submissionCloseAt: new Date(dto.submissionDeadline),
         clarificationCloseAt: dto.clarificationDeadline ? new Date(dto.clarificationDeadline) : null,
+        category: dto.category ?? null,
+        procurementType: dto.procurementType ?? null,
+        estimatedBudget: dto.estimatedBudget != null ? new Prisma.Decimal(dto.estimatedBudget) : null,
         status: TenderStatus.DRAFT,
         createdBy: userId,
         owningUserId: userId,
@@ -140,7 +169,7 @@ export class TendersService {
   async update(id: string, dto: UpdateTenderDto) {
     const tender = await this.prisma.tender.findUnique({
       where: { id },
-      select: { id: true, status: true, title: true, description: true, submissionCloseAt: true, clarificationCloseAt: true },
+      select: { id: true, status: true, title: true, description: true, submissionCloseAt: true, clarificationCloseAt: true, departmentId: true, category: true, procurementType: true, estimatedBudget: true },
     });
     if (!tender) throw new NotFoundException('Tender not found');
     if (tender.status !== TenderStatus.DRAFT && tender.status !== TenderStatus.INTERNAL_REVIEW) {
@@ -149,12 +178,28 @@ export class TendersService {
       );
     }
 
+    // BUG-009: department editable in Draft only — once submitted for approval
+    // the department is bound to the approval chain and cannot drift.
+    if (dto.departmentId !== undefined && dto.departmentId !== tender.departmentId) {
+      if (tender.status !== TenderStatus.DRAFT) {
+        throw new BadRequestException(
+          'Department can only be changed while the tender is in DRAFT status.',
+        );
+      }
+    }
+
     const data: Prisma.TenderUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.submissionDeadline !== undefined) data.submissionCloseAt = new Date(dto.submissionDeadline);
     if (dto.clarificationDeadline !== undefined) {
       data.clarificationCloseAt = dto.clarificationDeadline ? new Date(dto.clarificationDeadline) : null;
+    }
+    if (dto.departmentId !== undefined) data.department = { connect: { id: dto.departmentId } };
+    if (dto.category !== undefined) data.category = dto.category;
+    if (dto.procurementType !== undefined) data.procurementType = dto.procurementType;
+    if (dto.estimatedBudget !== undefined) {
+      data.estimatedBudget = dto.estimatedBudget != null ? new Prisma.Decimal(dto.estimatedBudget) : null;
     }
 
     const updated = await this.prisma.tender.update({
@@ -200,7 +245,131 @@ export class TendersService {
   }
 
   async publish(id: string, userId: string) {
+    // BUG-008/010/012: procurementType + estimatedBudget + ≥1 RFQ document
+    // MUST be set before a tender can be published.
+    const tender = await this.prisma.tender.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        procurementType: true,
+        estimatedBudget: true,
+        _count: { select: { tenderDocuments: true } },
+      },
+    });
+    if (!tender) throw new NotFoundException('Tender not found');
+    const missing: string[] = [];
+    if (!tender.procurementType) missing.push('procurementType');
+    if (tender.estimatedBudget == null) missing.push('estimatedBudget');
+    if (tender._count.tenderDocuments === 0) missing.push('at least one RFQ document');
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Cannot publish: missing required field(s) — ${missing.join(', ')}. Set them on the edit form and try again.`,
+      );
+    }
     return this.transition(id, userId, TenderStatus.APPROVED, TenderStatus.PUBLISHED, 'TENDER_PUBLISHED', AuditRiskLevel.MEDIUM);
+  }
+
+  async uploadDocument(tenderId: string, file: MulterFile, userId: string) {
+    if (!file) throw new BadRequestException('File is required');
+    if (!ALLOWED_TENDER_DOC_MIMES.has(file.mimetype)) {
+      throw new BadRequestException('Unsupported file type. Allowed: PDF, DOC, DOCX, XLS, XLSX.');
+    }
+    const tender = await this.prisma.tender.findUnique({
+      where: { id: tenderId },
+      select: { id: true, status: true },
+    });
+    if (!tender) throw new NotFoundException('Tender not found');
+    if (!TENDER_DOC_EDITABLE.includes(tender.status)) {
+      throw new ConflictException(`Documents are locked once tender leaves ${TENDER_DOC_EDITABLE.join('/')}`);
+    }
+
+    const docId = randomUUID();
+    const { storageKey, checksumSha256, fileSize } = await this.tenderStorage.write({
+      tenderId,
+      docId,
+      originalFilename: file.originalname,
+      payload: file.buffer,
+      mimeType: file.mimetype,
+    });
+
+    const doc = await this.prisma.tenderDocument.create({
+      data: {
+        id: docId,
+        tenderId,
+        originalFilename: file.originalname,
+        storageKey,
+        mimeType: file.mimetype || 'application/octet-stream',
+        fileSize: BigInt(fileSize),
+        checksumSha256,
+        uploadedBy: userId,
+      },
+    });
+
+    await this.audit.log({
+      eventType: 'TENDER_DOCUMENT_UPLOADED',
+      entityType: 'TenderDocument',
+      entityId: doc.id,
+      tenderId,
+      actorUserId: userId,
+      afterValue: { filename: doc.originalFilename, fileSize, checksumSha256 },
+      riskLevel: AuditRiskLevel.LOW,
+    });
+
+    return {
+      id: doc.id,
+      filename: doc.originalFilename,
+      mimeType: doc.mimeType,
+      fileSize: Number(doc.fileSize),
+      checksumSha256: doc.checksumSha256,
+      uploadedAt: doc.uploadedAt.toISOString(),
+    };
+  }
+
+  async deleteDocumentEntry(tenderId: string, documentId: string, userId: string) {
+    const doc = await this.prisma.tenderDocument.findFirst({
+      where: { id: documentId, tenderId },
+      include: { tender: { select: { status: true } } },
+    });
+    if (!doc) throw new NotFoundException('Document not found');
+    if (!TENDER_DOC_EDITABLE.includes(doc.tender.status)) {
+      throw new ConflictException('Documents are locked at this tender status');
+    }
+    await this.prisma.tenderDocument.delete({ where: { id: doc.id } });
+    await this.tenderStorage.delete(doc.storageKey);
+    await this.audit.log({
+      eventType: 'TENDER_DOCUMENT_DELETED',
+      entityType: 'TenderDocument',
+      entityId: doc.id,
+      tenderId,
+      actorUserId: userId,
+      beforeValue: { filename: doc.originalFilename, checksumSha256: doc.checksumSha256 },
+      riskLevel: AuditRiskLevel.LOW,
+    });
+    return { ok: true };
+  }
+
+  async streamDocument(tenderId: string, documentId: string, userId: string) {
+    const doc = await this.prisma.tenderDocument.findFirst({
+      where: { id: documentId, tenderId },
+    });
+    if (!doc) throw new NotFoundException('Document not found');
+    const { stream, size, mimeType } = await this.tenderStorage.stream(doc.storageKey);
+    await this.audit.log({
+      eventType: 'TENDER_DOCUMENT_DOWNLOADED',
+      entityType: 'TenderDocument',
+      entityId: doc.id,
+      tenderId,
+      actorUserId: userId,
+      riskLevel: AuditRiskLevel.LOW,
+    });
+    return {
+      id: doc.id,
+      filename: doc.originalFilename,
+      mimeType: doc.mimeType || mimeType,
+      fileSize: size,
+      stream,
+    };
   }
 
   async cancel(id: string, reason: string, userId: string) {
@@ -361,22 +530,29 @@ export class TendersService {
   }
 
   private serializeSummary(t: any) {
+    // BUG-006 retest A4: emit daysLeft so the Days Left widget shows the
+    // countdown instead of '—'. Negative values mean the deadline has passed;
+    // null means no deadline set yet.
+    const daysLeft =
+      t.submissionCloseAt
+        ? Math.ceil((t.submissionCloseAt.getTime() - Date.now()) / 86_400_000)
+        : null;
     return {
       id: t.id,
       referenceNumber: t.reference,
       title: t.title,
       status: STATUS_DB_TO_API[t.status as TenderStatus],
       submissionDeadline: t.submissionCloseAt?.toISOString() ?? null,
+      departmentId: t.departmentId ?? null,
       departmentName: t.department?.name ?? '',
       departmentCode: t.department?.code ?? null,
       category: t.category ?? null,
-      // Prisma column is `tenderType` (DB `tender_type`); frontend canonical name is `procurementType`.
-      // Mapping here until the Prisma field is renamed under the BUG-008/9/10/11 bundle.
-      procurementType: t.tenderType ?? null,
-      estimatedBudget: t.budgetEstimate != null ? Number(t.budgetEstimate) : null,
+      procurementType: t.procurementType ?? null,
+      estimatedBudget: t.estimatedBudget != null ? Number(t.estimatedBudget) : null,
       createdAt: t.createdAt?.toISOString() ?? null,
       createdByName: t.createdByUser?.displayName ?? null,
       updatedAt: t.updatedAt.toISOString(),
+      daysLeft,
     };
   }
 

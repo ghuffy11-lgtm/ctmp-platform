@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { usePdfViewer } from '@/components/viewer/PdfViewerProvider';
 import { AlertTriangle, ClipboardList, Package, ChevronRight, Eye, Save, PenLine, Lock } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -111,6 +112,7 @@ function ListSkeleton() {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function TechnicalEvaluationPage() {
+  const { openPdfViewer } = usePdfViewer();
   const [tenders, setTenders] = useState<TenderSummary[]>([]);
   const [tendersLoading, setTendersLoading] = useState(true);
   const [selectedTenderId, setSelectedTenderId] = useState<string | null>(null);
@@ -233,15 +235,23 @@ export default function TechnicalEvaluationPage() {
         alert('No technical documents uploaded for this bid.');
         return;
       }
+      const doc = docs[0];
+      // Iframes can't carry an Authorization header, so we pre-fetch the PDF
+      // with the bearer token and feed the modal a blob URL. The view endpoint
+      // writes the audit row server-side before streaming.
       const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
-      const res = await fetch(`${apiBase}/api/v1/bids/${selectedBid.id}/documents/${docs[0].id}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+      const res = await fetch(
+        `${apiBase}/api/v1/bids/${selectedBid.id}/envelopes/TECHNICAL/documents/${doc.id}/view`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      );
+      if (!res.ok) throw new Error(`Failed to open proposal (${res.status})`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      openPdfViewer({
+        src: url,
+        title: doc.filename ?? `${selectedBid.vendorCompany} — Technical proposal`,
+        onClose: () => URL.revokeObjectURL(url),
+      });
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to open proposal');
     } finally {
@@ -547,9 +557,10 @@ export default function TechnicalEvaluationPage() {
                 </table>
               </div>
 
-              {/* Summary + actions */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div className="md:col-span-2 bg-card rounded-xl border border-border p-5 flex items-center justify-between shadow-sm">
+              {/* Summary + actions — BUG-021 retest D1: Save lives on its own row below
+                  so Pass/Fail have room to breathe instead of being crammed into one row. */}
+              <div className="space-y-4 mb-6">
+                <div className="bg-card rounded-xl border border-border p-5 flex items-center justify-between shadow-sm">
                   <div className="flex items-center gap-6">
                     <div>
                       <p className="text-xs font-bold uppercase text-text-secondary">Current Score</p>
@@ -572,7 +583,7 @@ export default function TechnicalEvaluationPage() {
                       <button
                         type="button"
                         onClick={() => setRecommendation('FAIL')}
-                        className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${
+                        className={`px-6 py-2 text-sm font-bold rounded-md transition-all ${
                           recommendation === 'FAIL'
                             ? 'bg-danger text-white shadow-sm'
                             : 'text-text-secondary hover:text-text-primary'
@@ -583,7 +594,7 @@ export default function TechnicalEvaluationPage() {
                       <button
                         type="button"
                         onClick={() => setRecommendation('PASS')}
-                        className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${
+                        className={`px-6 py-2 text-sm font-bold rounded-md transition-all ${
                           recommendation === 'PASS'
                             ? 'bg-success text-white shadow-sm'
                             : 'text-text-secondary hover:text-text-primary'
@@ -597,7 +608,7 @@ export default function TechnicalEvaluationPage() {
                 <button
                   onClick={handleSaveEvaluation}
                   disabled={submitting}
-                  className="bg-accent hover:bg-accent-hover text-white rounded-xl shadow-md font-bold text-base px-6 py-4 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="w-full bg-accent hover:bg-accent-hover text-white rounded-xl shadow-md font-bold text-base px-6 py-4 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   <Save className="w-5 h-5" />
                   {submitting ? 'Saving…' : 'Save Evaluation'}

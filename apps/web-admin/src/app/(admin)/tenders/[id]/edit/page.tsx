@@ -32,10 +32,20 @@ interface TenderData {
   procurementType: string | null;
   estimatedBudget: number | null;
   submissionDeadline: string | null;
+  departmentName?: string;
+  departmentCode?: string | null;
+  departmentId?: string;
+}
+
+interface Department {
+  id: string;
+  name: string;
+  code: string;
 }
 
 interface FormData {
   title: string;
+  departmentId: string;
   category: string;
   procurementType: string;
   estimatedBudget: string;
@@ -54,6 +64,7 @@ function toFormData(tender: TenderData): FormData {
   }
   return {
     title: tender.title,
+    departmentId: tender.departmentId ?? '',
     category: tender.category ?? '',
     procurementType: tender.procurementType ?? '',
     estimatedBudget: tender.estimatedBudget != null ? String(tender.estimatedBudget) : '',
@@ -62,6 +73,9 @@ function toFormData(tender: TenderData): FormData {
     description: tender.description ?? '',
   };
 }
+
+// BUG-010: budget editable only in Draft + Internal Review.
+const BUDGET_EDITABLE_STATUSES = new Set(['Draft', 'Internal Review']);
 
 function FieldLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
@@ -82,14 +96,19 @@ export default function EditTenderPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormData | null>(null);
+  const [departments, setDepartments] = useState<Department[]>([]);
 
   useEffect(() => {
     async function load() {
       try {
         const token = getAccessToken();
-        const result = await get<TenderData>(`/tenders/${tenderId}`, token);
+        const [result, deptRes] = await Promise.all([
+          get<TenderData>(`/tenders/${tenderId}`, token),
+          get<{ data: Department[] }>('/departments?pageSize=100', token).catch(() => ({ data: [] })),
+        ]);
         setTender(result);
         setForm(toFormData(result));
+        setDepartments(deptRes.data ?? []);
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : 'Failed to load tender');
       } finally {
@@ -104,7 +123,7 @@ export default function EditTenderPage() {
   }
 
   async function handleSave() {
-    if (!form || !form.title.trim()) return;
+    if (!form || !form.title.trim() || !tender) return;
     setSaving(true);
     try {
       const token = getAccessToken();
@@ -113,14 +132,22 @@ export default function EditTenderPage() {
         const time = form.submissionDeadlineTime || '23:59';
         submissionDeadline = new Date(`${form.submissionDeadlineDate}T${time}:00`).toISOString();
       }
-      await patch(`/tenders/${tenderId}`, {
+      const payload: Record<string, unknown> = {
         title: form.title.trim(),
         category: form.category || null,
         procurementType: form.procurementType || null,
-        estimatedBudget: form.estimatedBudget ? Number(form.estimatedBudget) : null,
         submissionDeadline,
         description: form.description.trim() || null,
-      }, token);
+      };
+      // BUG-009: only send departmentId on Draft (backend rejects mid-flight).
+      if (tender.status === 'Draft' && form.departmentId) {
+        payload.departmentId = form.departmentId;
+      }
+      // BUG-010: only send estimatedBudget when editable.
+      if (BUDGET_EDITABLE_STATUSES.has(tender.status)) {
+        payload.estimatedBudget = form.estimatedBudget ? Number(form.estimatedBudget) : null;
+      }
+      await patch(`/tenders/${tenderId}`, payload, token);
       router.push(`/tenders/${tenderId}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to save changes');
@@ -209,7 +236,35 @@ export default function EditTenderPage() {
             </div>
           </div>
 
-          {/* Row 2: Category + Budget */}
+          {/* BUG-009: Department editable in Draft only; locked after submission. */}
+          <div>
+            <FieldLabel required>Department</FieldLabel>
+            {tender.status === 'Draft' ? (
+              <select
+                value={form.departmentId}
+                onChange={e => update('departmentId', e.target.value)}
+                className="w-full px-4 py-2.5 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-bg cursor-pointer transition-shadow"
+              >
+                <option value="">Select Department</option>
+                {departments.map(d => (
+                  <option key={d.id} value={d.id}>{d.name} ({d.code})</option>
+                ))}
+              </select>
+            ) : (
+              <div className="relative">
+                <input
+                  type="text"
+                  value={tender.departmentName ?? '—'}
+                  disabled
+                  className="w-full px-4 py-2.5 text-sm border border-border rounded-lg bg-bg text-text-secondary/70 cursor-not-allowed pr-10"
+                />
+                <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary/40" />
+                <p className="text-xs text-text-secondary mt-1">Department is locked after the tender leaves Draft status.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Row 2: Category + Budget (BUG-010: budget editable in Draft + Internal Review only) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <FieldLabel>Category</FieldLabel>
@@ -225,10 +280,10 @@ export default function EditTenderPage() {
               </select>
             </div>
             <div>
-              <FieldLabel>Estimated Budget (USD)</FieldLabel>
+              <FieldLabel>Estimated Budget (KWD)</FieldLabel>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-text-secondary">
-                  $
+                  KWD
                 </span>
                 <input
                   type="number"
@@ -236,9 +291,13 @@ export default function EditTenderPage() {
                   value={form.estimatedBudget}
                   onChange={e => update('estimatedBudget', e.target.value)}
                   placeholder="0.00"
-                  className="w-full pl-8 pr-4 py-2.5 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-bg placeholder:text-text-secondary/40 transition-shadow"
+                  disabled={!BUDGET_EDITABLE_STATUSES.has(tender.status)}
+                  className={`w-full pl-14 pr-4 py-2.5 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-bg placeholder:text-text-secondary/40 transition-shadow ${!BUDGET_EDITABLE_STATUSES.has(tender.status) ? 'cursor-not-allowed text-text-secondary/70' : ''}`}
                 />
               </div>
+              {!BUDGET_EDITABLE_STATUSES.has(tender.status) && (
+                <p className="text-xs text-text-secondary mt-1">Budget is locked after approval.</p>
+              )}
             </div>
           </div>
 

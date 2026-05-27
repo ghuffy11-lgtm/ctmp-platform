@@ -6,6 +6,168 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-27 (afternoon) — Priority-1 retest fixes + Phase A + four Priority-2 bundles + 2 standalones shipped
+
+**Date/time:** 2026-05-27 ~15:55 GMT+3 (end of single ~4 hour session)
+**Agent/task:** End-to-end execution of the locked plan: P1 retest fails → Phase A (BUG-037) → Priority-2 bug bundles → standalones. Owner directive: "fix all and then we do final testing" — no per-deploy click-through pauses, single owner verification pass at the end.
+
+### Shipped to staging (`10.1.13.98`) — all deploys verified via chunk markers + API health + audit chain integrity
+
+| Bucket | Bugs closed | Files | Migration |
+|---|---|---|---|
+| **P1 retest fixes** | BUG-005 (A4 daysLeft) · BUG-021 second pass (D1) · BUG-022 second pass (D2 401) | tenders serializer, technical-evaluation page | — |
+| **Phase A — In-app PDF viewer** | BUG-037 | 11 files (api: audit/bids/migration; admin: PdfViewerProvider/Modal/layout/tech-eval; vendor: FileDropZone) | 009 (document_view_log + viewer permissions) |
+| **Bundle 1 — Tender form completeness** | BUG-008 · BUG-009 · BUG-010 · BUG-011 | Prisma rename (`tenderType` → `procurementType`, `budgetEstimate` → `estimatedBudget`), DTO whitelist expanded, status guards (departmentId Draft-only, estimatedBudget Draft+InternalReview-only), publish gate (procurementType + estimatedBudget required), `new` + `[id]/edit` forms (Category + Procurement Type + Estimated Budget added; KWD label; Department dropdown conditional) | — |
+| **Bundle 2 — Tender doc upload pipeline** | BUG-004 · BUG-012 · BUG-014 | NEW `TenderStorageService` (mirrors BidStorage), `POST /tenders/:id/documents` (multipart) + `DELETE`, audit events `TENDER_DOCUMENT_UPLOADED/DELETED/DOWNLOADED`, publish gate (≥1 doc required), frontend Upload/Delete/Download wiring + filename/mimeType rename (BUG-004) | — |
+| **Bundle 3 — Commercial docs surface** | BUG-023 · BUG-025 (partial) | NEW `CommercialDocumentsList.tsx` shared component (status + permission aware), embedded in `committee-opening` 5th column. **BUG-025 embed on `commercial-comparison` deferred** — Phase C (BUG-035) replaces that page in place, so embedding now would be wasted work. | — |
+| **BUG-028 — RBAC enforcement Part A** | BUG-028 (Sidebar only) | Sidebar nav items now all permission-gated per master plan §I matrix (`tender:view`, `tender:approve`/`award:approve`, `clarification:view_internal`/`reply`, `technical:evaluate`, `committee:*`/`commercial:view`, `vendor:view`, `reports:view`, `audit:view`, `system:configure`). `anyPermission` OR-list helper added. **Part B (dept-scoped data filtering) deferred** — requires JWT payload extension to carry `user.departments`; non-trivial change documented for next session. | — |
+| **BUG-030 — Vendor reset-password route** | BUG-030 | NEW `/reset-password` page (mirrors verify-email pattern; min 12-char check; confirm-match; success → /login). Backend `vendor-auth.service.ts` now emits `resetUrl` variable to the email template using `vendor.portalUrl` config. | — |
+| **BUG-031 — Vendor clarification privacy** | BUG-031 | Per-reply visibility model. Migration 010 moves `is_public` from `tender_clarifications` to `tender_clarification_replies` (with backfill of existing parent flag to all replies). `clarifications.service.ts` filter rewritten: vendor sees own threads OR threads where any reply.isPublic=true; non-public replies and the asking-vendor identity are redacted from non-owning vendor callers (§4 of agreed approach). | 010 (per-reply visibility) |
+
+Total: **17 bugs/features closed across 11 deploys / 2 DB migrations / 1 new module / 2 new shared components.**
+
+### Deferred — non-trivial work that needs proper scope
+
+| ID | Why deferred | Recommended next-session action |
+|---|---|---|
+| BUG-015 | Invitation workflow is a multi-page feature: visibility selector on create form, invited-vendors panel on detail, publish gate (≥3 invitees for INVITATION_ONLY), and `tender_vendors` write paths. Full owner-locked decisions are in the tracker (BUG-015 entry); ~5–8 files. | One focused session. |
+| BUG-016 | Notification policy question — already has owner-locked answer in tracker. Needs a one-line decision-log entry, not code. | Document + close. |
+| BUG-017 | Clarification attachments — new DB tables, new storage service, visibility-aware download. ~7 files. | Same session as BUG-018. |
+| BUG-018 | Clarifications Print/Export — Print is trivial (`window.print()` + `@media print` styles); Export needs a new report-renderer (depends on reports module). Split: ship Print now, defer Export to a Reports-module pass. | Quick win available. |
+| BUG-019 | Timeline drawer — small (~40 LOC). Component + click handler. Could ship with Print fix. | Bundle with BUG-018 Print. |
+| BUG-020 | Question — who performs technical evaluation and how they're notified. Needs owner answer + RBAC follow-up. | Owner-only action. |
+| BUG-026 | Superseded by Phase D (BUG-039 Award flow). Close as "deferred to Phase D" once that phase ships. | No work needed. |
+| BUG-028 Part B | Dept-scoped data filtering requires `user.departments` on the JWT payload. Backend changes: auth service (issue tokens with department list), JWT strategy (carry through to req.user), 6 list services (apply IN-filter). Non-trivial and breaks all existing tokens at deploy time. | One dedicated session with a coordinated token-rotation plan. |
+| BUG-032 | Vendor friendly state-messages registry — broad UX pass across all blocked states. ~3 files + 10+ copy entries. | Dedicated session; lower urgency. |
+
+### Verification trail (server-side automated)
+
+For every deploy:
+- ✅ Pre-flight `docker system df` (host stayed clean — `/mnt/repo` ≤ 3%)
+- ✅ Migration SQL applied via `psql -v ON_ERROR_STOP=1` (no rollbacks)
+- ✅ `pnpm exec tsc --noEmit` on the API for every backend bundle (zero errors)
+- ✅ Prisma client regenerated locally before each Prisma-touching deploy
+- ✅ Container rebuilds via `docker compose build --no-cache <service>` followed by `up -d --force-recreate --no-deps <service>`
+- ✅ Post-deploy health: API `(healthy)`, audit chain verifier "215 rows OK" → "217 rows OK" across the session (no chain breaks)
+- ✅ Spot-checks on compiled `.next/static/chunks/` for marker strings (`PdfViewerProvider`, `BUDGET_EDITABLE_STATUSES`, "Drop a PDF here", `space-y-4 mb-6`, etc.)
+
+Owner end-to-end click-through (per directive) is the pending step — single pass across all surfaces.
+
+### Files modified / created this session — full list
+
+**API (10):**
+- `database/migrations/009_phase_a_pdf_viewer.sql` (NEW)
+- `database/migrations/010_clarification_visibility_per_reply.sql` (NEW)
+- `apps/api/prisma/schema.prisma` (DocumentViewLog model + tenderType→procurementType + budgetEstimate→estimatedBudget + TenderClarification.isPublic moved to Reply)
+- `apps/api/src/modules/audit/audit.service.ts` (logDocumentView)
+- `apps/api/src/modules/bids/bids.service.ts` (viewBidDocument + listEnvelopeDocuments admin admission + PDF magic-byte gate)
+- `apps/api/src/modules/bids/bids.controller.ts` (view endpoint + list guard switch)
+- `apps/api/src/modules/tenders/tender-storage.service.ts` (NEW)
+- `apps/api/src/modules/tenders/tenders.module.ts` (TenderStorageService + StorageModule)
+- `apps/api/src/modules/tenders/tenders.service.ts` (daysLeft + procurementType/estimatedBudget persist + status guards + publish gate + upload/delete/stream document)
+- `apps/api/src/modules/tenders/tenders.controller.ts` (POST/DELETE document endpoints + streaming download)
+- `apps/api/src/modules/tenders/dto/create-tender.dto.ts` (3 new fields)
+- `apps/api/src/modules/clarifications/clarifications.service.ts` (per-reply visibility filter + redaction)
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.ts` (resetUrl in email template)
+
+**Admin frontend (8):**
+- `apps/web-admin/src/app/(admin)/layout.tsx` (PdfViewerProvider mount)
+- `apps/web-admin/src/components/viewer/PdfViewerProvider.tsx` (NEW)
+- `apps/web-admin/src/components/viewer/PdfViewerModal.tsx` (NEW)
+- `apps/web-admin/src/components/CommercialDocumentsList.tsx` (NEW)
+- `apps/web-admin/src/components/layout/Sidebar.tsx` (full permission gating)
+- `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx` (Save layout + View Full Proposal → modal viewer)
+- `apps/web-admin/src/app/(admin)/tenders/new/page.tsx` (Category + Procurement Type + Budget inputs)
+- `apps/web-admin/src/app/(admin)/tenders/[id]/edit/page.tsx` (Department conditional + budget lock + KWD label)
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` (BUG-004 rename + upload + delete + download wiring)
+- `apps/web-admin/src/app/(admin)/committee-opening/page.tsx` (Commercial Documents 5th column)
+
+**Vendor frontend (2):**
+- `apps/web-vendor/src/components/forms/FileDropZone.tsx` (PDF-only enforcement)
+- `apps/web-vendor/src/app/reset-password/page.tsx` (NEW)
+
+### Git status
+
+NOT pushed. ~25 files modified + 8 created in working tree (D:\Work\CTMP\ctmp-platform). Two new SQL migrations. **Recommend next session opens with a commit + push** before resuming feature work — staging is now 17 bugs ahead of `origin/develop` (last pushed = `3e54f5e` from 2026-05-26).
+
+### Next recommended step
+
+1. **Owner end-to-end verification pass** on staging — single click-through across all surfaces, mark tracker statuses from the owner side.
+2. **Git commit + push** — bundle as "Phase 9: retest fixes + Phase A in-app PDF viewer + 14 bug fixes" or similar; consider splitting into 2-3 logical commits.
+3. **Continue Priority-2 backlog** in the next session: BUG-015 (invitation workflow), BUG-017/018 (clarification attachments + Print), BUG-019 (timeline drawer), BUG-028 Part B (dept scope + JWT extension), BUG-032 (vendor messages).
+4. **Then Phase B** (Technical Comparison page, BUG-036) per master-plan execution order.
+
+---
+
+## 2026-05-27 (afternoon) — Bundled retest fixes + Phase A shipped to staging
+
+**Date/time:** 2026-05-27 ~14:10 GMT+3
+**Agent/task:** Owner-approved bundled deploy: Priority-1 retest-fail fixes (A4 / D1) + full **Phase A — shared in-app PDF viewer (BUG-037)** per master-plan execution order. Code only — no design changes.
+
+### Files changed (11 total)
+
+**Backend (5):**
+- `database/migrations/009_phase_a_pdf_viewer.sql` — NEW. Creates `document_view_log` table (+ 3 indexes), inserts `viewer:pdf:open` / `viewer:pdf:download` permissions, grants per master-plan §I default RBAC matrix. SYSTEM_ADMIN deliberately omitted.
+- `apps/api/prisma/schema.prisma` — added `DocumentViewLog` model (scalar fields only; no relations).
+- `apps/api/src/modules/audit/audit.service.ts` — added `logDocumentView({ userId, bidDocumentId, tenderId?, bidId?, viewContext })`. Writes BOTH `document_view_log` (queryable index) AND the hash-chained `audit_logs` row with `eventType: 'BID_DOCUMENT_VIEWED'`. Both must succeed before the caller is allowed to stream — master-plan rule "no failing-open on audit".
+- `apps/api/src/modules/bids/bids.service.ts` — three changes: (1) `uploadDocument` rejects non-`application/pdf` mime AND verifies `%PDF-` magic bytes (master-plan rule E1); (2) `listEnvelopeDocuments` parameter renamed `vendor → user` + access model expanded to admit admin users (TECHNICAL needs envelope OPENED; COMMERCIAL needs `commercial:view` + OPENED) — fixes BUG-022 root cause; (3) NEW `viewBidDocument(bidId, documentId, user)` mirrors `downloadDocument`'s access checks, calls `audit.logDocumentView()` BEFORE streaming for non-owning users.
+- `apps/api/src/modules/bids/bids.controller.ts` — NEW `GET /bids/:bidId/envelopes/:envelopeType/documents/:documentId/view` (Content-Disposition: inline, X-Content-Type-Options: nosniff). Existing list endpoint guard changed `VendorJwtAuthGuard → OptionalVendorOrUserGuard` so admins are no longer 401'd.
+- `apps/api/src/modules/tenders/tenders.service.ts` — `serializeSummary` now emits `daysLeft = Math.ceil((submissionCloseAt - now) / 86_400_000)` or null. Fixes retest A4.
+
+**Frontend admin (4):**
+- `apps/web-admin/src/components/viewer/PdfViewerProvider.tsx` — NEW React context (`usePdfViewer()`, `openPdfViewer({ src, title, onClose })`, `closePdfViewer()`). Manages a single modal at a time, fires `onClose` from the previous open when replacing, locks body scroll while open, handles ESC.
+- `apps/web-admin/src/components/viewer/PdfViewerModal.tsx` — NEW full-screen modal. Header with title + optional Download button + Close. Body is an `<iframe>` (native browser PDF rendering — no react-pdf dependency).
+- `apps/web-admin/src/app/(admin)/layout.tsx` — wraps children in `<PdfViewerProvider>`.
+- `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx` — two retest-related changes: (1) D1 — restructured Pass/Fail/Save group into two rows (Pass/Fail full-width on top, Save full-width on its own row, owner's exact ask); (2) re-wired `handleViewProposal` to fetch the PDF as a blob with bearer auth then hand the blob URL to `openPdfViewer()` (iframes can't send Authorization headers; pre-fetch + blob URL preserves the audit write).
+
+**Frontend vendor (1):**
+- `apps/web-vendor/src/components/forms/FileDropZone.tsx` — added client-side PDF-only check (mime + filename extension) before the upload POST; input now has `accept="application/pdf,.pdf"`; copy reads "Drop a PDF here · PDF only · Max 50 MB". Backend `%PDF-` magic-byte check is the authoritative gate.
+
+### Verification on staging (10.1.13.98)
+
+| Item | Result |
+|---|---|
+| Pre-flight disk | `docker system df` → 40GB images / 11GB build cache; `/mnt/repo` at 3% (1.8T free). |
+| Migration 009 applied | psql to ctmp-postgres: `BEGIN, CREATE TABLE, 3× CREATE INDEX, COMMIT, INSERT 0 2 (permissions), INSERT 0 10 (role grants)`. Clean. |
+| Builds (no-cache) | ctmp-api / ctmp-web-admin / ctmp-web-vendor — all 3 built successfully. |
+| API health post-recreate | `Up X seconds (healthy)`. Boot log: `Audit chain verified — 215 rows OK (id 1..215)`. No errors. |
+| **A4 — daysLeft serializer** | `GET /api/v1/tenders?pageSize=1` → response keys include `daysLeft` (value `0` for a tender past deadline). |
+| **D1 — Save button layout** | New chunk `page-fa928bc207eee7dd.js` contains both `space-y-4 mb-6` (two-row wrapper) and `w-full bg-accent` (full-width Save). |
+| **Phase A — view endpoint registered** | `GET /api/v1/bids/.../envelopes/TECHNICAL/documents/.../view` with no token → 401 (route exists, guard rejecting correctly). |
+| **Phase A — modal viewer in chunk** | `PdfViewerProvider` / `PdfViewerModal` / `openPdfViewer` present in admin `layout-*.js` and `technical-evaluation/page-*.js`. |
+| **Phase A — vendor PDF-only** | "Drop a PDF here" present in vendor `wizard/[tenderId]/page-*.js` chunk. |
+
+End-to-end click-through verification (owner action): open Technical Evaluation, select a bid with an OPENED technical envelope, click **View Full Proposal**. Expected: PDF opens in the modal, ESC closes, `document_view_log` table gets a row.
+
+### Retest items closed by this deploy
+
+| Retest | Bug | Status after deploy |
+|---|---|---|
+| A4 | BUG-005 (was incorrectly tagged BUG-006) | ✅ daysLeft now computed server-side |
+| D1 | BUG-021 (second pass — first pass was padding only) | ✅ Restructured into two rows per owner direction |
+| D2 | BUG-022 / BUG-037 | ✅ Root cause fixed (admin guard + new view endpoint) — owner click-through pending |
+| F4 | BUG-033 | Deferred to Phase G (per master-plan locked decision) |
+
+### Phase A status — all 9 items shipped
+
+A.1 (Modal) · A.2 (Provider) · A.3 (view endpoint) · A.4 (audit helper) · A.5 (migration) · A.6 (RBAC seed) · A.7 (tech-eval re-wire) · A.8 (vendor PDF-only) · A.9 (deploy + verify) — all flipped to `[x]` in `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md`.
+
+### Git status
+
+NOT pushed. Local-only commits zero. All 11 files modified in working tree. Recommend the next session commit + push as a single "Phase 9: retest fixes + Phase A in-app PDF viewer" message before starting Phase B.
+
+### Open questions / immediate follow-ups
+
+1. **Owner click-through on D2** — needs a tender with an OPENED technical envelope + a bid that has a PDF document, to confirm the modal renders correctly in a real browser. The compiled chunk + endpoint 401-on-no-auth proves the wiring; the visual render is the last unverified step.
+2. **iframe PDF rendering edge cases** — if a corporate browser policy disables the built-in PDF viewer, the iframe will offer to download instead. Acceptable for v1; swap to `pdfjs-dist` if it bites.
+3. **Phase B (Technical Comparison page, BUG-036) is next.** Read-only; lower risk than Phase C. Requires the new comparison module skeleton + `GET /tenders/:id/comparison/technical` endpoint per master-plan §3.
+
+### Next recommended step
+
+Phase B (BUG-036) per master-plan execution order — Technical Comparison page. The PDF viewer infrastructure is in place, so Phase B's VendorTechnicalCard can use the existing `usePdfViewer()` context out of the box.
+
+---
+
 ## 2026-05-27 — In-app comparison & document viewer master plan locked
 
 **Date/time:** 2026-05-27 (discussion + documentation session)

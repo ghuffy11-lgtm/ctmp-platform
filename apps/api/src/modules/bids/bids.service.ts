@@ -238,6 +238,15 @@ export class BidsService {
 
   async uploadDocument(bidId: string, envelopeType: EnvelopeType, file: MulterFile, vendor: any) {
     if (!file) throw new BadRequestException('File is required');
+    // Master plan rule E1: PDF-only at upload time. Reject mime mismatch AND
+    // verify the magic header — a curl client can spoof the multipart mime.
+    if (file.mimetype !== 'application/pdf') {
+      throw new BadRequestException('Only PDF files are accepted. Other file types are not supported.');
+    }
+    const head = file.buffer?.subarray(0, 5).toString('ascii');
+    if (head !== '%PDF-') {
+      throw new BadRequestException('File does not appear to be a valid PDF.');
+    }
     const bid = await this.prisma.bid.findUnique({
       where: { id: bidId },
       select: { id: true, vendorId: true, status: true, tenderId: true },
@@ -353,19 +362,39 @@ export class BidsService {
     return { ok: true };
   }
 
-  async listEnvelopeDocuments(bidId: string, envelopeType: EnvelopeType, vendor: any) {
+  async listEnvelopeDocuments(bidId: string, envelopeType: EnvelopeType, user: any) {
     const bid = await this.prisma.bid.findUnique({
       where: { id: bidId },
       select: { id: true, vendorId: true },
     });
     if (!bid) throw new NotFoundException('Bid not found');
-    if (bid.vendorId !== vendor.vendorId) throw new ForbiddenException('Not your bid');
 
     const envelope = await this.prisma.bidEnvelope.findFirst({
       where: { bidId, envelopeType },
       include: { bidDocuments: true },
     });
     if (!envelope) throw new NotFoundException('Envelope not found');
+
+    // Access model mirrors downloadDocument(): vendors only see their own bid;
+    // admins need the envelope to be OPENED (TECHNICAL) or OPENED + commercial:view
+    // (COMMERCIAL). Phase A re-uses the same gating; Phase C will tighten via
+    // comparison:commercial:view per master plan §I when that page lands.
+    const isVendor = !!user?.vendorId;
+    if (isVendor) {
+      if (bid.vendorId !== user.vendorId) throw new ForbiddenException('Not your bid');
+    } else if (envelopeType === EnvelopeType.TECHNICAL) {
+      if (envelope.status !== EnvelopeStatus.OPENED) {
+        throw new ForbiddenException('Technical envelope not yet opened');
+      }
+    } else {
+      const perms: string[] = user?.permissions ?? [];
+      if (!perms.includes('commercial:view')) {
+        throw new ForbiddenException('commercial:view permission required');
+      }
+      if (envelope.status !== EnvelopeStatus.OPENED) {
+        throw new ForbiddenException('Commercial envelope not yet opened by committee');
+      }
+    }
 
     return {
       envelopeId: envelope.id,
@@ -379,6 +408,70 @@ export class BidsService {
         checksumSha256: d.checksumSha256,
         uploadedAt: d.uploadedAt.toISOString(),
       })),
+    };
+  }
+
+  /**
+   * Phase A — BUG-037. Stream a bid document inline for the in-app PDF viewer
+   * modal. Access checks mirror downloadDocument(); on success the view is
+   * audit-logged BEFORE the stream is returned to the caller (master plan rule:
+   * no failing-open on audit). Vendor self-views of their own bid skip the
+   * document_view_log write — that table is for non-owner access tracking.
+   */
+  async viewBidDocument(bidId: string, documentId: string, user: any) {
+    const doc = await this.prisma.bidDocument.findFirst({
+      where: { id: documentId, bidEnvelope: { bidId } },
+      include: {
+        bidEnvelope: {
+          select: {
+            envelopeType: true,
+            status: true,
+            bid: { select: { vendorId: true, tenderId: true } },
+          },
+        },
+      },
+    });
+    if (!doc) throw new NotFoundException('Document not found');
+
+    const isVendor = !!user?.vendorId;
+    if (isVendor) {
+      if (doc.bidEnvelope.bid.vendorId !== user.vendorId) {
+        throw new ForbiddenException('Not your bid');
+      }
+    } else if (doc.bidEnvelope.envelopeType === EnvelopeType.TECHNICAL) {
+      if (doc.bidEnvelope.status !== EnvelopeStatus.OPENED) {
+        throw new ForbiddenException('Technical envelope not yet opened');
+      }
+    } else {
+      const perms: string[] = user?.permissions ?? [];
+      if (!perms.includes('commercial:view')) {
+        throw new ForbiddenException('commercial:view permission required');
+      }
+      if (doc.bidEnvelope.status !== EnvelopeStatus.OPENED) {
+        throw new ForbiddenException('Commercial envelope not yet opened by committee');
+      }
+    }
+
+    if (!isVendor && user?.id) {
+      await this.audit.logDocumentView({
+        userId: user.id,
+        bidDocumentId: doc.id,
+        tenderId: doc.bidEnvelope.bid.tenderId,
+        bidId,
+        viewContext:
+          doc.bidEnvelope.envelopeType === EnvelopeType.TECHNICAL
+            ? 'technical-evaluation'
+            : 'commercial-comparison',
+      });
+    }
+
+    const { stream, size, mimeType } = await this.storage.stream(doc.storageKey);
+    return {
+      id: doc.id,
+      filename: doc.originalFilename,
+      mimeType: doc.mimeType || mimeType,
+      fileSize: size,
+      stream,
     };
   }
 

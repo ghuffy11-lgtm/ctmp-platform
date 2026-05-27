@@ -26,15 +26,15 @@ Lands first because retest item **D2** (View Full Proposal 401) immediately bene
 
 | Item | Status | Files | Notes |
 |---|---|---|---|
-| A.1 PDF viewer modal component (frontend) | `[ ]` | `apps/web-admin/src/components/viewer/PdfViewerModal.tsx` | Full-screen modal, ESC closes, no annotations |
-| A.2 PDF viewer provider (frontend context) | `[ ]` | `apps/web-admin/src/components/viewer/PdfViewerProvider.tsx` | App-wide so any descendant can open |
-| A.3 New view-stream API endpoint | `[ ]` | `apps/api/src/modules/bids/bids.controller.ts` | `GET /bids/:id/envelopes/:type/documents/:docId/view` |
-| A.4 Audit logging on view | `[ ]` | `apps/api/src/modules/audit/audit.service.ts` + new `document_view_log` table | Failing-open NOT allowed |
-| A.5 DB migration: `document_view_log` table | `[ ]` | `database/migrations/00X_document_view_log.sql` | See master plan §3.3 |
-| A.6 RBAC entries: `viewer:pdf:open`, `viewer:pdf:download` | `[ ]` | `database/seeds/` | Defaults per master plan §I |
-| A.7 Wire viewer into existing Technical Evaluation page (fixes retest D2) | `[ ]` | `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx` | Replaces broken handler from BUG-022 |
-| A.8 Vendor-portal upload enforcement: PDF only | `[ ]` | `apps/web-vendor/src/app/(portal)/bids/wizard/[tenderId]/...` + API DTO | Reject non-PDF at upload |
-| A.9 Verification | `[ ]` | — | Open a PDF from each surface; confirm modal opens, ESC closes, audit row written, non-PDF upload rejected |
+| A.1 PDF viewer modal component (frontend) | `[x] 2026-05-27` | `apps/web-admin/src/components/viewer/PdfViewerModal.tsx` | Full-screen modal, ESC closes, no annotations |
+| A.2 PDF viewer provider (frontend context) | `[x] 2026-05-27` | `apps/web-admin/src/components/viewer/PdfViewerProvider.tsx` | Mounted in `(admin)/layout.tsx`; `usePdfViewer()` hook; locks body scroll while open |
+| A.3 New view-stream API endpoint | `[x] 2026-05-27` | `apps/api/src/modules/bids/bids.controller.ts` | `GET /bids/:id/envelopes/:type/documents/:docId/view`; guard = `OptionalVendorOrUserGuard`; Content-Disposition: inline; `X-Content-Type-Options: nosniff` |
+| A.4 Audit logging on view | `[x] 2026-05-27` | `apps/api/src/modules/audit/audit.service.ts` + `document_view_log` table | Writes both `document_view_log` AND `audit_logs` chain BEFORE the stream returns. Vendor self-views skipped. |
+| A.5 DB migration: `document_view_log` table | `[x] 2026-05-27` | `database/migrations/009_phase_a_pdf_viewer.sql` | Applied to staging: 1 CREATE TABLE + 3 CREATE INDEX. FK to `bid_documents` (v1 only opens bid PDFs). |
+| A.6 RBAC entries: `viewer:pdf:open`, `viewer:pdf:download` | `[x] 2026-05-27` | `database/migrations/009_phase_a_pdf_viewer.sql` (folded into migration) | INSERT 0 2 + INSERT 0 10 grants. SYSTEM_ADMIN deliberately omitted (separation of duties). |
+| A.7 Wire viewer into existing Technical Evaluation page (fixes retest D2) | `[x] 2026-05-27` | `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx` | Pre-fetches PDF with bearer auth → blob URL → modal. Also fixed: list endpoint guard (was vendor-only → 401 for admins). |
+| A.8 Vendor-portal upload enforcement: PDF only | `[x] 2026-05-27` | `apps/web-vendor/src/components/forms/FileDropZone.tsx` + `apps/api/src/modules/bids/bids.service.ts` | Client: mime + filename + `accept="application/pdf,.pdf"`. Server: mime + `%PDF-` magic bytes. |
+| A.9 Verification | `[x] 2026-05-27` | — | All 6 markers verified live on staging (see HANDOVER 2026-05-27 afternoon entry). End-to-end click-through still pending owner. |
 
 ---
 

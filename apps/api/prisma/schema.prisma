@@ -565,8 +565,8 @@ model Tender {
   description           String?          @db.Text
   departmentId          String           @map("department_id") @db.Uuid
   category              String?          @db.VarChar(128)
-  tenderType            String?          @map("tender_type") @db.VarChar(64)
-  budgetEstimate        Decimal?         @map("budget_estimate") @db.Decimal(15, 2)
+  procurementType       String?          @map("tender_type") @db.VarChar(64)
+  estimatedBudget       Decimal?         @map("budget_estimate") @db.Decimal(15, 2)
   currency              String?          @db.Char(3)
   visibility            TenderVisibility @default(PUBLIC)
   status                TenderStatus     @default(DRAFT)
@@ -658,7 +658,6 @@ model TenderClarification {
   askedByUserId         String?             @map("asked_by_user_id") @db.Uuid
   askedByVendorUserId   String?             @map("asked_by_vendor_user_id") @db.Uuid
   question              String              @db.Text
-  isPublic              Boolean             @default(false) @map("is_public")
   status                ClarificationStatus @default(OPEN)
   createdAt             DateTime            @default(now()) @map("created_at")
 
@@ -676,6 +675,7 @@ model TenderClarificationReply {
   clarificationId  String   @map("clarification_id") @db.Uuid
   repliedByUserId  String   @map("replied_by_user_id") @db.Uuid
   answer           String   @db.Text
+  isPublic         Boolean  @default(false) @map("is_public")
   createdAt        DateTime @default(now()) @map("created_at")
 
   clarification  TenderClarification @relation(fields: [clarificationId], references: [id], onDelete: Cascade)
@@ -940,6 +940,22 @@ model BidDocument {
   fileIntegrityChecks FileIntegrityCheck[]
 
   @@map("bid_documents")
+}
+
+model DocumentViewLog {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  bidDocumentId String   @map("bid_document_id") @db.Uuid
+  tenderId      String?  @map("tender_id") @db.Uuid
+  bidId         String?  @map("bid_id") @db.Uuid
+  viewContext   String   @map("view_context") @db.VarChar(64)
+  viewedAt      DateTime @default(now()) @map("viewed_at")
+  ipAddress     String?  @map("ip_address") @db.VarChar(45)
+  userAgent     String?  @map("user_agent") @db.Text
+
+  @@index([bidDocumentId])
+  @@index([tenderId])
+  @@map("document_view_log")
 }
 
 model BidSubmissionReceipt {

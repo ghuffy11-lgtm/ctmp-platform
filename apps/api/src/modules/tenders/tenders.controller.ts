@@ -1,5 +1,7 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Delete, Get, Post, Patch, Body, Param, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { OptionalVendorOrUserGuard } from '../../common/guards/optional-vendor-or-user.guard';
@@ -10,6 +12,8 @@ import { TendersService } from './tenders.service';
 import { CreateTenderDto } from './dto/create-tender.dto';
 import { UpdateTenderDto } from './dto/update-tender.dto';
 import { ListTendersDto } from './dto/list-tenders.dto';
+
+const MAX_TENDER_DOC_BYTES = 50 * 1024 * 1024;
 
 @ApiTags('tenders')
 @ApiBearerAuth()
@@ -51,8 +55,42 @@ export class TendersController {
   @Get(':id/documents/:documentId')
   @RequirePermissions('tender:view')
   @ApiOperation({ operationId: 'downloadTenderDocument', summary: 'Download tender document' })
-  downloadDocument(@Param('id') id: string, @Param('documentId') documentId: string) {
-    return this.tendersService.downloadDocument(id, documentId);
+  async downloadDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @CurrentUser('id') userId: string,
+    @Res() res: Response,
+  ) {
+    const result = await this.tendersService.streamDocument(id, documentId, userId);
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', String(result.fileSize ?? 0));
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename.replace(/"/g, '')}"`);
+    result.stream.pipe(res);
+  }
+
+  // BUG-012: Tender RFQ document upload + delete pipeline.
+  @Post(':id/documents')
+  @RequirePermissions('tender:edit')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_TENDER_DOC_BYTES } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ operationId: 'uploadTenderDocument', summary: 'Upload a tender RFQ document (multipart, server SHA-256)' })
+  uploadDocument(
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.uploadDocument(id, file, userId);
+  }
+
+  @Delete(':id/documents/:documentId')
+  @RequirePermissions('tender:edit')
+  @ApiOperation({ operationId: 'deleteTenderDocument', summary: 'Delete a tender RFQ document (only editable statuses)' })
+  deleteDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.deleteDocumentEntry(id, documentId, userId);
   }
 
   @Post(':id/submit-for-approval')

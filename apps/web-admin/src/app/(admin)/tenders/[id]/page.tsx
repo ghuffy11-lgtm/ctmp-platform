@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { get, post } from '@/lib/api';
+import { get, post, del } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import {
@@ -28,10 +28,11 @@ import {
 
 interface TenderDocument {
   id: string;
-  fileName: string;
+  filename: string;
   fileSize: number;
   uploadedAt: string;
-  fileType: string;
+  mimeType: string;
+  checksumSha256?: string;
 }
 
 interface TenderDetail {
@@ -91,12 +92,14 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function getFileIcon(fileType: string): React.ReactNode {
-  if (fileType.includes('pdf')) return <FileText className="w-5 h-5 text-text-secondary" />;
-  if (fileType.includes('word') || fileType.includes('doc')) return <FileText className="w-5 h-5 text-text-secondary" />;
-  if (fileType.includes('sheet') || fileType.includes('excel') || fileType.includes('xls')) return <Table2 className="w-5 h-5 text-text-secondary" />;
+function getFileIcon(mimeType: string): React.ReactNode {
+  if (mimeType.includes('pdf')) return <FileText className="w-5 h-5 text-text-secondary" />;
+  if (mimeType.includes('word') || mimeType.includes('doc')) return <FileText className="w-5 h-5 text-text-secondary" />;
+  if (mimeType.includes('sheet') || mimeType.includes('excel') || mimeType.includes('xls')) return <Table2 className="w-5 h-5 text-text-secondary" />;
   return <Paperclip className="w-5 h-5 text-text-secondary" />;
 }
+
+const TENDER_DOC_ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 const EDITABLE_STATUSES = ['Draft', 'Internal Review', 'Approved'];
 const CANCELLABLE_STATUSES = ['Draft', 'Internal Review', 'Approved', 'Published', 'Clarification Period'];
@@ -109,6 +112,9 @@ export default function TenderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
 
   async function loadTender() {
     setLoading(true);
@@ -136,6 +142,68 @@ export default function TenderDetailPage() {
       alert(err instanceof Error ? err.message : 'Action failed');
     } finally {
       setActionLoading(null);
+    }
+  }
+
+  // BUG-012: tender RFQ document upload pipeline.
+  async function handleDocUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingDoc(true);
+    setDocError(null);
+    try {
+      const token = getAccessToken();
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+      const res = await fetch(`${apiBase}/api/v1/tenders/${tenderId}/documents`, {
+        method: 'POST',
+        body: fd,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(body.message ?? res.statusText);
+      }
+      await loadTender();
+    } catch (err) {
+      setDocError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploadingDoc(false);
+    }
+  }
+
+  async function handleDocDelete(docId: string, filename: string) {
+    if (!confirm(`Delete "${filename}"? This cannot be undone.`)) return;
+    try {
+      const token = getAccessToken();
+      await del(`/tenders/${tenderId}/documents/${docId}`, token);
+      await loadTender();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Delete failed');
+    }
+  }
+
+  async function handleDocDownload(docId: string, filename: string) {
+    try {
+      const token = getAccessToken();
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const res = await fetch(`${apiBase}/api/v1/tenders/${tenderId}/documents/${docId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Download failed');
     }
   }
 
@@ -380,12 +448,30 @@ export default function TenderDetailPage() {
                   </span>
                 </div>
                 {EDITABLE_STATUSES.includes(tender.status) && (
-                  <button className="flex items-center gap-1.5 text-sm text-accent hover:underline font-semibold">
-                    <Upload className="w-4 h-4" />
-                    Upload
-                  </button>
+                  <>
+                    <input
+                      ref={docInputRef}
+                      type="file"
+                      accept={TENDER_DOC_ACCEPT}
+                      onChange={handleDocUpload}
+                      className="hidden"
+                    />
+                    <button
+                      onClick={() => docInputRef.current?.click()}
+                      disabled={uploadingDoc}
+                      className="flex items-center gap-1.5 text-sm text-accent hover:underline font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Upload className="w-4 h-4" />
+                      {uploadingDoc ? 'Uploading…' : 'Upload'}
+                    </button>
+                  </>
                 )}
               </div>
+              {docError && (
+                <div className="px-6 py-2 bg-danger/5 border-b border-danger/20 text-xs text-danger">
+                  {docError}
+                </div>
+              )}
               {tender.documents.length === 0 ? (
                 <div className="py-10 text-center">
                   <FolderOpen className="w-10 h-10 text-text-secondary/30 mx-auto mb-2" />
@@ -408,8 +494,8 @@ export default function TenderDetailPage() {
                       <tr key={doc.id} className="hover:bg-bg/60 transition-colors">
                         <td className="px-6 py-3.5">
                           <div className="flex items-center gap-3">
-                            {getFileIcon(doc.fileType)}
-                            <span className="text-sm text-text-primary">{doc.fileName}</span>
+                            {getFileIcon(doc.mimeType)}
+                            <span className="text-sm text-text-primary">{doc.filename}</span>
                           </div>
                         </td>
                         <td className="px-6 py-3.5 text-sm text-text-secondary">{formatFileSize(doc.fileSize)}</td>
@@ -419,12 +505,24 @@ export default function TenderDetailPage() {
                           })}
                         </td>
                         <td className="px-6 py-3.5 text-right">
-                          <button
-                            className="p-1.5 hover:bg-bg rounded-lg text-text-secondary hover:text-accent transition-colors"
-                            title="Download"
-                          >
-                            <Download className="w-4.5 h-4.5" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => handleDocDownload(doc.id, doc.filename)}
+                              className="p-1.5 hover:bg-bg rounded-lg text-text-secondary hover:text-accent transition-colors"
+                              title="Download"
+                            >
+                              <Download className="w-4.5 h-4.5" />
+                            </button>
+                            {EDITABLE_STATUSES.includes(tender.status) && (
+                              <button
+                                onClick={() => handleDocDelete(doc.id, doc.filename)}
+                                className="p-1.5 hover:bg-danger/5 rounded-lg text-text-secondary hover:text-danger transition-colors"
+                                title="Delete"
+                              >
+                                <AlertCircle className="w-4.5 h-4.5" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}

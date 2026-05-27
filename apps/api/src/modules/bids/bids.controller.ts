@@ -82,15 +82,39 @@ export class BidsController {
     return this.bidsService.uploadDocument(bidId, parseEnvelopeType(envelopeType), file, vendor);
   }
 
-  @UseGuards(VendorJwtAuthGuard)
+  // BUG-022 / retest D2: list must serve both vendors (own DRAFT envelope) and
+  // admin users (envelope must be OPENED for technical, OPENED + commercial:view
+  // for commercial). VendorJwtAuthGuard alone returned 401 to admins.
+  @UseGuards(OptionalVendorOrUserGuard)
   @Get('bids/:bidId/envelopes/:envelopeType/documents')
   @ApiOperation({ operationId: 'listBidEnvelopeDocuments', summary: 'List documents currently attached to an envelope' })
   listEnvelopeDocs(
     @Param('bidId') bidId: string,
     @Param('envelopeType') envelopeType: string,
-    @CurrentUser() vendor: any,
+    @CurrentUser() user: any,
   ) {
-    return this.bidsService.listEnvelopeDocuments(bidId, parseEnvelopeType(envelopeType), vendor);
+    return this.bidsService.listEnvelopeDocuments(bidId, parseEnvelopeType(envelopeType), user);
+  }
+
+  // BUG-037 Phase A. Stream a bid PDF inline for the modal viewer. Service
+  // writes the audit row BEFORE the stream begins (master plan rule).
+  @UseGuards(OptionalVendorOrUserGuard)
+  @Get('bids/:bidId/envelopes/:envelopeType/documents/:documentId/view')
+  @ApiOperation({ operationId: 'viewBidDocument', summary: 'Stream a bid document inline for the in-app viewer' })
+  async viewBidDocument(
+    @Param('bidId') bidId: string,
+    @Param('envelopeType') envelopeType: string,
+    @Param('documentId') documentId: string,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    parseEnvelopeType(envelopeType); // validate path segment
+    const result = await this.bidsService.viewBidDocument(bidId, documentId, user);
+    res.setHeader('Content-Type', result.mimeType || 'application/pdf');
+    res.setHeader('Content-Length', String(result.fileSize ?? 0));
+    res.setHeader('Content-Disposition', `inline; filename="${result.filename.replace(/"/g, '')}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    result.stream.pipe(res);
   }
 
   @UseGuards(VendorJwtAuthGuard)
