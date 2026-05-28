@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { getAccessToken, decodeToken, clearTokens } from '@/lib/auth';
 import { Bell, LogOut } from 'lucide-react';
@@ -30,7 +31,12 @@ function titleForPath(pathname: string): string {
 export function TopNavBar() {
   const router = useRouter();
   const pathname = usePathname();
-  const token = getAccessToken();
+  // SSR has no cookies; defer token-derived UI to after mount so server and
+  // first client render produce identical DOM (avoids React #418).
+  const [token, setToken] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    setToken(getAccessToken());
+  }, []);
   const payload = token ? decodeToken(token) : null;
   const username = payload?.username ?? '';
   const displayName = username

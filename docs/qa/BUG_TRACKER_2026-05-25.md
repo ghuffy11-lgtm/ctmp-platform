@@ -75,6 +75,7 @@ The user reports observations in chat → this doc captures them with file:line 
 | BUG-026 | High | Feature | Admin → Commercial Comparison | 2026-05-27 | **Closed by Phase D (BUG-039).** Override-with-justification is now the standard path; the new AwardConfirmDialog enforces text + PDF for any non-lowest-PASS pick. |
 | BUG-038 | Medium | Feature | Admin → Awarded tender → Award Minutes PDF | 2026-05-27 | **Phase E complete.** `award-minutes.service.ts` renders HTML→PDF via puppeteer-core + system chromium (api.Dockerfile updated with chromium-alpine + fonts). PDF includes header, decision summary, justification block, all bids considered (winner highlighted, FAIL grayed), committee attendance, notification opt-in flags, immutable SHA-256 footer. Always generates a fresh copy per master plan H2. New `GET /tenders/:id/award/minutes.pdf` gated by `award:minutes:generate`. "Generate Award Minutes" button on tender detail page (Awarded status only) triggers download. award_minutes table populated; each generation appends a new row + storage object. |
 | BUG-043 | Medium | Feature | Admin → Settings → Evaluation Criteria Library | 2026-05-28 | **Phase F (library) complete.** Migration 014 creates `evaluation_criteria_library` table (+ 6 starter seeds), `criteria:library:manage` + `criteria:tender:edit` permissions. NEW NestJS module `evaluation-criteria` with library CRUD endpoints (`GET/POST /evaluation-criteria/library`, `PUT/DELETE /evaluation-criteria/library/:id`). Soft-delete only (is_active=false). NEW `/settings/evaluation-criteria` admin page with full CRUD UI + show-inactive toggle. Sidebar entry gated by `criteria:library:manage`. |
+| BUG-046 | Critical | Bug | Admin layout → Sidebar + TopNavBar | 2026-05-29 | **Hydration crash (React #418) on every admin page.** `Sidebar.tsx:54` and `TopNavBar.tsx:33` called `getAccessToken()` during render. SSR has no `document.cookie` → render produced 1-item sidebar + "User" placeholder. Client hydration with cookie → render produced 14-item sidebar + real user. Mismatched DOM → React threw #418 → admin layout crashed into error overlay → every page beneath looked broken (Commercial Comparison blank, Phase A modal not openable, sidebar gates not effective, etc). Fix: deferred token read behind `useEffect`; both files now use `useState(undefined)` + `useEffect(setToken(getAccessToken()))` so SSR and first client render produce identical DOM. Verified SSR `<nav>` contents = `['/dashboard']` on all admin routes post-fix; new layout chunk hash `a2eb0aea5e608a64`. |
 | BUG-045 | Low | Cleanup | Reports module → Remove Commercial Comparison export | 2026-05-28 | **Phase G complete.** Removed the `commercial_comparison` entry from the REPORT_CATALOG in `reports.service.ts` + the case branch + the `commercialComparison()` private method in `report-renderer.service.ts`. The card automatically disappears from the Reports & Analytics UI (admin page reads the catalog from `GET /reports`). New attempts to `POST /reports/commercial_comparison/export` return `404 Unknown report code`. All other report codes (tender_summary, vendor_directory, vendor_activity, bid_submissions, technical_evaluations, award_history, audit_trail) still work. BUG-033 marked superseded in the tracker. |
 | BUG-044 | Medium | Feature | Admin → Tender edit → Per-tender Criteria Editor | 2026-05-28 | **Phase F (per-tender) complete.** `PUT /tenders/:id/criteria` atomic replace — validates weights sum to 100 (±0.05 FP slop), unique codes, positive max-scores, transactional upsert+delete. Gated by `criteria:tender:edit` and tender status (Draft/InternalReview/Approved only). NEW `<TenderCriteriaEditor>` component mounted on `/tenders/[id]/edit` page — inline rows, add-from-library OR custom, live weight-sum indicator, mandatory-gate toggle, Save disabled until weights==100. Technical Evaluation scorecard now reads `GET /tenders/:id/criteria` (falls back to DEFAULT_CRITERIA for pre-Phase-F tenders). |
 | BUG-042 | Medium | Feature | Vendor portal + Notifications → Optional award notifications | 2026-05-27 | **Phase E complete.** Migration 013 seeds TENDER_AWARDED_WINNER + TENDER_AWARDED_LOSER notification templates. AwardService.dispatchAwardNotifications() resolves recipients by VendorUser.isPrimaryContact (falls back to all active users); auto-called from confirmAward() when opt-in flags TRUE (best-effort, failures audit-logged but don't roll back). Manual re-trigger: `POST /tenders/:id/award/notify` (perm `notification:vendor:trigger`) re-dispatches with optional body flags. Vendor portal `/bids/[bidId]` shows celebratory emerald "You have been awarded" banner when bid.status=AWARDED, thank-you slate "Awarded to another vendor" when tender is Awarded/Closed but they didn't win. |
@@ -140,7 +141,7 @@ The user reports observations in chat → this doc captures them with file:line 
 
 ## BUG-004 — Admin tender detail: Technical Documents count shows 0 even when docs exist
 
-- **Status:** Open
+- **Status:** ✅ **Fixed 2026-05-28**
 - **Severity:** High
 - **Discovered:** 2026-05-25 (tender `TDR-2026-0007`)
 - **Component:** Admin portal → Tender Detail → "Tender Documents" section
@@ -157,7 +158,7 @@ The user reports observations in chat → this doc captures them with file:line 
 
 ## BUG-005 — Admin tender detail: "Days Left" widget shows no number
 
-- **Status:** Open
+- **Status:** ✅ **Fixed 2026-05-28**
 - **Severity:** Medium
 - **Discovered:** 2026-05-25 (tender `TDR-2026-0007`)
 - **Component:** Admin portal → Tender Detail → "Days Left" widget
@@ -189,7 +190,7 @@ The user reports observations in chat → this doc captures them with file:line 
 
 ## BUG-007 — Admin tender detail: Workflow Progress doesn't show current stage [FIXED 2026-05-26]
 
-- **Status:** Open
+- **Status:** ✅ **Fixed 2026-05-28**
 - **Severity:** High
 - **Discovered:** 2026-05-25 (tender `TDR-2026-0007`, currently in `Commercial Sealed`)
 - **Component:** Admin portal → Tender Detail → "Workflow Progress" visualisation
@@ -208,7 +209,7 @@ The user reports observations in chat → this doc captures them with file:line 
 
 ## BUG-NA-001 — "1 jusn 2026" date
 
-- **Status:** Not a bug
+- **Status:** ✅ **Fixed 2026-05-28**
 - **Severity:** —
 - **Discovered:** 2026-05-25 (user report)
 - **Component:** Admin portal → Tender Detail → Submission Deadline
@@ -220,7 +221,7 @@ The user reports observations in chat → this doc captures them with file:line 
 
 ## BUG-008 — Tender create form missing Procurement Type field
 
-- **Status:** Open (decisions locked 2026-05-26)
+- **Status:** ✅ **Fixed 2026-05-28**
 - **Type:** Bug
 - **Severity:** Medium
 - **Discovered:** 2026-05-26 (manual E2E)
@@ -255,7 +256,7 @@ The user reports observations in chat → this doc captures them with file:line 
 
 ## BUG-009 — Tender edit form: Department editable only in Draft
 
-- **Status:** Open (decision locked 2026-05-26)
+- **Status:** ✅ **Fixed 2026-05-28**
 - **Type:** Bug + business-rule decision
 - **Severity:** Medium
 - **Discovered:** 2026-05-26
@@ -281,7 +282,7 @@ The user reports observations in chat → this doc captures them with file:line 
 
 ## BUG-010 — Estimated Budget on create + edit (writable in Draft + Internal Review, locked after Approval)
 
-- **Status:** Open (decisions locked 2026-05-26)
+- **Status:** Open **Inprogress  2026-05-28**
 - **Type:** Bug + business-rule decision
 - **Severity:** High
 - **Discovered:** 2026-05-26
@@ -310,12 +311,13 @@ The user reports observations in chat → this doc captures them with file:line 
   4. Approve tender → edit shows budget as read-only with hint.
   5. Create Draft without budget → try Publish → 400 "Estimated Budget is required before publishing".
 - **Notes:** Bundled with BUG-008 + BUG-009. Same redeploy. Per-tender currency configurability deferred — system-wide KWD assumption is acceptable for v1.
+  **Notes 2026-05-28** When creating a new tender Estimate Budget in KWD, but when checking tender under Key Details it shows in $ instead ok KWD
 
 ---
 
 ## BUG-011 — Tender edit (pre-approval) rejected with 400 "property … should not exist"
 
-- **Status:** Open — **bundled with BUG-008/9/10** (decision 2026-05-26)
+- **Status:** ✅ **Fixed 2026-05-28**
 - **Type:** Bug (auto-resolved by bundle)
 - **Severity:** High
 - **Discovered:** 2026-05-26
@@ -331,7 +333,7 @@ The user reports observations in chat → this doc captures them with file:line 
 
 ## BUG-012 — Tender RFQ document upload (build feature end-to-end)
 
-- **Status:** Open (decisions locked 2026-05-26)
+- **Status:** Open **Inprogress  2026-05-28**
 - **Type:** Bug + new feature (both ends missing)
 - **Severity:** High
 - **Discovered:** 2026-05-26
@@ -366,6 +368,8 @@ The user reports observations in chat → this doc captures them with file:line 
   5. Try Publish with zero docs → 400 "At least one RFQ document is required". Add a doc → Publish succeeds.
   6. After Publish, Upload + Delete buttons are hidden.
 - **Notes:** Critical for the procurement workflow — without RFQ docs, vendors have nothing to bid against. Should ship before any pilot vendor onboarding. Related to BUG-004 (display side) and BUG-014 (Description tab attachment view).
+  **Notes 2026-05-28** Upload button works,
+  **New Feature 2026-05-28** we need Tender Documents allow upload when creating a new tender also, means allow upload when creating tender.
 
 ---
 
@@ -416,7 +420,7 @@ The user reports observations in chat → this doc captures them with file:line 
 - **Resolution:** Once BUG-004 (display) + BUG-012 (upload pipeline) ship, the Documents card on the Overview tab will show attached docs. BUG-014 closes automatically — no separate code change.
 - **Verification (as part of the bundle):** Open a tender that has documents attached → Overview tab shows the Documents card with each filename + size + upload date + download link, right below the Project Description card.
 - **Notes:** No standalone work. Mark Fixed at the same time as BUG-004 + BUG-012 (a single redeploy verifies all three).
-
+  **Notes 2026-05-28** Attachemnt can Only be downloaded, there is no option to view, there should be option to view the attachment in full window.  
 ---
 
 ## BUG-015 — INVITATION_ONLY tender workflow (build end-to-end)
@@ -468,7 +472,7 @@ The user reports observations in chat → this doc captures them with file:line 
   3. After Publish, try to remove an invited vendor → blocked. Try to add a new vendor → succeeds.
   4. Close Submissions → Manage panel becomes fully read-only.
 - **Notes:** Tightly coupled to BUG-016 (notification policy) and BUG-031 (vendor visibility — also a confidentiality bug). After this lands, BUG-031 may be auto-resolved.
-
+  **Notes 2026-05-28** no option to select companies to send to .. there is nothing can be done.
 ---
 
 ## BUG-016 — Tender publication notification policy
@@ -505,7 +509,7 @@ The user reports observations in chat → this doc captures them with file:line 
   3. Post-publish, admin adds 4th invitee → MailHog shows 1 new email immediately.
   4. NotificationLog has SENT rows for each dispatch with the correct template code + recipient.
 - **Notes:** Tightly coupled to BUG-015 (INVITATION_ONLY workflow). Implement BUG-015 first, then bolt notifications on top. Reminders deferred — list as future feature.
-
+**Notes 2026-05-28** there is nothing
 ---
 
 ## BUG-017 — Clarification attachments (vendor questions + admin replies)
@@ -543,7 +547,7 @@ The user reports observations in chat → this doc captures them with file:line 
   4. Upload an `.exe` → rejected with MIME error.
   5. Audit log shows CLARIFICATION_DOCUMENT_UPLOADED with actor + clarification reference.
 - **Notes:** Reuses BUG-012 storage pattern. Could be deployed together to share the storage refactor.
-
+**Notes 2026-05-28** No document upload option. just message.
 ---
 
 ## BUG-018 — Clarifications: Print → window.print + Export → PDF report

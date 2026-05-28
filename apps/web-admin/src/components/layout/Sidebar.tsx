@@ -51,8 +51,14 @@ const navItems: Array<{
 
 export function Sidebar() {
   const pathname = usePathname();
-  const token = getAccessToken();
+  // SSR has no cookies; reading the token during render would diverge from
+  // the hydrated client render and trip React #418. Defer until after mount.
+  const [token, setToken] = useState<string | undefined>(undefined);
   const [unackCount, setUnackCount] = useState(0);
+
+  useEffect(() => {
+    setToken(getAccessToken());
+  }, []);
 
   const canViewAudit = !!token && hasPermission(token, 'audit:view');
 

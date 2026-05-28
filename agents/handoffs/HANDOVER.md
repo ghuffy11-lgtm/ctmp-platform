@@ -6,6 +6,79 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-29 — BUG-046 fix: admin layout hydration crash (React #418)
+
+**Date/time:** 2026-05-29 ~00:35 GMT+3 (post owner click-through)
+**Agent/task:** Owner reported "Commercial Comparison shows nothing — React #418" + a wide swathe of Phase A/B/C/F/G checkboxes failing in the browser despite my server-side checks passing. Investigation identified ONE root cause: SSR/client hydration mismatch in the shared admin layout, which crashed every gated admin page into the React error overlay.
+
+### Root cause
+
+- `apps/web-admin/src/components/layout/Sidebar.tsx:54` — `const token = getAccessToken()` read during render.
+- `apps/web-admin/src/components/layout/TopNavBar.tsx:33` — same anti-pattern.
+- `getAccessToken()` calls `js-cookie` which reads `document.cookie`.
+- SSR: no `document` → returns `undefined` → Sidebar renders 1 item (Dashboard only), TopNav renders "User"/"Admin" placeholders.
+- Client hydration: cookie populated → Sidebar renders 14 items, TopNav renders real user.
+- DOM divergence → React #418 → admin layout subtree replaced with the minified error overlay → every page below it appeared blank or broken regardless of its own state.
+
+### Fix
+
+Standard mounted-flag pattern. Both files now use:
+
+```tsx
+const [token, setToken] = useState<string | undefined>(undefined);
+useEffect(() => { setToken(getAccessToken()); }, []);
+```
+
+SSR + first client render both see `token = undefined` → identical DOM → no hydration mismatch. After `useEffect` fires, `setToken(real)` triggers a normal re-render with the populated sidebar / user pill — clean React state update, not hydration.
+
+### Files (2)
+
+- `apps/web-admin/src/components/layout/Sidebar.tsx` — added `useState<string|undefined>` + `useEffect` for token
+- `apps/web-admin/src/components/layout/TopNavBar.tsx` — same pattern; also added `useState`/`useEffect` imports
+
+### Verification trail
+
+- ✅ `tar` of both files shipped to `/mnt/repo/ctmp-platform/...`
+- ✅ Pre-flight `docker system df`: 32GB images, 523MB build cache — fine
+- ✅ `docker compose --project-name ctmp build --no-cache web-admin` → completed in ~74s; image `ctmp-web-admin:latest` rebuilt
+- ✅ `docker compose up -d --force-recreate web-admin` → container recreated and started clean
+- ✅ Post-deploy SSR HTML for `/commercial-comparison`, `/technical-comparison`, `/reports`, `/dashboard` all show sidebar `<nav>` = `['/dashboard']` only (matches what the first client render now also produces)
+- ✅ Layout chunk hash changed: `8a699182a2c10e14` → `a2eb0aea5e608a64` (proof of rebuild)
+- ✅ User pill SSR text = "User" placeholder (matches first client render)
+
+### Why this single fix unblocks so much
+
+All admin pages mount through `apps/web-admin/src/app/(admin)/layout.tsx`, which renders `<Sidebar />` and `<TopNavBar />`. Both components hydration-crashed, so the entire admin subtree died. Symptoms the owner saw:
+
+- Phase A — PDF viewer modal never mountable (overlay covered it)
+- Phase B — Technical Comparison page appeared blank
+- Phase C — "Commercial comparison not showing anything" + the React #418 in page error
+- Phase D/E — "can't reach this level" (downstream of C being broken)
+- Phase F — per-tender editor `[!]` items might have been affected (needs re-walk)
+- Phase G — Commercial Comparison card "missing" was actually the page crash, not the catalog (catalog verified server-side as correct)
+
+### Server-side findings from the same pass (still open, NOT yet bugs)
+
+These are real but separate from BUG-046, surfaced during the same audit:
+
+1. **Zero active PROCUREMENT_ADMIN users** — the only role granted `comparison:commercial:recommend/confirm`, `award:amend`, `notification:vendor:trigger`. Owner cannot exercise Confirm-Award without first creating a PROCUREMENT_ADMIN user (or granting one of the existing admins that role as a second role).
+2. **Per-criterion technical scores never persisted.** `EvaluateBidDto` accepts only an aggregated `{score, notes}`; the scorecard concatenates per-criterion entries into the `notes` text. `technical_evaluation_scores` table has 0 rows system-wide. Phase B Technical Comparison will show empty per-criterion matrix until the evaluation pipeline is upgraded to write per-criterion rows.
+3. **Per-tender criteria never used.** `tender_technical_criteria` has 0 rows across all tenders — the Phase F editor exists but no tender has been configured with criteria yet.
+4. **SYSTEM_ADMIN holds `commercial:view/download/evaluate/export`** — direct violation of the spec separation-of-duties rule "System Admin does NOT receive commercial visibility by default". Likely from initial 003 seeds; never revoked.
+5. **`viewer:pdf:open` permission is not enforced by the view endpoint.** `bids.service.ts:421` (viewBidDocument) gates on envelope-state + `commercial:view` only. The new perm exists in DB + sidebar gate, but the backend endpoint ignores it.
+6. **PDF viewer serves non-PDF mime types** — 10 legacy `text/plain` bid_documents still streamable; no mime check at the view endpoint.
+7. **Quorum count gate effectively disabled** — all 7 committee_sessions have `required_quorum_count = NULL`; service short-circuits the count check when null; no admin UI to set the value.
+8. **Pre-Phase-D awarded tender (TDR-2026-0005) has no `awards` row** — Amend Award + Generate Award Minutes won't work on legacy awarded tenders.
+
+These should become BUG-047 → BUG-054 once the owner has re-walked the now-unbroken click-through and we can scope them properly.
+
+### Next recommended step
+
+1. **Owner re-walks the click-through** — Phase A/B/C/F editor / G items that previously failed should now mount and render. Phase A modal, Phase C lowest-PASS row, Phase G catalog absence, Phase F sub-items (Add custom / code auto-gen / weight colour / Published lock) all need fresh eyeballs.
+2. After re-walk, decide which of the 8 server-side findings above are worth opening as `BUG-047+`. (Item 1 — create a PROCUREMENT_ADMIN user — is a blocker for any Phase D/E re-walk.)
+
+---
+
 ## 2026-05-28 — Phase G (legacy XLSX export removed) — in-app comparison loop closed
 
 **Date/time:** 2026-05-28 ~00:42 GMT+3 (continuation after `c12f5f5` push, Phase F)
