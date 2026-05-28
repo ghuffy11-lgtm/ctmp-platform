@@ -46,6 +46,8 @@ interface CommitteeSession {
   openedAt?: string;
   remarks?: string;
   chairName?: string;
+  requiredQuorumCount?: number | null;
+  requiredRoleCode?: string;
   members?: CommitteeMember[];
 }
 
@@ -109,6 +111,10 @@ export default function CommitteeOpeningPage() {
   const [sessionDate, setSessionDate] = useState('');
   const [sessionTime, setSessionTime] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  // Phase D quorum config — written to committee_sessions.required_quorum_count
+  // / required_role_code; consulted by the Phase D award confirm flow.
+  const [requiredQuorumCount, setRequiredQuorumCount] = useState<string>('');
+  const [requiredRoleCode, setRequiredRoleCode] = useState<string>('CHAIR');
 
   // ─── Fetch tenders ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -216,15 +222,25 @@ export default function CommitteeOpeningPage() {
       const token = getAccessToken();
       const time = sessionTime || '10:00';
       const scheduledAt = new Date(`${sessionDate}T${time}:00`).toISOString();
+      const parsedQuorum = requiredQuorumCount.trim() === ''
+        ? undefined
+        : Number(requiredQuorumCount);
       await post(
         `/tenders/${selectedTenderId}/committee-sessions`,
-        { scheduledAt, memberIds: selectedMemberIds },
+        {
+          scheduledAt,
+          memberIds: selectedMemberIds,
+          requiredQuorumCount: parsedQuorum,
+          requiredRoleCode: requiredRoleCode || 'CHAIR',
+        },
         token,
       );
       setShowCreateForm(false);
       setSelectedMemberIds([]);
       setSessionDate('');
       setSessionTime('');
+      setRequiredQuorumCount('');
+      setRequiredRoleCode('CHAIR');
       await fetchSessionData(selectedTenderId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create session');
@@ -371,6 +387,10 @@ export default function CommitteeOpeningPage() {
                         Chair: {session.chairName}
                       </span>
                     )}
+                    <span className="flex items-center gap-1.5">
+                      Quorum: {session.requiredQuorumCount ?? '—'}
+                      {session.requiredRoleCode ? ` (+ ${session.requiredRoleCode} present)` : ''}
+                    </span>
                   </div>
                 )}
               </div>
@@ -430,6 +450,30 @@ export default function CommitteeOpeningPage() {
                       placeholder="10:00"
                       className="px-3 py-2 border border-border rounded-lg text-sm"
                     />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Required Quorum (members PRESENT)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={requiredQuorumCount}
+                      onChange={(e) => setRequiredQuorumCount(e.target.value)}
+                      placeholder="leave blank = chair-only gate"
+                      className="px-3 py-2 border border-border rounded-lg text-sm"
+                    />
+                    <p className="text-[11px] text-text-secondary">Minimum present members required at award Confirm time. Blank = no count gate (chair-presence rule still applies).</p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Required Role at Confirm</label>
+                    <select
+                      value={requiredRoleCode}
+                      onChange={(e) => setRequiredRoleCode(e.target.value)}
+                      className="px-3 py-2 border border-border rounded-lg text-sm bg-white"
+                    >
+                      <option value="CHAIR">CHAIR (default)</option>
+                      <option value="PROCUREMENT_ADMIN">PROCUREMENT_ADMIN</option>
+                      <option value="SYSTEM_ADMIN">SYSTEM_ADMIN</option>
+                    </select>
                   </div>
                 </div>
                 <div className="flex flex-col gap-2">

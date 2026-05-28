@@ -100,20 +100,66 @@ export class TechnicalEvaluationService {
     const threshold = bid.tender.technicalPassThreshold
       ? Number(bid.tender.technicalPassThreshold)
       : 70;
-    const result: TechnicalResult = dto.score >= threshold
+
+    // Compute overallScore from per-criterion rows when provided. Weighted
+    // average normalised to 0–100. If only the aggregate `score` is sent
+    // (legacy clients), use it as-is. At least one must be present.
+    let overallScore: number;
+    if (dto.criterionScores && dto.criterionScores.length > 0) {
+      const totalWeight = dto.criterionScores.reduce((s, c) => s + c.weight, 0);
+      if (totalWeight <= 0) {
+        throw new BadRequestException('Sum of criterion weights must be positive');
+      }
+      const weighted = dto.criterionScores.reduce(
+        (s, c) => s + c.score * c.weight,
+        0,
+      );
+      // Each criterion's `score` is already 0–100; weighted average stays 0–100.
+      overallScore = weighted / totalWeight;
+    } else if (typeof dto.score === 'number') {
+      overallScore = dto.score;
+    } else {
+      throw new BadRequestException(
+        'Either `score` or `criterionScores` must be provided',
+      );
+    }
+    overallScore = Math.max(0, Math.min(100, overallScore));
+
+    const result: TechnicalResult = overallScore >= threshold
       ? TechnicalResult.PASS
       : TechnicalResult.FAIL;
 
-    const evaluation = await this.prisma.technicalEvaluation.upsert({
-      where: { bidId_evaluatorUserId: { bidId, evaluatorUserId: evaluatorId } },
-      update: { overallScore: dto.score, comments: dto.notes, result },
-      create: {
-        bidId,
-        evaluatorUserId: evaluatorId,
-        overallScore: dto.score,
-        comments: dto.notes,
-        result,
-      },
+    const evaluation = await this.prisma.$transaction(async tx => {
+      const ev = await tx.technicalEvaluation.upsert({
+        where: { bidId_evaluatorUserId: { bidId, evaluatorUserId: evaluatorId } },
+        update: { overallScore, comments: dto.notes, result },
+        create: {
+          bidId,
+          evaluatorUserId: evaluatorId,
+          overallScore,
+          comments: dto.notes,
+          result,
+        },
+      });
+
+      if (dto.criterionScores && dto.criterionScores.length > 0) {
+        // Atomic replace: drop the evaluator's previous per-criterion rows for
+        // this bid and write the new set. Keeps the comparison aggregation
+        // stable across re-submissions.
+        await tx.technicalEvaluationScore.deleteMany({
+          where: { technicalEvaluationId: ev.id },
+        });
+        await tx.technicalEvaluationScore.createMany({
+          data: dto.criterionScores.map(c => ({
+            technicalEvaluationId: ev.id,
+            criterion: c.criterion,
+            weight: c.weight,
+            score: c.score,
+            comments: c.comments,
+          })),
+        });
+      }
+      return ev;
     });
 
     await this.audit.log({
@@ -123,7 +169,11 @@ export class TechnicalEvaluationService {
       tenderId: bid.tenderId,
       bidId,
       actorUserId: evaluatorId,
-      afterValue: { score: dto.score, result },
+      afterValue: {
+        score: overallScore,
+        result,
+        criterionCount: dto.criterionScores?.length ?? 0,
+      },
       riskLevel: AuditRiskLevel.LOW,
     });
 

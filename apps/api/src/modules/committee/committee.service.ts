@@ -36,6 +36,8 @@ export class CommitteeService {
         location: dto.location,
         createdBy: userId,
         status: CommitteeSessionStatus.SCHEDULED,
+        requiredQuorumCount: dto.requiredQuorumCount ?? null,
+        requiredRoleCode: dto.requiredRoleCode ?? 'CHAIR',
         committeeMembers: {
           create: uniqueMembers.map((userId, idx) => ({
             userId,
@@ -255,6 +257,8 @@ export class CommitteeService {
       openedAt: session.openedAt?.toISOString(),
       remarks: session.minutesText ?? undefined,
       chairName: chair?.user.displayName,
+      requiredQuorumCount: session.requiredQuorumCount ?? null,
+      requiredRoleCode: session.requiredRoleCode ?? 'CHAIR',
       members: session.committeeMembers.map(m => ({
         userId: m.userId,
         name: m.user.displayName,
@@ -289,6 +293,8 @@ export class CommitteeService {
           openedAt: s.openedAt?.toISOString(),
           remarks: s.minutesText ?? undefined,
           chairName: chair?.user.displayName,
+          requiredQuorumCount: s.requiredQuorumCount ?? null,
+          requiredRoleCode: s.requiredRoleCode ?? 'CHAIR',
           members: s.committeeMembers.map((m: typeof s.committeeMembers[number]) => ({
             userId: m.userId,
             name: m.user.displayName,

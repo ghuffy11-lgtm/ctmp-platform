@@ -433,6 +433,15 @@ export class BidsService {
     });
     if (!doc) throw new NotFoundException('Document not found');
 
+    // Master plan A: PDF-only viewer. Non-PDF documents (legacy text/plain etc.
+    // from before BUG-037 upload enforcement) are not streamable through the
+    // view path — the frontend modal viewer assumes PDF.
+    if (doc.mimeType && doc.mimeType !== 'application/pdf') {
+      throw new BadRequestException(
+        `Viewer accepts application/pdf only; this document is ${doc.mimeType}`,
+      );
+    }
+
     const isVendor = !!user?.vendorId;
     if (isVendor) {
       if (doc.bidEnvelope.bid.vendorId !== user.vendorId) {

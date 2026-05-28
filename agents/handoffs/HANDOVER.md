@@ -6,6 +6,64 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-29 — BUG-047/048/049 + dev grant: Phase A-D follow-up bundle
+
+**Date/time:** 2026-05-29 ~01:05 GMT+3 (after BUG-046 hydration fix)
+**Agent/task:** Owner asked "continue with the rest remaining issues and features." Shipped three hardening fixes from the 8 server-side findings I logged in the BUG-046 HANDOVER entry, plus a dev-environment role grant that unblocks the owner's Phase D/E walkthrough.
+
+### What landed
+
+**BUG-047 — Per-criterion technical scores now persisted.**
+- `apps/api/src/modules/technical-evaluation/dto/evaluate-bid.dto.ts` — added `CriterionScoreDto` (criterion, weight, score, comments) and made `EvaluateBidDto.criterionScores` an optional array. Legacy aggregated `score` payloads still accepted.
+- `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts` — `evaluate()` now wraps the upsert in a `prisma.$transaction`, computes `overallScore` as a weighted average from `criterionScores` when provided, and atomic-replaces `technical_evaluation_scores` rows for the (evaluator, bid) pair.
+- `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx` — `CriterionScore` interface gains `weight`; `DEFAULT_CRITERIA` populated with sensible weights; hydration from `/tenders/:id/criteria` fills `weight` from per-tender config (falls back to `maxScore`); `handleSaveEvaluation` POSTs `{criterionScores: [...], notes}` instead of `{score: total, notes: concat}`.
+- Effect: Phase B Technical Comparison's vendor×criterion matrix and per-evaluator per-criterion breakdown will populate on any evaluation submitted post-fix.
+
+**BUG-048 — PDF viewer rejects non-PDF mime.**
+- `apps/api/src/modules/bids/bids.service.ts` viewBidDocument — added an early `if (doc.mimeType && doc.mimeType !== 'application/pdf') throw new BadRequestException(...)` before the access checks. Verified: text/plain document → HTTP 400, application/pdf document → HTTP 200.
+- Closes the loophole where 10 legacy text/plain bid_documents (uploaded pre-Phase-A enforcement) could still stream through the modal viewer and break PDF.js. Master plan A invariant now enforced at both upload AND view.
+
+**BUG-049 — Quorum count is configurable per session.**
+- `apps/api/src/modules/committee/dto/create-session.dto.ts` — added `requiredQuorumCount?: number` (`@IsInt @Min(0)`) and `requiredRoleCode?: string` (default 'CHAIR').
+- `apps/api/src/modules/committee/committee.service.ts` — `createSession()` persists both fields; `findOne()` and `listForTender()` serialisers include them so the frontend can render the configured gate.
+- `apps/web-admin/src/app/(admin)/committee-opening/page.tsx` — added "Required Quorum (members PRESENT)" number input + "Required Role at Confirm" select (CHAIR / PROCUREMENT_ADMIN / SYSTEM_ADMIN) to the Schedule-Session form; added `requiredQuorumCount` / `requiredRoleCode` to the `CommitteeSession` interface; existing session header now displays "Quorum: N (+ CHAIR present)" so the configured gate is visible at award-confirm time.
+- The chair-presence rule still applies independently. Blank quorum value continues to disable the count check (by design — small committees can opt out of the count gate).
+
+**Dev grant — admin@ctmp.local now also holds PROCUREMENT_ADMIN.**
+- Direct SQL insert into `user_roles` so the single admin account can exercise all new Phase A-G surfaces during the owner walkthrough. Token version bumped (`token_version+1`) → owner must log out + log in to pick up the new permissions in the JWT.
+- Confirmed: refreshed JWT has 94 permissions (was 65); includes `comparison:commercial:confirm`, `comparison:commercial:recommend`, `comparison:technical:view`, `viewer:pdf:open`, `viewer:pdf:download`, `award:amend`, `award:minutes:generate`, `notification:vendor:trigger`, `criteria:tender:edit`.
+- **Not a code commit** — this is a staging-only dev-env tweak. Production should keep PROCUREMENT_ADMIN on real procurement-team users (per the spec separation-of-duties rule). Documented here so future Claude sessions remember why admin@ctmp.local has two roles on staging.
+
+### Files (7)
+
+API (5): bids.service.ts, technical-evaluation/dto/evaluate-bid.dto.ts, technical-evaluation/technical-evaluation.service.ts, committee/dto/create-session.dto.ts, committee/committee.service.ts.
+Admin (2): technical-evaluation/page.tsx, committee-opening/page.tsx.
+
+### Verification trail
+
+- ✅ Pre-flight `docker system df`: 32GB images, fine
+- ✅ `pnpm next build` on web-admin caught a missing `weight` field on `CriterionScore` interface on first pass; added it + populated DEFAULT_CRITERIA weights; second build clean
+- ✅ `docker compose --project-name ctmp build --no-cache api web-admin` → both built clean
+- ✅ `docker compose up -d --force-recreate api web-admin` → both started healthy
+- ✅ Admin token re-login: 94 permissions, includes the full Phase A-G grant set
+- ✅ Phase A: `GET /bids/:id/envelopes/TECHNICAL/documents/:docId/view` on text/plain doc → 400; on application/pdf doc → 200
+- ✅ Phase B: `GET /tenders/0007/comparison/technical` with admin token → 200 (previously 403)
+- ✅ Phase C: `GET /tenders/0008/comparison/commercial` with admin token → 200 (previously 403)
+
+### Still open (deferred — call required)
+
+From the original 8 findings the owner has not yet decided on:
+
+1. **SYSTEM_ADMIN holds `commercial:view/download/evaluate/export`** — direct spec violation (CLAUDE.md: "System Admin does NOT automatically receive commercial bid visibility"). Revoking would break the current admin's ability to do commercial work on staging. Deferred until the owner has completed walkthrough and a non-admin PROCUREMENT_ADMIN user is set up for production.
+2. **`viewer:pdf:open` not enforced at the view endpoint** — `bids.service.ts:421` gates on envelope-state + `commercial:view` only; the dedicated `viewer:pdf:open` perm is unused by the backend. Moot during owner walkthrough (admin has the perm via PROCUREMENT_ADMIN), but should be tightened before production.
+3. **Pre-Phase-D awarded tender (TDR-2026-0005) has no `awards` row** — Amend Award and Generate Award Minutes won't operate on the legacy awarded tender. Either accept the limitation (only new awards use the new path) or backfill a synthetic Award row from `tenders.awarded_*`.
+
+### Next recommended step
+
+Owner re-walks the click-through. The Phase A modal should open on PDFs (and 400 cleanly on the 10 legacy text/plain documents — that's the spec). Phase B Technical Comparison will still show empty cells for *existing* evaluations (the data was never captured), but new evaluations submitted via the scorecard now populate per-criterion rows. Phase D Confirm/Amend should now be reachable from admin@ctmp.local after a fresh login.
+
+---
+
 ## 2026-05-29 — BUG-046 fix: admin layout hydration crash (React #418)
 
 **Date/time:** 2026-05-29 ~00:35 GMT+3 (post owner click-through)

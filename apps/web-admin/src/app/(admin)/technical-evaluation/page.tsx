@@ -44,6 +44,9 @@ interface CriterionScore {
   criterion: string;
   description: string;
   maxScore: number;
+  // Weight comes from the tender's per-tender criteria config (or DEFAULT_CRITERIA);
+  // sent through to the backend so per-criterion rows persist with their weight.
+  weight: number;
   score: number | '';
   passed: boolean;
 }
@@ -63,21 +66,25 @@ const DEFAULT_CRITERIA: Omit<CriterionScore, 'score' | 'passed'>[] = [
     criterion: 'Compliance with Technical Specs',
     description: 'Full adherence to Appendix A equipment list and operational parameters.',
     maxScore: 30,
+    weight: 30,
   },
   {
     criterion: 'Team Experience & Qualifications',
     description: 'Years of relevant experience for the assigned Project Manager and Senior Engineers.',
     maxScore: 25,
+    weight: 25,
   },
   {
     criterion: 'Project Methodology & Timeline',
     description: 'Detailing project phase milestones and risk mitigation strategies.',
     maxScore: 25,
+    weight: 25,
   },
   {
     criterion: 'Support & Maintenance SLA',
     description: 'Post-implementation technical support availability and response times.',
     maxScore: 20,
+    weight: 20,
   },
 ];
 
@@ -193,6 +200,9 @@ export default function TechnicalEvaluationPage() {
           criterion: c.name,
           description: c.description ?? '',
           maxScore: c.maxScore,
+          // Fall back to maxScore if weight wasn't configured — keeps the
+          // backend per-criterion weighted-average meaningful.
+          weight: c.weight ?? c.maxScore,
         })));
       } else {
         setTenderCriteria(DEFAULT_CRITERIA);
@@ -287,18 +297,25 @@ export default function TechnicalEvaluationPage() {
     setSubmitError(null);
     try {
       const token = getAccessToken();
-      const criteriaBreakdown = criteria
-        .map(c => `${c.criterion}: ${typeof c.score === 'number' ? c.score : 0}/${c.maxScore}`)
-        .join(' · ');
+      // Phase B: send per-criterion rows so the Technical Comparison matrix can
+      // render vendor×criterion consensus. Backend stores each row in
+      // technical_evaluation_scores and computes the weighted overall score.
+      const criterionScores = criteria.map(c => ({
+        criterion: c.criterion,
+        weight: c.weight,
+        // Normalise per-criterion score to a 0–100 scale (input is `score/maxScore`).
+        score: typeof c.score === 'number' && c.maxScore > 0
+          ? Math.round((c.score / c.maxScore) * 100 * 100) / 100
+          : 0,
+      }));
       const fullNotes = [
         `Recommendation: ${recommendation}`,
-        `Criteria breakdown — ${criteriaBreakdown}`,
         notes ? `Evaluator notes: ${notes}` : '',
       ].filter(Boolean).join('\n');
       await post(
         `/bids/${selectedBid.id}/technical-evaluations`,
         {
-          score: totalScore,
+          criterionScores,
           notes: fullNotes,
         },
         token,
