@@ -45,7 +45,8 @@ WITH new_grants(email, role_code) AS (VALUES
   ('engineer@ctmp.local', 'TECHNICAL_EVALUATOR'),
   ('engineer@ctmp.local', 'APPROVER'),
   ('manager@ctmp.local',  'PROCUREMENT_ADMIN'),
-  ('finance@ctmp.local',  'COMMERCIAL_COMMITTEE_MEMBER')
+  ('finance@ctmp.local',  'COMMERCIAL_COMMITTEE_MEMBER'),
+  ('finance@ctmp.local',  'COMMERCIAL_EVALUATOR')
 )
 INSERT INTO user_roles (user_id, role_id)
 SELECT u.id, r.id
@@ -53,6 +54,34 @@ FROM new_grants g
 JOIN users u ON u.email = g.email
 JOIN roles r ON r.code = g.role_code
 ON CONFLICT DO NOTHING;
+SQL
+
+echo "==> Patching role-permission gaps the workflow needs (idempotent)"
+# These grants close gaps in the baseline role definitions surfaced by the
+# owner's procurement walk: TECHNICAL_EVALUATOR couldn't reply to clarifications,
+# PROCUREMENT_ADMIN couldn't open or finalize technical envelopes, etc.
+$PSQL <<'SQL'
+WITH role_grants(role_code, perm_code) AS (VALUES
+  ('TECHNICAL_EVALUATOR', 'clarification:reply'),
+  ('TECHNICAL_EVALUATOR', 'clarification:view_internal'),
+  ('PROCUREMENT_ADMIN',   'tender:approve'),
+  ('PROCUREMENT_ADMIN',   'technical:open'),
+  ('PROCUREMENT_ADMIN',   'technical:view'),
+  ('PROCUREMENT_ADMIN',   'technical:finalize'),
+  ('PROCUREMENT_ADMIN',   'committee:open_commercial')
+)
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM role_grants g
+JOIN roles r ON r.code = g.role_code
+JOIN permissions p ON p.code = g.perm_code
+ON CONFLICT DO NOTHING;
+SQL
+
+echo "==> Bumping token_version for affected users (forces re-login)"
+$PSQL <<'SQL'
+UPDATE users SET token_version = token_version + 1
+WHERE email IN ('engineer@ctmp.local', 'manager@ctmp.local', 'finance@ctmp.local');
 SQL
 
 echo "==> Inserting 3 vendor companies"
