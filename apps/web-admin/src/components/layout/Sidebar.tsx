@@ -40,7 +40,7 @@ const navItems: Array<{
   { href: '/technical-evaluation', label: 'Technical Evaluation', icon: BarChart3, permission: 'technical:evaluate' },
   { href: '/technical-comparison', label: 'Technical Comparison', icon: BarChart3, permission: 'comparison:technical:view' },
   { href: '/committee-opening', label: 'Committee & Commercial', icon: Scale, anyPermission: ['committee:open_commercial', 'committee:record_attendance', 'commercial:view'] },
-  { href: '/commercial-comparison', label: 'Commercial Comparison', icon: ArrowLeftRight, permission: 'commercial:view' },
+  { href: '/commercial-comparison', label: 'Commercial Comparison', icon: ArrowLeftRight, anyPermission: ['comparison:commercial:view', 'commercial:view'] },
   { href: '/vendors', label: 'Vendor Management', icon: Building2, permission: 'vendor:view' },
   { href: '/reports', label: 'Reports', icon: FileText, permission: 'reports:view' },
   { href: '/audit-log', label: 'Audit Log', icon: History, permission: 'audit:view' },

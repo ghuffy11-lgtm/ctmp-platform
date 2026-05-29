@@ -376,9 +376,10 @@ export class BidsService {
     if (!envelope) throw new NotFoundException('Envelope not found');
 
     // Access model mirrors downloadDocument(): vendors only see their own bid;
-    // admins need the envelope to be OPENED (TECHNICAL) or OPENED + commercial:view
-    // (COMMERCIAL). Phase A re-uses the same gating; Phase C will tighten via
-    // comparison:commercial:view per master plan §I when that page lands.
+    // admins need the envelope to be OPENED (TECHNICAL) or OPENED + either the
+    // legacy `commercial:view` OR the new `comparison:commercial:view`
+    // (COMMERCIAL). BUG-052: accept either perm so committee members holding
+    // only the new perm can expand cards on the Commercial Comparison page.
     const isVendor = !!user?.vendorId;
     if (isVendor) {
       if (bid.vendorId !== user.vendorId) throw new ForbiddenException('Not your bid');
@@ -388,7 +389,7 @@ export class BidsService {
       }
     } else {
       const perms: string[] = user?.permissions ?? [];
-      if (!perms.includes('commercial:view')) {
+      if (!perms.includes('commercial:view') && !perms.includes('comparison:commercial:view')) {
         throw new ForbiddenException('commercial:view permission required');
       }
       if (envelope.status !== EnvelopeStatus.OPENED) {

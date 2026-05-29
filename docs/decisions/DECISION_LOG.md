@@ -18,6 +18,41 @@ Related files:
 
 ## Decisions
 
+### 2026-05-29 — Commercial-flow permission matrix locked (BUG-052)
+
+Date: 2026-05-29
+Decision: Lock the permission grants for the commercial-evaluation + commercial-comparison flow so that (a) SYSTEM_ADMIN has zero commercial visibility, (b) COMMERCIAL_COMMITTEE_MEMBER becomes a full participant who can view + download + enter prices + recommend, (c) COMMERCIAL_EVALUATOR stays as a peer role for outside specialists, and (d) PROCUREMENT_ADMIN remains the sole Confirm authority.
+
+Context: Owner's walkthrough as `finance@` (COMMERCIAL_COMMITTEE_MEMBER) hit a chain of perm errors: the sidebar entry for `/commercial-comparison` did not render (sidebar gates on legacy `commercial:view`, finance had only the new `comparison:commercial:view`); after typing the URL directly, expanding any vendor card returned a 403 "commercial:view permission required" from the bid-documents endpoint; no lowest-PASS auto-highlight because no `commercial_evaluations` rows existed; and no active user held the COMMERCIAL_EVALUATOR role that owns the price-entry permission. The 2026-05-29 handover claimed finance was stacked with COMMERCIAL_EVALUATOR but the DB showed only COMMERCIAL_COMMITTEE_MEMBER (config drift). Master plan §I separates "review/evaluate" from "recommend" from "confirm", and the locked rule "System Admin does NOT receive commercial visibility by default" had been violated by 003-era seeds that granted `commercial:view/download/evaluate` to SYSTEM_ADMIN. Walkthrough captured the issues as WALK-044 to WALK-049.
+
+Options considered:
+  - Keep SYSTEM_ADMIN's commercial perms for staging convenience → rejected: violates spec separation-of-duties; owner has manager@/finance@/committee@ for procurement work.
+  - Grant Confirm to committee members too (full power) → rejected: violates locked rule "Confirm is final. No higher-authority approval layer." and the master-plan PROCUREMENT_ADMIN-as-confirmer model.
+  - Retire COMMERCIAL_EVALUATOR and fold its perms into committee → rejected: loses the ability to bring in an outside finance evaluator who isn't a voting committee member.
+  - Keep committee read-only and route price entry through procurement → rejected: violates owner's WALK-048 expectation that committee members are full participants in commercial review.
+
+Outcome (locked target matrix):
+  - SYSTEM_ADMIN — REVOKE `commercial:view`, `commercial:download`, `commercial:evaluate`, `award:minutes:generate`.
+  - PROCUREMENT_ADMIN — unchanged (`comparison:commercial:view`, `comparison:commercial:recommend`, `comparison:commercial:confirm`, `notification:vendor:trigger`, `award:amend`, `award:minutes:generate`).
+  - COMMERCIAL_EVALUATOR — ADD `commercial:download`, `comparison:commercial:view`, `comparison:commercial:recommend`, `award:minutes:generate`; keeps `commercial:view`, `commercial:evaluate`.
+  - COMMERCIAL_COMMITTEE_MEMBER — ADD `commercial:view`, `commercial:download`, `commercial:evaluate`, `comparison:commercial:recommend`; keeps `comparison:commercial:view`, `commercial:open_committee`, `commercial:view_status`, `committee:record_attendance`, `committee:view_minutes`, `award:minutes:generate`.
+  - PROCUREMENT_OFFICER — unchanged (no commercial perms; separation of duties).
+
+Three companion code changes ship in the same commit so the matrix actually works at runtime:
+  - `apps/api/src/modules/bids/bids.service.ts:391` — `listEnvelopeDocuments` commercial branch now accepts either legacy `commercial:view` OR new `comparison:commercial:view`. This was the source of the "commercial:view permission required" 403 finance hit when expanding a vendor card.
+  - `apps/web-admin/src/components/layout/Sidebar.tsx:43` — `/commercial-comparison` entry switches from `permission: 'commercial:view'` to `anyPermission: ['comparison:commercial:view', 'commercial:view']`, matching the page-level defense-in-depth gate.
+  - Token version bumped on every affected user so caches do not survive the deploy.
+
+Impact: Phase D Confirm flow is now exercisable. Finance/committee can land on the Commercial Comparison page from the sidebar, expand cards, view + download bid PDFs, enter prices on the commercial-evaluation page (which populates `commercialTotal` and triggers the lowest-PASS auto-highlight on Commercial Comparison), and click Recommend to surface the AwardConfirmDialog for the procurement-admin to Confirm. SYSTEM_ADMIN cannot view bid data and cannot regenerate award minutes — procurement team owns those surfaces.
+
+Related files:
+  - `database/migrations/015_phase_perm_matrix_lockdown.sql` (NEW)
+  - `scripts/seed_walkthrough_users.sh`
+  - `apps/api/src/modules/bids/bids.service.ts`
+  - `apps/web-admin/src/components/layout/Sidebar.tsx`
+  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-052)
+  - `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` (WALK-044..049 → ✅ Fixed)
+
 ### 2026-05-28 — In-app comparison pivot loop closed (Phase G removes legacy XLSX export)
 
 Date: 2026-05-28

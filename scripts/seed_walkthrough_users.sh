@@ -83,6 +83,39 @@ JOIN permissions p ON p.code = g.perm_code
 ON CONFLICT DO NOTHING;
 SQL
 
+echo "==> BUG-052: Commercial-flow permission matrix lockdown"
+# Mirrors database/migrations/015_bug052_perm_matrix_lockdown.sql so a fresh
+# seed run reproduces the locked matrix on the same DB whether or not the
+# migration has been applied. Idempotent: DELETEs no-op the second time, INSERTs
+# use ON CONFLICT DO NOTHING.
+$PSQL <<'SQL'
+-- SYSTEM_ADMIN: REVOKE commercial:view/download/evaluate + award:minutes:generate.
+-- CLAUDE.md: "System Admin does NOT automatically receive commercial bid visibility."
+DELETE FROM role_permissions
+WHERE role_id = (SELECT id FROM roles WHERE code = 'SYSTEM_ADMIN')
+  AND permission_id IN (
+    SELECT id FROM permissions
+    WHERE code IN ('commercial:view','commercial:download','commercial:evaluate','award:minutes:generate')
+  );
+
+-- COMMERCIAL_EVALUATOR: add download + recommend + minutes.
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r, permissions p
+WHERE r.code = 'COMMERCIAL_EVALUATOR'
+  AND p.code IN ('commercial:download','comparison:commercial:recommend','award:minutes:generate')
+ON CONFLICT DO NOTHING;
+
+-- COMMERCIAL_COMMITTEE_MEMBER: add view + download + evaluate + recommend.
+-- Committee members are full participants in commercial review per master plan §I + WALK-048.
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r, permissions p
+WHERE r.code = 'COMMERCIAL_COMMITTEE_MEMBER'
+  AND p.code IN ('commercial:view','commercial:download','commercial:evaluate','comparison:commercial:recommend')
+ON CONFLICT DO NOTHING;
+SQL
+
 echo "==> BUG-028 Part B: dept-scoping plumbing"
 $PSQL <<'SQL'
 -- Idempotent: seed the bypass permission row + grants. Roles with this perm

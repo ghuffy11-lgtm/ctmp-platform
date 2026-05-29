@@ -6,6 +6,74 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-29 — BUG-052 shipped: commercial-flow perm matrix lockdown (WALK-044..049 closed)
+
+**Date/time:** 2026-05-29 ~16:50 GMT+3
+**Agent/task:** Owner walking Commercial Comparison as `finance@` hit a chain of perm errors: sidebar entry missing, expanding any vendor card returned 403 "commercial:view permission required", no `commercial_evaluations` rows so no lowest-PASS highlight, COMMERCIAL_EVALUATOR role held by no active user (config drift from prior session). Captured as WALK-044 to WALK-049. After walking the role-perm matrix together with the owner (Path 3 of three options), all four design decisions locked on the Recommended option. Shipped end-to-end as BUG-052 in one bundle.
+
+### Locked perm matrix (per master plan §I + CLAUDE.md separation-of-duties rule)
+
+- **SYSTEM_ADMIN** — REVOKE `commercial:view`, `commercial:download`, `commercial:evaluate`, `award:minutes:generate`. Spec is explicit: System Admin does NOT automatically receive commercial bid visibility. Re-applies and extends migration 007 (which was either not applied or got reverted).
+- **PROCUREMENT_ADMIN** (`manager@`) — unchanged. Sole Confirm authority per locked rule "Confirm is final. No higher-authority approval layer." Keeps `comparison:commercial:view/recommend/confirm`, `notification:vendor:trigger`, `award:amend`, `award:minutes:generate`. Note: does NOT hold the legacy `commercial:*` set; backend gate fix (below) lets them through anyway.
+- **COMMERCIAL_EVALUATOR** — ADD `commercial:download`, `comparison:commercial:recommend`, `award:minutes:generate`. Kept as a peer role for outside specialists.
+- **COMMERCIAL_COMMITTEE_MEMBER** (`finance@`, `committee@`) — ADD `commercial:view`, `commercial:download`, `commercial:evaluate`, `comparison:commercial:recommend`. Committee members become full participants (view docs, download, enter prices jointly, recommend a winner); they do NOT Confirm.
+- **PROCUREMENT_OFFICER** — unchanged (no commercial perms; separation of duties).
+
+### What landed
+
+**Migration 015** — `database/migrations/015_bug052_perm_matrix_lockdown.sql`. Idempotent. Result: `DELETE 3 / INSERT 0 3 / INSERT 0 4 / UPDATE 5` (5 users had token_version bumped — admin + 2 committee members + 2 with evaluator).
+
+**Code change A** — `apps/api/src/modules/bids/bids.service.ts:391`. `listEnvelopeDocuments` commercial branch now accepts either legacy `commercial:view` OR new `comparison:commercial:view`. Closes WALK-045. Graceful migration — no role needs both perms.
+
+**Code change B** — `apps/web-admin/src/components/layout/Sidebar.tsx:43`. `/commercial-comparison` entry switched from `permission:'commercial:view'` to `anyPermission:['comparison:commercial:view','commercial:view']`. Mirrors the page's defense-in-depth gate. Closes WALK-044.
+
+**Seed script update** — `scripts/seed_walkthrough_users.sh`. New "BUG-052: Commercial-flow permission matrix lockdown" block mirrors migration 015 so a fresh seed reproduces the matrix.
+
+**Docs** — DECISION_LOG.md (rationale + locked outcomes), BUG_TRACKER_2026-05-25.md (BUG-052 entry in Fixed table), WALKTHROUGH_TRACKER_2026-05-29.md (WALK-044..049 flipped to ✅).
+
+### Verification trail (all on staging)
+
+- ✅ Pre-flight `docker system df`: 52GB images, 22GB build cache reclaimable. Fine.
+- ✅ Migration 015 applied: `BEGIN/DELETE 3/INSERT 0 3/INSERT 0 4/UPDATE 5/COMMIT`.
+- ✅ Post-migration matrix query confirms 16 grants exactly as planned across SYSTEM_ADMIN (0), PROCUREMENT_ADMIN (4), COMMERCIAL_EVALUATOR (6), COMMERCIAL_COMMITTEE_MEMBER (6).
+- ✅ `docker compose --project-name ctmp build --no-cache api web-admin` — both built clean (~165s).
+- ✅ `docker compose up -d --force-recreate api web-admin` — both started healthy.
+- ✅ JWT perms for finance@: view + download + evaluate + comparison:view + comparison:recommend + minutes; NO confirm.
+- ✅ JWT perms for manager@: NO legacy commercial:*; YES comparison:view + comparison:recommend + comparison:confirm + minutes.
+- ✅ JWT perms for admin@: zero commercial perms (spec separation of duties restored).
+- ✅ Endpoint smoke (TDR-2026-0013):
+  - finance@ → `/comparison/commercial` = 200, `/bids/.../COMMERCIAL/documents` = 200 (was 403)
+  - manager@ → 200 / 200 (BUG-052 backend OR-gate lets them through)
+  - admin@ → 403 / 403 (spec compliant)
+
+### What's NOT in this commit
+
+- **No price-entry data added** — the matrix unblocks finance@ to enter prices via the commercial-evaluation page; the prices themselves are owner-walked.
+- **No second-token bump for users that just got new role perms via migration** — the migration bumps `token_version + 1` on all carriers of affected roles. Owner needs to log out + back in once after this deploy.
+- **`commercial:download` on PROCUREMENT_ADMIN** — not added. Manager confirms based on the in-app PDF viewer; the download is intentionally a committee/evaluator action. Re-open if Phase E minutes PDF needs manager to save copies.
+- **`commercial:view` parity for the download endpoint** — same OR-gate logic should propagate to the per-document download path if a non-evaluator/committee role ever needs to download. Not currently a walkthrough blocker; left for follow-up if surfaced.
+
+### Walkthrough resumes here
+
+Owner re-logs in (any account that already had perms — token_version was bumped):
+
+1. As `finance@`: navigate to `/commercial-comparison` → entry now appears in sidebar. Pick TDR-2026-0013. Expand a vendor card. Commercial PDF list should populate (no 403). Then go to `/commercial-evaluation` (existing page) and enter a price on both vendors. Return to `/commercial-comparison` — lowest-PASS row should auto-highlight green. Click **Recommend (lowest PASS)** to surface the AwardConfirmDialog.
+2. Switch to `manager@`: same tender, expand cards (works via BUG-052 OR-gate), click Recommend → AwardConfirmDialog → fill the (zero-friction for lowest-PASS) Confirm. Tender → `Awarded`. Generate Award Minutes PDF.
+3. Capture any new findings as WALK-050+.
+
+### Files modified this segment
+
+- `database/migrations/015_bug052_perm_matrix_lockdown.sql` (NEW)
+- `apps/api/src/modules/bids/bids.service.ts` — listEnvelopeDocuments OR-gate
+- `apps/web-admin/src/components/layout/Sidebar.tsx` — anyPermission on /commercial-comparison
+- `scripts/seed_walkthrough_users.sh` — matrix-lockdown block + reproduces 015
+- `docs/decisions/DECISION_LOG.md` — locked decision with full rationale
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-052 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-044..049 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+---
+
 ## 2026-05-29 — Owner walkthrough in progress; BUG-050 + perm-grant patches shipped; 39 walkthrough findings captured
 
 **Date/time:** 2026-05-29 ~late evening GMT+3 (continuation of the same day's work)
