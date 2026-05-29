@@ -18,6 +18,31 @@ Related files:
 
 ## Decisions
 
+### 2026-05-29 — Manual commercial-price entry on Commercial Comparison page (BUG-053)
+
+Date: 2026-05-29
+Decision: Add an inline commercial-total entry control on the Commercial Comparison page's per-vendor card. Authorised callers (any user holding `commercial:evaluate`) record the price manually for now. Auto-extract-from-PDF deferred as a future enhancement. Grant PROCUREMENT_ADMIN the three operational commercial perms (`commercial:view` / `:download` / `:evaluate`) so the procurement-team lead can prepare the comparison jointly with finance ahead of the chairman/committee award meeting.
+
+Context: Owner walking BUG-052 surfaced two gaps in the same breath. (1) The admin app never built a UI for the existing `POST /bids/:bidId/commercial-evaluations` endpoint — the backend module was live since Phase 9 but no page consumed it. So even after BUG-052 granted finance@/committee@ the `commercial:evaluate` perm, there was nowhere to *use* it. (2) After BUG-052 my reading of the locked separation-of-duties rule blocked PROCUREMENT_ADMIN from holding any `commercial:*` perm; owner pointed out that the spec rule names SYSTEM_ADMIN explicitly and procurement managers operationally drive the comparison ("in real life chairman is not going to sit and open the commercial, this is procurement manager and finance"). Both gaps surfaced as the workflow being "broken."
+
+Options considered:
+  - Build a separate `/commercial-evaluation` admin page → rejected: third workflow surface for what is fundamentally pre-comparison prep work; master plan already designates the Commercial Comparison page as the canonical commercial surface.
+  - Put the entry on the Committee Opening page (right after envelopes open) → rejected: chairman/committee role is to open the envelopes ceremonially, not type figures; that's procurement+finance prep work that needs to happen on the same page where the comparison lives.
+  - Ship auto-extract from PDF instead of manual entry → rejected by owner directly: "manual is fine as well … lets do manual first." Captured as a deferred enhancement in memory for a later session.
+  - Keep PROCUREMENT_ADMIN out of commercial perms per BUG-052 → rejected: misreads the spec, which separates SYSTEM_ADMIN, not the procurement lead, and contradicts the operational reality of the procurement function.
+
+Outcome: Migration 016 grants PROCUREMENT_ADMIN the three perms and bumps token_version on all PROCUREMENT_ADMIN holders. VendorComparisonCard gains a `CommercialTotalBlock` sub-component that replaces the Phase-F line-items placeholder: editable amount + Save when caller has `commercial:evaluate` and the envelope is OPENED; current value with Edit affordance once recorded; "Awaiting price entry" amber notice for non-evaluator viewers. Page wires `canEvaluate` from JWT and re-fetches comparison on Save so lowest-PASS auto-highlight fires immediately. Seed script mirrors migration 016. Memory file [[project-future-pdf-price-extraction]] captures the deferred auto-extract enhancement so a future session can pick it up.
+
+Impact: Phase D Confirm flow is exercisable end-to-end on a real tender. Manager and finance jointly prep the comparison; chairman/committee then review and award. End-to-end verified on TDR-2026-0013: manager@ entered 15,000 + 18,500 KWD, `priceCount` went 0→2, `lowestPassBidId` materialised pointing at the lower-priced vendor. admin@ correctly 403's on the same endpoint — spec separation-of-duties preserved for SYSTEM_ADMIN.
+
+Related files:
+  - `database/migrations/016_bug053_procurement_admin_commercial.sql` (NEW)
+  - `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — CommercialTotalBlock sub-component
+  - `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — canEvaluate state + onPriceSaved wiring
+  - `scripts/seed_walkthrough_users.sh` — mirrors 016
+  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-053)
+  - Memory: `project_future_pdf_price_extraction.md` (deferred auto-extract)
+
 ### 2026-05-29 — Commercial-flow permission matrix locked (BUG-052)
 
 Date: 2026-05-29

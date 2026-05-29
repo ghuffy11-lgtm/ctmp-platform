@@ -11,10 +11,13 @@ import {
   Clock,
   Building2,
   FileText,
+  Pencil,
   Shield,
   TrendingDown,
 } from 'lucide-react';
 import { CommercialDocumentsList } from '@/components/CommercialDocumentsList';
+import { post } from '@/lib/api';
+import { getAccessToken } from '@/lib/auth';
 
 export interface CardCommercialDoc {
   id: string;
@@ -45,10 +48,13 @@ export interface CardVendor {
 interface Props {
   vendor: CardVendor;
   tenderId: string;
+  tenderCurrency: string;
   isLowestPass: boolean;
   initialExpanded?: boolean;
   selected?: boolean;
+  canEvaluate?: boolean;
   onRecommend: (bidId: string, isLowestPass: boolean) => void;
+  onPriceSaved?: () => void;
 }
 
 function fmtCurrency(amount: number | null, currency: string) {
@@ -99,10 +105,13 @@ function resultPill(result: 'PASS' | 'FAIL' | 'PENDING') {
 export function VendorComparisonCard({
   vendor,
   tenderId,
+  tenderCurrency,
   isLowestPass,
   initialExpanded,
   selected,
+  canEvaluate,
   onRecommend,
+  onPriceSaved,
 }: Props) {
   const [expanded, setExpanded] = useState(!!initialExpanded);
   const isFail = vendor.technicalResult === 'FAIL';
@@ -148,23 +157,14 @@ export function VendorComparisonCard({
 
       {expanded && (
         <div className="border-t border-border bg-bg/30">
-          {/* Block 1: Line items (Phase F placeholder) */}
-          <section className="px-5 py-4 border-b border-border">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2 flex items-center gap-1.5">
-              <TrendingDown className="w-3.5 h-3.5" /> Line items
-            </h4>
-            <div className="text-sm text-text-secondary bg-card border border-dashed border-border rounded-lg p-4">
-              <p>
-                Per-line-item breakdown appears here once the tender has a BOQ template
-                (Phase F). For now, only the bid total is captured.
-              </p>
-              <p className="mt-2">
-                <span className="font-mono font-semibold text-text-primary">
-                  Total: {fmtCurrency(vendor.commercialTotal, vendor.currency)}
-                </span>
-              </p>
-            </div>
-          </section>
+          {/* Block 1: Commercial total — manual price entry by procurement/finance.
+              Future: auto-extract from the commercial PDF on vendor submission. */}
+          <CommercialTotalBlock
+            vendor={vendor}
+            canEvaluate={!!canEvaluate}
+            tenderCurrency={tenderCurrency}
+            onSaved={onPriceSaved}
+          />
 
           {/* Block 2: Technical detail (read-only) */}
           <section className="px-5 py-4 border-b border-border">
@@ -275,5 +275,133 @@ export function VendorComparisonCard({
         </div>
       )}
     </div>
+  );
+}
+
+// BUG-053: inline commercial-total entry. Authorised users (PROCUREMENT_ADMIN
+// + COMMERCIAL_COMMITTEE_MEMBER + COMMERCIAL_EVALUATOR per the BUG-052 matrix)
+// see an editable amount input + Save. Everyone else sees the current value.
+// Future: auto-extract from PDF on submission so this becomes a review step
+// rather than a re-keying step.
+function CommercialTotalBlock({
+  vendor,
+  canEvaluate,
+  tenderCurrency,
+  onSaved,
+}: {
+  vendor: CardVendor;
+  canEvaluate: boolean;
+  tenderCurrency: string;
+  onSaved?: () => void;
+}) {
+  const opened = vendor.commercialEnvelopeStatus === 'OPENED';
+  const hasPrice = vendor.commercialTotal != null;
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState<string>(
+    vendor.commercialTotal != null ? String(vendor.commercialTotal) : '',
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    const num = Number(amount);
+    if (!Number.isFinite(num) || num < 0) {
+      setError('Enter a valid non-negative amount.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      await post(`/bids/${vendor.bidId}/commercial-evaluations`, { totalPrice: num }, token);
+      setEditing(false);
+      onSaved?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleCancel() {
+    setEditing(false);
+    setAmount(vendor.commercialTotal != null ? String(vendor.commercialTotal) : '');
+    setError(null);
+  }
+
+  const showForm = canEvaluate && opened && (editing || !hasPrice);
+
+  return (
+    <section className="px-5 py-4 border-b border-border">
+      <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2 flex items-center gap-1.5">
+        <TrendingDown className="w-3.5 h-3.5" /> Commercial total
+      </h4>
+
+      {!opened ? (
+        <div className="text-sm text-text-secondary bg-card border border-dashed border-border rounded-lg p-4">
+          Awaiting committee opening of the commercial envelope. Total cannot be recorded until the envelope is OPENED.
+        </div>
+      ) : showForm ? (
+        <div className="bg-card border border-border rounded-lg px-4 py-3 space-y-2">
+          <label className="text-xs font-semibold text-text-secondary">
+            Enter total from the commercial PDF
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="0"
+              step="0.001"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              disabled={saving}
+              className="flex-1 px-3 py-2 rounded-md border border-border bg-bg text-text-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent/40"
+              placeholder="0.000"
+            />
+            <span className="text-sm font-semibold text-text-secondary">{tenderCurrency}</span>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || amount === ''}
+              className="px-4 py-2 rounded-md bg-accent text-white text-sm font-bold disabled:opacity-50 hover:opacity-90"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            {hasPrice && (
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={saving}
+                className="px-3 py-2 rounded-md border border-border text-sm text-text-secondary hover:bg-bg"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+          {error && <p className="text-xs text-danger">{error}</p>}
+          <p className="text-[11px] text-text-secondary italic">
+            Recorded by procurement / finance. Audit-logged. Vendors cannot edit this value.
+          </p>
+        </div>
+      ) : hasPrice ? (
+        <div className="bg-card border border-border rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+          <span className="font-mono font-semibold text-text-primary text-base">
+            {fmtCurrency(vendor.commercialTotal, vendor.currency)}
+          </span>
+          {canEvaluate && (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:underline"
+            >
+              <Pencil className="w-3.5 h-3.5" /> Edit
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-900">
+          Awaiting price entry by procurement / finance. The comparison cannot be finalised until a total is recorded for this vendor.
+        </div>
+      )}
+    </section>
   );
 }

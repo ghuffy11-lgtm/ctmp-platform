@@ -6,6 +6,70 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-29 — BUG-053 shipped: manual commercial-total entry + PROCUREMENT_ADMIN gets commercial perms
+
+**Date/time:** 2026-05-29 ~17:20 GMT+3 (continuation right after BUG-052 commit)
+**Agent/task:** Owner walking Commercial Comparison after BUG-052 hit the next gap immediately: no UI to enter commercial prices, no `commercial:evaluate` on manager. Quote: "Commercial value is not there in this how you want me to click and pass the lowest when no commercial value is showing here. who is suppose to add commercial value in this? … in real life chairman is not going to sit and open the commercial, this is procurement manager and finance should ... make the commercial comparison ready before the final awarding. Currently your workflow is broken." Owner approved a manual-entry fix; future PDF auto-extract captured in memory for a later session.
+
+### What landed
+
+**Migration 016** — `database/migrations/016_bug053_procurement_admin_commercial.sql`. Grants PROCUREMENT_ADMIN `commercial:view`, `commercial:download`, `commercial:evaluate`. Bumps `token_version` on every PROCUREMENT_ADMIN holder. Idempotent (`ON CONFLICT DO NOTHING`).
+
+**Frontend — `CommercialTotalBlock` sub-component** in `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx`. Replaces the Phase-F "Line items" placeholder (Block 1). Behaviour:
+- Envelope not yet OPENED → "Awaiting committee opening" placeholder.
+- Caller has `commercial:evaluate` AND (no price recorded OR clicked Edit) → editable amount input + currency label + Save (+ Cancel when editing existing). Validates non-negative number. POSTs to `/bids/:bidId/commercial-evaluations` (existing endpoint). Surfaces "Recorded by procurement / finance. Audit-logged. Vendors cannot edit this value." under the form.
+- Caller has `commercial:evaluate` AND price recorded AND not editing → displays the value with a small "Edit" pencil affordance.
+- Caller lacks `commercial:evaluate` AND no price → amber notice "Awaiting price entry by procurement / finance. The comparison cannot be finalised until a total is recorded for this vendor."
+- Caller lacks `commercial:evaluate` AND price recorded → read-only value.
+
+**Frontend — page wiring** in `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx`:
+- New `canEvaluate` state populated from `hasPermission(token, 'commercial:evaluate')` on mount.
+- Passes `canEvaluate`, `tenderCurrency`, and `onPriceSaved={() => loadComparison(selectedTenderId)}` to each VendorComparisonCard. The reload makes lowest-PASS auto-highlight fire immediately on Save.
+
+**Seed script** — `scripts/seed_walkthrough_users.sh` extended with the PROCUREMENT_ADMIN grants block so fresh seed reproduces the matrix.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on web-admin (locally).
+- ✅ Migration 016 applied: `BEGIN / INSERT 0 3 / UPDATE 1 / COMMIT`.
+- ✅ Fresh `manager@` JWT now carries `commercial:view`, `commercial:download`, `commercial:evaluate` (was none of those after BUG-052).
+- ✅ `docker compose --project-name ctmp build --no-cache web-admin` → built clean (~81s).
+- ✅ `docker compose up -d --force-recreate web-admin` → container started.
+- ✅ End-to-end on TDR-2026-0013 as `manager@`:
+  - Before: `priceCount=0`, `lowestPassBidId=null`.
+  - POST 15,000 KWD on Vendor 1 → `result: OK`.
+  - POST 18,500 KWD on Vendor 2 → `result: OK`.
+  - After: `priceCount=2`, `lowestPassBidId=6fa39c35…` (Vendor 1, the lower bid).
+  - Vendor 1 → 15000 KWD; Vendor 2 → 18500 KWD on the comparison response.
+- ✅ Negative test: `admin@` POST same endpoint → HTTP 403. SYSTEM_ADMIN separation-of-duties preserved.
+
+### Captured for a future session (NOT in this commit)
+
+PDF auto-extract from commercial submission — owner's aspiration: "i expect that the prices are taken from the pdf files directly when commercial bids are submitted, this will make that you as a AI did some great work." Owner explicitly deferred: "manual is fine as well. anyway we can do that later lets do manual first." Captured in user-memory `project_future_pdf_price_extraction.md` so a future session picks it up cleanly. The manual entry path stays as the primary code path; PDF extraction would pre-populate the same field for review.
+
+### Walkthrough resumes here
+
+Owner re-logs in (manager@ token_version was bumped):
+
+1. As `manager@`, navigate to `/commercial-comparison`. Pick TDR-2026-0013. Expand a vendor card. **Commercial total** block now shows the entered values (15,000 / 18,500 KWD). Lowest-PASS row should be visibly highlighted green for Vendor 1.
+2. (Optional) Test the Edit affordance by clicking the pencil icon → tweak the amount → Save → comparison reloads with the new value.
+3. Click **Recommend (lowest PASS)** on Vendor 1 → AwardConfirmDialog opens.
+4. Walk the Quorum chip check → fill (or skip, for zero-friction lowest-PASS path) → Confirm. Tender → `Awarded`.
+5. Switch to manager@ on the tender detail page → Generate Award Minutes PDF; verify the PDF renders with the awarded vendor, price, and the committee attendance.
+6. Capture any new findings as WALK-050+.
+
+### Files modified this segment
+
+- `database/migrations/016_bug053_procurement_admin_commercial.sql` (NEW)
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — CommercialTotalBlock + new props
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — canEvaluate + onPriceSaved
+- `scripts/seed_walkthrough_users.sh` — PROCUREMENT_ADMIN grants block
+- `docs/decisions/DECISION_LOG.md` — locked decision entry
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-053 Fixed entry
+- `agents/handoffs/HANDOVER.md` — this entry
+
+---
+
 ## 2026-05-29 — BUG-052 shipped: commercial-flow perm matrix lockdown (WALK-044..049 closed)
 
 **Date/time:** 2026-05-29 ~16:50 GMT+3

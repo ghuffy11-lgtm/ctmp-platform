@@ -87,6 +87,7 @@ function CommercialComparisonContent() {
 
   const [permissionChecked, setPermissionChecked] = useState(false);
   const [canView, setCanView] = useState(false);
+  const [canEvaluate, setCanEvaluate] = useState(false);
 
   const [tenders, setTenders] = useState<TenderListItem[]>([]);
   const [tendersLoading, setTendersLoading] = useState(true);
@@ -109,6 +110,8 @@ function CommercialComparisonContent() {
       hasPermission(token, 'commercial:view')
     );
     setCanView(ok);
+    // BUG-053: surfaces inline price-entry on each VendorComparisonCard when true.
+    setCanEvaluate(!!token && hasPermission(token, 'commercial:evaluate'));
     setPermissionChecked(true);
   }, []);
 
@@ -337,10 +340,13 @@ function CommercialComparisonContent() {
                   key={v.bidId}
                   vendor={v}
                   tenderId={comparison.tender.id}
+                  tenderCurrency={comparison.tender.currency}
                   isLowestPass={v.bidId === comparison.lowestPassBidId}
                   initialExpanded={v.bidId === selectedBidId}
                   selected={v.bidId === selectedBidId}
+                  canEvaluate={canEvaluate}
                   onRecommend={handleRecommend}
+                  onPriceSaved={() => selectedTenderId && loadComparison(selectedTenderId)}
                 />
               ))}
             </section>

@@ -114,6 +114,17 @@ FROM roles r, permissions p
 WHERE r.code = 'COMMERCIAL_COMMITTEE_MEMBER'
   AND p.code IN ('commercial:view','commercial:download','commercial:evaluate','comparison:commercial:recommend')
 ON CONFLICT DO NOTHING;
+
+-- BUG-053: PROCUREMENT_ADMIN gains commercial review perms so manager can
+-- prep the comparison jointly with finance before the award meeting. Owner
+-- directive 2026-05-29: "this is procurement manager and finance" who enter
+-- prices, not the chairman/committee. Manager retains sole Confirm authority.
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r, permissions p
+WHERE r.code = 'PROCUREMENT_ADMIN'
+  AND p.code IN ('commercial:view','commercial:download','commercial:evaluate')
+ON CONFLICT DO NOTHING;
 SQL
 
 echo "==> BUG-028 Part B: dept-scoping plumbing"
