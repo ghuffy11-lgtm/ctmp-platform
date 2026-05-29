@@ -6,6 +6,48 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-29 — Walkthrough user setup + admin role revert
+
+**Date/time:** 2026-05-29 ~10:05 GMT+3
+**Agent/task:** Owner declined to walk the scenario as `admin@ctmp.local`; wanted a realistic multi-user cast. Step-by-step in plan mode we agreed on 5 internal + 3 vendor accounts mapped to the procurement actors they described ("officer creates → engineer approves + scores + answers clarifications → manager publishes / opens / awards → finance opens commercial with manager → committee awards together → vendors submit bids"). Plan file: `~/.claude/plans/before-i-start-the-merry-hammock.md`.
+
+### What landed
+
+- NEW `scripts/seed_walkthrough_users.sh` — idempotent Bash seed. Hashes the shared password via the api container's `bcrypt` package (verified the matching format used by `auth.service.ts`), inserts 4 internal users + role mappings + 3 vendor companies + 3 vendor primary contacts, reverts the dev-only `PROCUREMENT_ADMIN` grant on `admin@ctmp.local`, bumps `admin@`'s token_version so any stale dual-role JWT is invalidated, prints the cast + credentials to stdout. Re-runnable: ON CONFLICT clauses skip existing rows.
+
+### Cast on staging now
+
+| Email | Role(s) | Password | Job in the walk |
+|---|---|---|---|
+| `officer@ctmp.local` | PROCUREMENT_OFFICER | `Walkthrough@2026!` | Creates the tender, uploads RFQ documents |
+| `engineer@ctmp.local` | TECHNICAL_EVALUATOR + APPROVER | `Walkthrough@2026!` | Approves tender content (Internal Review), answers vendor clarifications, scores technical bids |
+| `manager@ctmp.local` | PROCUREMENT_ADMIN | `Walkthrough@2026!` | Final approve, publish, open envelopes, finalize technical, schedule committee, confirm award, amend, generate minutes |
+| `finance@ctmp.local` | COMMERCIAL_COMMITTEE_MEMBER | `Walkthrough@2026!` | Sits on the committee with Manager; opens commercial envelopes; helps with financial comparison |
+| `committee@ctmp.local` | COMMERCIAL_COMMITTEE_MEMBER (pre-existing) | (pre-existing) | 3rd committee member for quorum |
+| `vendor1@vendor.test` | (vendor, primary contact of "Vendor 1") | `Walkthrough@2026!` | Expected winner — lowest PASS price |
+| `vendor2@vendor.test` | (vendor, primary contact of "Vendor 2") | `Walkthrough@2026!` | Runner-up PASS |
+| `vendor3@vendor.test` | (vendor, primary contact of "Vendor 3") | `Walkthrough@2026!` | Technical FAIL — exercises gray-out + lowest-PASS pre-selection |
+| `admin@ctmp.local` | SYSTEM_ADMIN (PROCUREMENT_ADMIN dev grant REVERTED) | (unchanged) | Sysadmin only — should not appear in the procurement walk |
+
+### Verification trail
+
+- ✅ Seed script ran clean on second pass after fixing two issues (bcryptjs → bcrypt, vendor_status enum `ACTIVE` → `APPROVED`). Script is now correct for fresh runs.
+- ✅ Login curls: officer@ → 200 (14 perms), engineer@ → 200 (13 perms), manager@ → 200 (37 perms), finance@ → 200 (12 perms), admin@ → 200 (57 perms after revert, was 94 during the dev grant), vendor1/2/3@ → 200 all three.
+- ✅ Manager JWT contains all key Phase A-G permissions: `tender:publish`, `comparison:commercial:confirm`, `comparison:commercial:recommend`, `award:amend`, `notification:vendor:trigger`.
+- ✅ Admin JWT no longer contains `comparison:commercial:confirm` — spec separation-of-duties restored.
+
+### Notes for future Claude sessions
+
+- The dev-only PROCUREMENT_ADMIN grant on `admin@ctmp.local` mentioned in the previous HANDOVER entry has now been reverted. Don't re-add it; route procurement-admin actions through `manager@ctmp.local` instead.
+- `committee@ctmp.local` and the legacy `evaluator@ctmp.local` / `ghuffran@hadiclinic.com.kw` / `it@hadiclinic.com.kw` users are left in place — they're not blocking the walk but exist for historical traceability.
+- SYSTEM_ADMIN still retains `commercial:view/download/evaluate/export` — that's a separate pre-existing spec violation (see migration 007 `revert_system_admin_commercial_grants.sql` which appears to exist but is not having effect). Defer the cleanup until the owner has finished the walk.
+
+### Next recommended step
+
+Owner walks the procurement scenario per the plan file's per-phase user map. If anything blocks (missing permission on a specific role, unexpected gate, etc.) capture as a new `BUG-NNN` in `docs/qa/BUG_TRACKER_2026-05-25.md`.
+
+---
+
 ## 2026-05-29 — BUG-047/048/049 + dev grant: Phase A-D follow-up bundle
 
 **Date/time:** 2026-05-29 ~01:05 GMT+3 (after BUG-046 hydration fix)
