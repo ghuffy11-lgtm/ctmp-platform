@@ -312,6 +312,11 @@ export class ComparisonService {
       },
     });
 
+    // BUG-054 / WALK-050: when tender is Awarded, surface the active Award row
+    // so the page can render an AwardSummaryCard in place of (or above) the
+    // per-vendor comparison cards. "Active" = not yet superseded by an amendment.
+    const award = await this.activeAwardSummary(tenderId);
+
     return {
       tender: {
         id: tender.id,
@@ -333,6 +338,63 @@ export class ComparisonService {
       },
       lowestPassBidId,
       vendors,
+      award,
+    };
+  }
+
+  private async activeAwardSummary(tenderId: string) {
+    const award = await this.prisma.award.findFirst({
+      where: { tenderId, supersededByAwardId: null },
+      orderBy: { confirmedAt: 'desc' },
+    });
+    if (!award) return null;
+
+    const [vendor, bid, confirmer, latestMinutes] = await Promise.all([
+      this.prisma.vendor.findUnique({
+        where: { id: award.recommendedVendorId },
+        select: { id: true, companyName: true },
+      }),
+      this.prisma.bid.findUnique({
+        where: { id: award.recommendedBidId },
+        include: {
+          commercialEvaluations: { select: { totalPrice: true, currency: true } },
+        },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: award.confirmedBy },
+        select: { displayName: true, email: true },
+      }),
+      this.prisma.awardMinutes.findFirst({
+        where: { awardId: award.id },
+        orderBy: { generatedAt: 'desc' },
+        select: { id: true, generatedAt: true },
+      }),
+    ]);
+
+    const prices = (bid?.commercialEvaluations ?? [])
+      .map(e => (e.totalPrice != null ? Number(e.totalPrice) : null))
+      .filter((v): v is number => typeof v === 'number');
+    const winnerPrice = prices.length > 0
+      ? prices.reduce((s, v) => s + v, 0) / prices.length
+      : null;
+    const winnerCurrency =
+      bid?.commercialEvaluations.find(e => e.currency)?.currency ?? 'KWD';
+
+    return {
+      awardId: award.id,
+      winnerVendorId: award.recommendedVendorId,
+      winnerVendorName: vendor?.companyName ?? '—',
+      winnerBidId: award.recommendedBidId,
+      winnerPrice,
+      winnerCurrency,
+      isLowest: award.isLowest,
+      justificationText: award.justificationText,
+      justificationPdfFilename: award.justificationPdfFilename,
+      notifyWinner: award.notifyWinner,
+      notifyLosers: award.notifyLosers,
+      confirmedByName: confirmer?.displayName ?? confirmer?.email ?? '—',
+      confirmedAt: award.confirmedAt.toISOString(),
+      minutesGeneratedAt: latestMinutes?.generatedAt.toISOString() ?? null,
     };
   }
 }

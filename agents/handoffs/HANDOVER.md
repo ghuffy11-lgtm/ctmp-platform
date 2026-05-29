@@ -6,6 +6,61 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-29 — BUG-054 shipped: Post-Confirm Award Summary card on Commercial Comparison (WALK-050)
+
+**Date/time:** 2026-05-29 ~17:45 GMT+3 (continuation after BUG-053)
+**Agent/task:** Owner successfully walked Phase D end-to-end on TDR-2026-0013 (manager entered prices via BUG-053, Recommend on Vendor 1, AwardConfirmDialog, Confirm → Awarded, Generate Minutes worked). Six refinement findings captured as WALK-050..055 grouped into three themes. Owner picked Theme 1 first (post-Confirm UX). Locked: (a) AwardSummaryCard at top, (b) full comparison collapsed below into an expander, (c) keep manual Minutes button (no auto-gen).
+
+### What landed
+
+**Backend** — `apps/api/src/modules/comparison/comparison.service.ts`. New private `activeAwardSummary(tenderId)` returns the latest non-superseded Award row joined with the winner vendor + bid (avg of commercial evaluations for price), the confirmer (`displayName` from User), and the latest AwardMinutes row if any. Block fields: `awardId`, `winnerVendorId`, `winnerVendorName`, `winnerBidId`, `winnerPrice`, `winnerCurrency`, `isLowest`, `justificationText`, `justificationPdfFilename`, `notifyWinner`, `notifyLosers`, `confirmedByName`, `confirmedAt`, `minutesGeneratedAt`. Exposed on the existing `GET /tenders/:id/comparison/commercial` response as `award: { ... } | null`.
+
+**Frontend — NEW** `apps/web-admin/src/components/comparison/AwardSummaryCard.tsx`. Visual hierarchy:
+- Green success-banded header with "AWARDED" pill + tender reference
+- Winner block (most prominent): vendor name + price + "Lowest PASS" green chip OR "Override" amber chip
+- Confirmer + Confirmed-at row (two-column grid)
+- Amber override-justification block (only when `isLowest=false`): justification text + supporting PDF filename
+- Notification row: Winner / Losers — each shows green Mail icon if notified, dim if not
+- Actions: `Generate Award Minutes` (or `Regenerate Award Minutes` if already generated) linking to `${API_BASE}/api/v1/tenders/:id/award/minutes.pdf` in a new tab; gated by `award:minutes:generate`. "Last generated DD MMM YYYY HH:MM" caption when `minutesGeneratedAt` is set.
+
+**Frontend — page wiring** `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx`:
+- Added `canGenerateMinutes` state computed from `hasPermission(token, 'award:minutes:generate')`.
+- Extended `CommercialComparisonResponse` interface with `award: AwardSummary | null`.
+- Render conditional: when `comparison.award` is present → `<AwardSummaryCard …/>` at top + `<details>` wrapping `CommercialMatrix` + per-vendor cards with summary label "Full comparison (audit reference)" (collapsed by default; per-vendor cards inside lose the `canEvaluate` prop so they're read-only — no inline price re-entry after award). When no award → page renders exactly as before.
+
+### Verification trail
+
+- ✅ Local `pnpm exec tsc --noEmit` passed on both api + web-admin (first pass had `fullName`→`displayName` fix; second pass clean).
+- ✅ `docker compose --project-name ctmp build --no-cache api web-admin` → both built clean (~165s including unpack).
+- ✅ `docker compose up -d --force-recreate api web-admin` → containers started; api healthy, web-admin running.
+- ✅ Positive test: `GET /tenders/<TDR-2026-0013>/comparison/commercial` as manager@ returns `award` block with:
+  - awardId, winnerVendorName="Vendor 1", winnerPrice=15000, winnerCurrency="KWD"
+  - isLowest=true, notifyWinner=true, notifyLosers=true (matches what manager picked at Confirm)
+  - confirmedByName="Procurement Manager", confirmedAt=`2026-05-29T16:48:57.478Z`
+  - minutesGeneratedAt=`2026-05-29T16:50:36.400Z` (proof the Minutes button worked earlier)
+- ✅ Negative test: `GET /tenders/<TDR-2026-0012>/comparison/commercial` (still in COMMERCIAL_EVALUATION) returns `award: null`. No regression.
+
+### Walkthrough state
+
+Owner now sees, when reopening TDR-2026-0013 on `/commercial-comparison`:
+1. AwardSummaryCard at top with the green Awarded header, Vendor 1 winner, 15,000 KWD, both notify flags lit green, Regenerate Minutes button.
+2. Below it: a single line "Full comparison (audit reference)" expander. Click to drill into the original comparison + per-vendor cards (read-only). Audit-friendly without being noisy.
+
+### Captured findings still open
+
+Tracker section M (Post-Confirm + lifecycle review gaps): WALK-051 (queue findability for awarded tenders), WALK-052 (Tender Closed transition + button), WALK-053 (unified Tender Summary view), WALK-054 (Technical Evaluator loses access after finalising), WALK-055 (overall flow simplification — owner's "too many steps" thread). Owner picked Theme 1 first; Themes 2 and 3 are next-session work, not blockers for this run.
+
+### Files modified this segment
+
+- `apps/api/src/modules/comparison/comparison.service.ts` — `activeAwardSummary` + award block in commercial response
+- `apps/web-admin/src/components/comparison/AwardSummaryCard.tsx` (NEW)
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — canGenerateMinutes state, award type, conditional render + collapsed expander
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-054 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-050..055 captured (section M); WALK-050 flipped to ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+---
+
 ## 2026-05-29 — BUG-053 shipped: manual commercial-total entry + PROCUREMENT_ADMIN gets commercial perms
 
 **Date/time:** 2026-05-29 ~17:20 GMT+3 (continuation right after BUG-052 commit)

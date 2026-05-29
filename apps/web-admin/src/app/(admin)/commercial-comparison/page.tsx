@@ -18,6 +18,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { CommercialMatrix, type CommercialMatrixVendor } from '@/components/comparison/CommercialMatrix';
 import { VendorComparisonCard, type CardVendor } from '@/components/comparison/VendorComparisonCard';
 import { AwardConfirmDialog } from '@/components/comparison/AwardConfirmDialog';
+import { AwardSummaryCard, type AwardSummary } from '@/components/comparison/AwardSummaryCard';
 import { QuorumStatus, type QuorumState } from '@/components/comparison/QuorumStatus';
 
 interface TenderListItem {
@@ -52,6 +53,7 @@ interface CommercialComparisonResponse {
   };
   lowestPassBidId: string | null;
   vendors: CardVendor[];
+  award: AwardSummary | null;
 }
 
 const ELIGIBLE_STATUSES = [
@@ -88,6 +90,7 @@ function CommercialComparisonContent() {
   const [permissionChecked, setPermissionChecked] = useState(false);
   const [canView, setCanView] = useState(false);
   const [canEvaluate, setCanEvaluate] = useState(false);
+  const [canGenerateMinutes, setCanGenerateMinutes] = useState(false);
 
   const [tenders, setTenders] = useState<TenderListItem[]>([]);
   const [tendersLoading, setTendersLoading] = useState(true);
@@ -112,6 +115,8 @@ function CommercialComparisonContent() {
     setCanView(ok);
     // BUG-053: surfaces inline price-entry on each VendorComparisonCard when true.
     setCanEvaluate(!!token && hasPermission(token, 'commercial:evaluate'));
+    // BUG-054: surfaces the AwardSummaryCard's Generate/Regenerate Minutes button.
+    setCanGenerateMinutes(!!token && hasPermission(token, 'award:minutes:generate'));
     setPermissionChecked(true);
   }, []);
 
@@ -321,35 +326,83 @@ function CommercialComparisonContent() {
             </div>
           </div>
 
-          {/* Matrix top */}
-          <CommercialMatrix
-            vendors={matrixVendors}
-            lowestPassBidId={comparison.lowestPassBidId}
-            selectedBidId={selectedBidId}
-            onSelect={handleSelectBid}
-          />
+          {/* BUG-054 / WALK-050: Award Summary surfaces at top when the tender
+              is Awarded. Per-vendor comparison collapses below into an
+              audit-reference expander so the page reads "this tender is
+              decided" instead of looking like a live comparison. */}
+          {comparison.award && (
+            <AwardSummaryCard
+              award={comparison.award}
+              tenderId={comparison.tender.id}
+              tenderReference={comparison.tender.referenceNumber}
+              canGenerateMinutes={canGenerateMinutes}
+            />
+          )}
 
-          {/* Per-vendor cards */}
-          {comparison.vendors.length > 0 && (
-            <section className="space-y-3">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-text-secondary">
-                Per-vendor detail
-              </h3>
-              {comparison.vendors.map(v => (
-                <VendorComparisonCard
-                  key={v.bidId}
-                  vendor={v}
-                  tenderId={comparison.tender.id}
-                  tenderCurrency={comparison.tender.currency}
-                  isLowestPass={v.bidId === comparison.lowestPassBidId}
-                  initialExpanded={v.bidId === selectedBidId}
-                  selected={v.bidId === selectedBidId}
-                  canEvaluate={canEvaluate}
-                  onRecommend={handleRecommend}
-                  onPriceSaved={() => selectedTenderId && loadComparison(selectedTenderId)}
+          {comparison.award ? (
+            <details className="bg-card border border-border rounded-xl">
+              <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-text-primary hover:bg-bg/40 select-none">
+                Full comparison (audit reference)
+              </summary>
+              <div className="px-5 py-4 border-t border-border space-y-4">
+                <CommercialMatrix
+                  vendors={matrixVendors}
+                  lowestPassBidId={comparison.lowestPassBidId}
+                  selectedBidId={selectedBidId}
+                  onSelect={handleSelectBid}
                 />
-              ))}
-            </section>
+                {comparison.vendors.length > 0 && (
+                  <section className="space-y-3">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-text-secondary">
+                      Per-vendor detail
+                    </h3>
+                    {comparison.vendors.map(v => (
+                      <VendorComparisonCard
+                        key={v.bidId}
+                        vendor={v}
+                        tenderId={comparison.tender.id}
+                        tenderCurrency={comparison.tender.currency}
+                        isLowestPass={v.bidId === comparison.lowestPassBidId}
+                        initialExpanded={false}
+                        selected={false}
+                        canEvaluate={false}
+                        onRecommend={handleRecommend}
+                      />
+                    ))}
+                  </section>
+                )}
+              </div>
+            </details>
+          ) : (
+            <>
+              <CommercialMatrix
+                vendors={matrixVendors}
+                lowestPassBidId={comparison.lowestPassBidId}
+                selectedBidId={selectedBidId}
+                onSelect={handleSelectBid}
+              />
+              {comparison.vendors.length > 0 && (
+                <section className="space-y-3">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-text-secondary">
+                    Per-vendor detail
+                  </h3>
+                  {comparison.vendors.map(v => (
+                    <VendorComparisonCard
+                      key={v.bidId}
+                      vendor={v}
+                      tenderId={comparison.tender.id}
+                      tenderCurrency={comparison.tender.currency}
+                      isLowestPass={v.bidId === comparison.lowestPassBidId}
+                      initialExpanded={v.bidId === selectedBidId}
+                      selected={v.bidId === selectedBidId}
+                      canEvaluate={canEvaluate}
+                      onRecommend={handleRecommend}
+                      onPriceSaved={() => selectedTenderId && loadComparison(selectedTenderId)}
+                    />
+                  ))}
+                </section>
+              )}
+            </>
           )}
 
           {/* Audit notice */}
