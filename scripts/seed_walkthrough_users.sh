@@ -68,7 +68,12 @@ WITH role_grants(role_code, perm_code) AS (VALUES
   ('PROCUREMENT_ADMIN',   'technical:open'),
   ('PROCUREMENT_ADMIN',   'technical:view'),
   ('PROCUREMENT_ADMIN',   'technical:finalize'),
-  ('PROCUREMENT_ADMIN',   'committee:open_commercial')
+  ('PROCUREMENT_ADMIN',   'committee:open_commercial'),
+  -- WALK-038: manager needs users:list + users:read to populate the
+  -- Committee Session member picker; without these the picker is empty
+  -- and the session cannot be created.
+  ('PROCUREMENT_ADMIN',   'users:list'),
+  ('PROCUREMENT_ADMIN',   'users:read')
 )
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id

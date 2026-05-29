@@ -6,6 +6,96 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-29 — Owner walkthrough in progress; BUG-050 + perm-grant patches shipped; 39 walkthrough findings captured
+
+**Date/time:** 2026-05-29 ~late evening GMT+3 (continuation of the same day's work)
+**Agent/task:** Owner began the realistic multi-user walkthrough with the cast set up earlier that day. Found and surfaced a long list of issues; this entry captures everything material from that walk so the next session does not re-discover any of it. Owner stopped doing screen click-throughs at the Committee Commercial Opening "schedule session" step (member picker empty — see WALK-038 below); the walkthrough will resume after the next round of fixes.
+
+### Code shipped in this segment
+
+**BUG-050 (BUG-028 Part B) — Dept-scoping for tenders + UI permission gating** — commit `4e196b9`, pushed to `origin/develop`.
+
+- JWT carries `departments: string[]` populated from `user_departments` at login (`auth.service.ts` + `jwt.strategy.ts`).
+- `TendersService.findAll` filters by `where.departmentId ∈ user.departments` when the caller lacks `system:view_all_departments`. `findOne` throws **NotFound** (not Forbidden) for out-of-dept tenders so existence does not leak.
+- Bypass perm `system:view_all_departments` granted to SYSTEM_ADMIN + AUDITOR + PROCUREMENT_ADMIN per owner decision (manager runs procurement org-wide).
+- Frontend `/tenders` Create button + `/tenders/[id]` action buttons (Submit / Publish / Close / Tech-Open / Edit / Cancel / Amend / Minutes / Award) each wrapped in `hasPermission(token, perm)` using the BUG-046 mounted-token pattern.
+- All 10 active LOCAL users had `token_version` bumped at deploy.
+
+**Role-permission gaps patched** (idempotent, in `scripts/seed_walkthrough_users.sh`):
+
+- TECHNICAL_EVALUATOR → +`clarification:reply`, +`clarification:view_internal`
+- PROCUREMENT_ADMIN → +`tender:approve`, +`technical:open`, +`technical:view`, +`technical:finalize`, +`committee:open_commercial`, +`users:list`, +`users:read` (the last two added late, while owner was stuck on WALK-038)
+- `finance@ctmp.local` user → +COMMERCIAL_EVALUATOR role stacked on top of COMMERCIAL_COMMITTEE_MEMBER (so they can view commercial bids + enter prices)
+
+**Owner-initiated DB change (NOT in any script):**
+
+- `engineer@ctmp.local` role was **manually changed** by the owner from `APPROVER` → `TECHNICAL_EVALUATOR` (replaced, not stacked). Implication: engineer no longer has `tender:approve`. The "Approve tender during Internal Review" step now needs another user. Manager (PROCUREMENT_ADMIN) has `tender:approve` from the BUG-050 patch and can cover it. **Owner decision pending** on whether to re-stack APPROVER on engineer or accept manager-as-approver.
+
+### Walkthrough tracker
+
+NEW file: `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — **39 entries (WALK-001 to WALK-039)** across:
+
+| Section | Items | Theme |
+|---|---|---|
+| A. Engineer dashboard | 3 | Quick Actions panel + dashboard widgets must be perm-gated per card |
+| B. **General principle** | 1 | WALK-G1 — Quick Actions on EVERY dashboard must be perm-gated per card, hide section when zero perms match. Applies to all users. |
+| C. Engineer Approval Queue | 3 | Empty description, no one-click PDF view, Edit button leaks to engineer |
+| D. Officer Tender tabs | 5 | Tech-criteria editor missing on Create, Clarifications/Bids/Audit tabs broken |
+| E. Manager Tender tabs | 4 | Same Clarifications/Bids/Audit breakage |
+| F. Vendor portal | 3 | Download not working, no one-click view, Clarifications should live inside tender detail |
+| G. Engineer Tender tabs + Tech Comp | 5 | Same tab issues + role-swap note |
+| H. Technical Evaluation scoring | 5 | Full Proposal opens in modal, auto-Pass at ≥70, **scorecard does not reload saved data** (critical — beyond BUG-047), + 2 truncated items TBD |
+| I. Technical Comparison | 6 | Per-vendor card: remove Consensus + slim Evaluator Breakdown to Notes/Recommendation; add tech-proposal PDF link; score `83.3/30` formatting wrong; matrix values wrong; remove "Score evaluations" |
+| J. Admin role mgmt | 1 | Admin should be able to create roles + assign perms via UI (no migration needed) |
+| K. Manager Committee Opening | 4 | Right pane blank, Print Agenda broken, **member picker empty (BLOCKER)**, admin-side perm-edit UI disabled |
+
+**Locked answers from chat already recorded:**
+
+- Q1 / WALK-032: score `83.3/30` — formatting/calculation is wrong, not the label
+- Q2 / WALK-031: link to **all** technical envelope documents (not a single "main" file), each opens in viewer
+
+**Truncated items still to capture from owner:**
+
+- WALK-027 — "After finalizing ..." (section header, body cut off mid-chat)
+- WALK-028 — "When engineer completes the evaluation for a vendor it should be ..." (sentence cut off)
+
+### Operating mode change (owner directive, mid-session)
+
+Owner switched the session to **strict notes-only mode** partway through: I capture observations to the tracker, no code edits, no deploys, no commits unless explicitly asked. This entry, the tracker file, and the seed-script grant additions were all explicitly requested updates — not autonomous action.
+
+### Current staging state
+
+- Latest pushed commit: `4e196b9` (BUG-050) on `origin/develop`. Two subsequent in-session SQL patches (role-perm gap grants + the users:list/users:read grant) are applied directly on the staging DB and are now also baked into `scripts/seed_walkthrough_users.sh` so a fresh run reproduces them.
+- All 10 active LOCAL users have current `token_version` reflecting the perm changes. Owner needs to log out + back in after every patch to pick up the new JWT.
+- Walkthrough is paused at: **manager@ scheduling a Committee Session** — was blocked by empty member picker (WALK-038); fix applied; owner needs to re-login and continue.
+
+### Next-session priorities (in order)
+
+1. **Resume the walkthrough** — owner re-logs in as manager@, finishes Committee Opening, then Phase D Confirm, Phase E Minutes, Phase F editor checks, Phase G catalog.
+2. **Lock down a fix plan for the 39 walkthrough items** — group by theme. The big ones:
+   - UI permission gating across every page (G1 principle + ~10 specific buttons/sections)
+   - Tender detail tabs (Clarifications / Bids / Audit Trail) broken across all roles
+   - Scorecard re-load (WALK-026 — engineer saves, can't see their own saved score back) — likely BUG-047 root cause extends to aggregate field too
+   - Tech-comparison matrix wrong values + remove Consensus block + slim Evaluator Breakdown + add proposal PDF link
+   - Vendor PDF view + clarification inside tender
+   - Admin role/permission management UI (WALK-035 + WALK-039)
+3. **Promote walkthrough items to BUG-NNN** once approaches are locked — keep the tracker as the working capture, BUG_TRACKER for shipped/agreed entries.
+4. Pending owner clarification: WALK-027 / WALK-028 (truncated text).
+
+### Files modified this segment
+
+- `apps/api/src/modules/auth/auth.service.ts` — JWT departments claim (BUG-050)
+- `apps/api/src/modules/auth/strategies/jwt.strategy.ts` — departments → request.user (BUG-050)
+- `apps/api/src/modules/tenders/tenders.service.ts` — findAll + findOne dept scope (BUG-050)
+- `apps/web-admin/src/app/(admin)/tenders/page.tsx` — Create button gated (BUG-050)
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — action buttons gated (BUG-050)
+- `scripts/seed_walkthrough_users.sh` — bypass perm + dept assignments + role-perm patches + users:list/read grant
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-050 added; BUG-028 note updated
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — NEW, 39 walkthrough findings
+- `agents/handoffs/HANDOVER.md` — this entry
+
+---
+
 ## 2026-05-29 — Walkthrough user setup + admin role revert
 
 **Date/time:** 2026-05-29 ~10:05 GMT+3
