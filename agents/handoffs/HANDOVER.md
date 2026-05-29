@@ -6,6 +6,59 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-29 — BUG-055 shipped: Theme 2 bundle (Close Tender + picker grouping + evaluator revisit) + BUG-054 patch
+
+**Date/time:** 2026-05-29 ~22:55 GMT+3 (continuation directly after BUG-054)
+**Agent/task:** Owner reported a 401 on the Regenerate Award Minutes button I shipped in BUG-054 (the `<a href>` link didn't carry the Bearer token). Patched inline. Then Theme 2 of the post-Confirm refinement work — three lifecycle-continuity fixes that the owner picked the Recommended approach for: PROCUREMENT_ADMIN manual Close Tender button (WALK-052), Active/Completed picker grouping (WALK-051), and evaluator past-evaluation revisit view (WALK-054).
+
+### What landed
+
+**Patch for BUG-054** — `apps/web-admin/src/components/comparison/AwardSummaryCard.tsx`. Minutes button switched from `<a href>` to a `handleOpenMinutes()` flow that does an authenticated `fetch()` with the Bearer token, converts to a blob URL, opens in a new tab. Mirrors `CommercialDocumentsList.handleDownload`. Adds inline loading + error states. Closes the 401 the owner hit.
+
+**WALK-052 — Close Tender lifecycle action:**
+- Migration `017_walk052_tender_close_permission.sql`: inserts `tender:close` permission, grants to PROCUREMENT_ADMIN, bumps `token_version` on all PROCUREMENT_ADMIN holders. Idempotent.
+- `apps/api/src/modules/tenders/tenders.service.ts`: new `closeTender(id, userId)` method. Only allowed from `AWARDED`; rejects otherwise with a 400 quoting the current status. Transitions to `TENDER_CLOSED`, writes audit row `TENDER_CLOSED` at MEDIUM risk.
+- `apps/api/src/modules/tenders/tenders.controller.ts`: new `POST /tenders/:id/close-tender` endpoint gated on `tender:close`.
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx`: new `close` perm flag (computed from JWT). Inside the Awarded block, a "Close Tender" button (Lock icon, slate styling, with a `confirm()` prompt explaining "the award decision is preserved"). Calls `handleAction('close-tender')`.
+
+**WALK-051 — Active / Completed picker grouping:**
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx`: extracted `ACTIVE_STATUSES` + `COMPLETED_STATUSES` constants. Picker now renders two `<optgroup>`s (`Active` and `Completed (awarded / closed)`) when each has at least one tender. Smallest-change approach so awarded/closed tenders stay findable without dominating the active queue.
+- Committee Opening page uses a button-list UI rather than `<select>`; its findability issue is a different shape (WALK-043) and was intentionally left out of this bundle to keep scope tight.
+
+**WALK-054 — Technical Evaluator past-evaluation view:**
+- `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx`: now fetches tenders from both `EVALUATION_STATUSES` (Technical Opening, Technical Evaluation) AND new `PAST_EVALUATION_STATUSES` (Commercial Sealed → Tender Closed). List renders two grouped sections with sticky headers ("Active" / "Past evaluations (view only)"); past entries get a slate status pill, "View only" chip, 75% opacity.
+- When a past-status tender is selected, the Save Evaluation button is replaced by a slate-bordered "Technical evaluation finalised" notice block explaining the scorecard is view-only. The Finalize Technical Results action card is hidden entirely on past-status selections.
+- Default-select logic prefers an Active tender when one exists; falls back to first overall if only past tenders are present.
+
+### Verification trail
+
+- ✅ Local `pnpm exec tsc --noEmit` passed on both api + web-admin.
+- ✅ Migration 017 applied: `BEGIN / INSERT 0 1 / INSERT 0 1 / UPDATE 1 / COMMIT` (1 PROCUREMENT_ADMIN holder).
+- ✅ Fresh `manager@` JWT carries `tender:close`.
+- ✅ End-to-end on TDR-2026-0013: `POST /tenders/<id>/close-tender` returned `status: TENDER_CLOSED`; DB query confirms `TDR-2026-0013 → TENDER_CLOSED`.
+- ✅ Build cache pruned to recover ~45GB after the deploy (pre-emptive — disk was at 100% in a prior session and caused silent build failures).
+
+### Files modified this segment
+
+- `database/migrations/017_walk052_tender_close_permission.sql` (NEW)
+- `apps/api/src/modules/tenders/tenders.service.ts` — `closeTender` method
+- `apps/api/src/modules/tenders/tenders.controller.ts` — `POST /:id/close-tender`
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — Close Tender button + perm flag
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — `<optgroup>` picker
+- `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx` — past-eval view + save-button gate
+- `apps/web-admin/src/components/comparison/AwardSummaryCard.tsx` — BUG-054 Minutes auth patch
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-055 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-051/052/054 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Theme 2 done. What's still open (Theme 3 + remainders)
+
+- WALK-053 (unified Tender Summary view) — Theme 3, owner deferred until they've felt the pain
+- WALK-055 (overall flow simplification — "too many steps") — Theme 3 discussion thread
+- WALK-043 (committee-opening picker shows tender disappearing after envelopes opened) — not part of Theme 2; needs its own design decision
+
+---
+
 ## 2026-05-29 — BUG-054 shipped: Post-Confirm Award Summary card on Commercial Comparison (WALK-050)
 
 **Date/time:** 2026-05-29 ~17:45 GMT+3 (continuation after BUG-053)

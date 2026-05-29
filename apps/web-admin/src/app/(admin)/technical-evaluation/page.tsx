@@ -101,7 +101,18 @@ interface TenderCriterion {
 const PASS_THRESHOLD = 70;
 
 // Tenders where technical evaluation is active: envelopes opened, scoring in progress.
+// Active evaluation statuses — scorecard is editable.
 const EVALUATION_STATUSES = ['Technical Opening', 'Technical Evaluation'];
+// WALK-054: completed statuses — evaluator can revisit read-only.
+const PAST_EVALUATION_STATUSES = [
+  'Commercial Sealed',
+  'Committee Commercial Opening',
+  'Commercial Evaluation / Comparison',
+  'Award Recommendation',
+  'Awarded',
+  'Tender Closed',
+];
+const PAST_SET = new Set(PAST_EVALUATION_STATUSES);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -153,8 +164,10 @@ export default function TechnicalEvaluationPage() {
       setTendersLoading(true);
       try {
         const token = getAccessToken();
+        // WALK-054: include past-evaluation statuses so the evaluator can
+        // revisit completed work read-only. Backend still gates writes.
         const results = await Promise.all(
-          EVALUATION_STATUSES.map(status =>
+          [...EVALUATION_STATUSES, ...PAST_EVALUATION_STATUSES].map(status =>
             get<PaginatedTenders>(
               `/tenders?status=${encodeURIComponent(status)}&pageSize=50`,
               token,
@@ -163,7 +176,9 @@ export default function TechnicalEvaluationPage() {
         );
         const merged = results.flatMap(r => r.data);
         setTenders(merged);
-        if (merged.length > 0) setSelectedTenderId(merged[0].id);
+        // Default-select an active tender if one exists; otherwise first overall.
+        const firstActive = merged.find(t => !PAST_SET.has(t.status));
+        if (merged.length > 0) setSelectedTenderId((firstActive ?? merged[0]).id);
       } finally {
         setTendersLoading(false);
       }
@@ -362,7 +377,7 @@ export default function TechnicalEvaluationPage() {
               Tenders Under Evaluation
             </p>
             <p className="text-xs text-text-secondary">
-              {tenders.length} active
+              {tenders.filter(t => !PAST_SET.has(t.status)).length} active · {tenders.filter(t => PAST_SET.has(t.status)).length} past
             </p>
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -376,32 +391,67 @@ export default function TechnicalEvaluationPage() {
                 </p>
               </div>
             ) : (
-              tenders.map(t => {
-                const isSelected = t.id === selectedTenderId;
+              (() => {
+                const active = tenders.filter(t => !PAST_SET.has(t.status));
+                const past = tenders.filter(t => PAST_SET.has(t.status));
+                const renderItem = (t: TenderSummary, isPast: boolean) => {
+                  const isSelected = t.id === selectedTenderId;
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => setSelectedTenderId(t.id)}
+                      className={`p-4 border-b border-border cursor-pointer transition-all ${
+                        isSelected
+                          ? 'bg-card border-l-4 border-l-accent shadow-sm'
+                          : 'border-l-4 border-l-transparent hover:bg-card/70'
+                      } ${isPast ? 'opacity-75' : ''}`}
+                    >
+                      <p className={`text-xs font-bold mb-1 ${isSelected ? 'text-accent' : 'text-text-secondary'}`}>
+                        {t.referenceNumber}
+                      </p>
+                      <p className={`text-sm font-semibold leading-snug mb-1.5 ${
+                        isSelected ? 'text-text-primary' : 'text-text-secondary'
+                      }`}>
+                        {t.title}
+                      </p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          isPast
+                            ? 'bg-slate-100 text-slate-700'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {t.status}
+                        </span>
+                        {isPast && (
+                          <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-200 text-slate-700">
+                            View only
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                };
                 return (
-                  <div
-                    key={t.id}
-                    onClick={() => setSelectedTenderId(t.id)}
-                    className={`p-4 border-b border-border cursor-pointer transition-all ${
-                      isSelected
-                        ? 'bg-card border-l-4 border-l-accent shadow-sm'
-                        : 'border-l-4 border-l-transparent hover:bg-card/70'
-                    }`}
-                  >
-                    <p className={`text-xs font-bold mb-1 ${isSelected ? 'text-accent' : 'text-text-secondary'}`}>
-                      {t.referenceNumber}
-                    </p>
-                    <p className={`text-sm font-semibold leading-snug mb-1.5 ${
-                      isSelected ? 'text-text-primary' : 'text-text-secondary'
-                    }`}>
-                      {t.title}
-                    </p>
-                    <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-100 text-amber-800">
-                      {t.status}
-                    </span>
-                  </div>
+                  <>
+                    {active.length > 0 && (
+                      <>
+                        <div className="px-4 py-2 bg-bg/60 border-b border-border text-[10px] font-bold uppercase tracking-wider text-text-secondary">
+                          Active
+                        </div>
+                        {active.map(t => renderItem(t, false))}
+                      </>
+                    )}
+                    {past.length > 0 && (
+                      <>
+                        <div className="px-4 py-2 bg-bg/60 border-b border-border text-[10px] font-bold uppercase tracking-wider text-text-secondary">
+                          Past evaluations (view only)
+                        </div>
+                        {past.map(t => renderItem(t, true))}
+                      </>
+                    )}
+                  </>
                 );
-              })
+              })()
             )}
           </div>
         </div>
@@ -644,14 +694,23 @@ export default function TechnicalEvaluationPage() {
                     </div>
                   </div>
                 </div>
-                <button
-                  onClick={handleSaveEvaluation}
-                  disabled={submitting}
-                  className="w-full bg-accent hover:bg-accent-hover text-white rounded-xl shadow-md font-bold text-base px-6 py-4 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  <Save className="w-5 h-5" />
-                  {submitting ? 'Saving…' : 'Save Evaluation'}
-                </button>
+                {selectedTender && PAST_SET.has(selectedTender.status) ? (
+                  <div className="w-full bg-slate-50 border border-slate-200 rounded-xl px-5 py-4 text-sm text-slate-700">
+                    <p className="font-semibold">Technical evaluation finalised</p>
+                    <p className="text-xs mt-0.5">
+                      This tender has moved past the technical evaluation phase ({selectedTender.status}). The scorecard is view-only; saved scores remain accessible for reference.
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleSaveEvaluation}
+                    disabled={submitting}
+                    className="w-full bg-accent hover:bg-accent-hover text-white rounded-xl shadow-md font-bold text-base px-6 py-4 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-5 h-5" />
+                    {submitting ? 'Saving…' : 'Save Evaluation'}
+                  </button>
+                )}
               </div>
 
               {submitError && (
@@ -676,23 +735,26 @@ export default function TechnicalEvaluationPage() {
                 </p>
               </div>
 
-              {/* Finalize */}
-              <div className="bg-card rounded-xl border border-border p-5 flex items-center justify-between shadow-sm">
-                <div>
-                  <p className="text-sm font-bold text-text-primary">Finalize Technical Results</p>
-                  <p className="text-xs text-text-secondary mt-0.5">
-                    Lock all scorecards for this tender. Only PASSED vendors proceed to commercial comparison.
-                  </p>
+              {/* Finalize — hidden when the tender has already moved past
+                  technical evaluation (WALK-054 view-only mode). */}
+              {selectedTender && !PAST_SET.has(selectedTender.status) && (
+                <div className="bg-card rounded-xl border border-border p-5 flex items-center justify-between shadow-sm">
+                  <div>
+                    <p className="text-sm font-bold text-text-primary">Finalize Technical Results</p>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      Lock all scorecards for this tender. Only PASSED vendors proceed to commercial comparison.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleFinalize}
+                    disabled={finalizing || evaluations.length === 0}
+                    className="px-5 py-2.5 bg-text-primary text-white rounded-lg text-sm font-bold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    <Lock className="w-[18px] h-[18px]" />
+                    {finalizing ? 'Finalizing…' : 'Finalize'}
+                  </button>
                 </div>
-                <button
-                  onClick={handleFinalize}
-                  disabled={finalizing || evaluations.length === 0}
-                  className="px-5 py-2.5 bg-text-primary text-white rounded-lg text-sm font-bold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  <Lock className="w-[18px] h-[18px]" />
-                  {finalizing ? 'Finalizing…' : 'Finalize'}
-                </button>
-              </div>
+              )}
             </div>
           )}
         </div>

@@ -152,6 +152,14 @@ export class TendersController {
     return this.tendersService.closeSubmissions(id, userId);
   }
 
+  // WALK-052: Final tender lifecycle close (Awarded → Tender Closed).
+  @Post(':id/close-tender')
+  @RequirePermissions('tender:close')
+  @ApiOperation({ operationId: 'closeTender', summary: 'Close awarded tender (final lifecycle step)' })
+  closeTender(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.tendersService.closeTender(id, userId);
+  }
+
   @Post(':id/approve')
   @RequirePermissions('tender:approve')
   @ApiOperation({ operationId: 'approveTender', summary: 'Approve tender from Internal Review' })

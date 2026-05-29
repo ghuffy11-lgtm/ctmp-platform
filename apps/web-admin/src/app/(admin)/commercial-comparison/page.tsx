@@ -56,13 +56,16 @@ interface CommercialComparisonResponse {
   award: AwardSummary | null;
 }
 
-const ELIGIBLE_STATUSES = [
+const ACTIVE_STATUSES = [
   'Committee Commercial Opening',
   'Commercial Evaluation / Comparison',
   'Award Recommendation',
-  'Awarded',
-  'Tender Closed',
 ];
+const COMPLETED_STATUSES = ['Awarded', 'Tender Closed'];
+const ELIGIBLE_STATUSES = [...ACTIVE_STATUSES, ...COMPLETED_STATUSES];
+// WALK-051: pickers group by Active / Completed so awarded/closed tenders
+// stay findable without dominating the active queue.
+const COMPLETED_SET = new Set(COMPLETED_STATUSES);
 
 function NoAccessScreen() {
   return (
@@ -258,11 +261,32 @@ function CommercialComparisonContent() {
             className="w-full px-4 py-2.5 text-sm border border-border rounded-lg bg-bg focus:outline-none focus:ring-2 focus:ring-accent"
           >
             <option value="">Select a tender…</option>
-            {tenders.map(t => (
-              <option key={t.id} value={t.id}>
-                {t.referenceNumber} — {t.title} ({t.status})
-              </option>
-            ))}
+            {(() => {
+              const active = tenders.filter(t => !COMPLETED_SET.has(t.status));
+              const completed = tenders.filter(t => COMPLETED_SET.has(t.status));
+              return (
+                <>
+                  {active.length > 0 && (
+                    <optgroup label="Active">
+                      {active.map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.referenceNumber} — {t.title} ({t.status})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {completed.length > 0 && (
+                    <optgroup label="Completed (awarded / closed)">
+                      {completed.map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.referenceNumber} — {t.title} ({t.status})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </>
+              );
+            })()}
           </select>
         )}
       </div>

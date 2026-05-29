@@ -22,6 +22,7 @@ import {
   Download,
   Check,
   FileText,
+  Lock,
   Table2,
   Paperclip,
   MessageSquare,
@@ -135,6 +136,7 @@ export default function TenderDetailPage() {
     award: false,     // award:finalize (legacy Issue Award action)
     amend: false,     // award:amend
     minutes: false,   // award:minutes:generate
+    close: false,     // tender:close (WALK-052)
   });
   useEffect(() => {
     const t = getAccessToken();
@@ -150,6 +152,7 @@ export default function TenderDetailPage() {
       award:    hasPermission(t, 'award:finalize'),
       amend:    hasPermission(t, 'award:amend'),
       minutes:  hasPermission(t, 'award:minutes:generate'),
+      close:    hasPermission(t, 'tender:close'),
     });
   }, []);
 
@@ -405,6 +408,22 @@ export default function TenderDetailPage() {
                 >
                   <Check className="w-4 h-4" />
                   {actionLoading === 'award' ? 'Issuing…' : 'Issue Award'}
+                </button>
+              )}
+              {/* WALK-052: final lifecycle close. PROCUREMENT_ADMIN-only. */}
+              {perms.close && (
+                <button
+                  onClick={() => {
+                    if (confirm('Close this tender? The award decision is preserved; the tender moves from Awarded → Tender Closed.')) {
+                      handleAction('close-tender');
+                    }
+                  }}
+                  disabled={actionLoading !== null}
+                  className="px-4 py-2 border border-border text-text-secondary text-sm font-semibold rounded-lg hover:bg-bg transition-colors disabled:opacity-60 flex items-center gap-1.5"
+                  title="Final lifecycle step: marks the tender as Closed for archival/reporting purposes."
+                >
+                  <Lock className="w-4 h-4" />
+                  {actionLoading === 'close-tender' ? 'Closing…' : 'Close Tender'}
                 </button>
               )}
             </>

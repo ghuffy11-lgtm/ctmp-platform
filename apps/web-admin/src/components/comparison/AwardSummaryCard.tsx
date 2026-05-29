@@ -1,6 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { Award, CheckCircle2, FileDown, Mail, ShieldAlert } from 'lucide-react';
+import { getAccessToken } from '@/lib/auth';
 
 export interface AwardSummary {
   awardId: string;
@@ -60,7 +62,36 @@ interface Props {
  */
 export function AwardSummaryCard({ award, tenderId, tenderReference, canGenerateMinutes }: Props) {
   const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
-  const minutesHref = `${API_BASE}/api/v1/tenders/${tenderId}/award/minutes.pdf`;
+  const [minutesLoading, setMinutesLoading] = useState(false);
+  const [minutesError, setMinutesError] = useState<string | null>(null);
+
+  // Bearer token lives in js-cookie / localStorage, not in HTTP cookies, so a
+  // plain <a href> hits the API without Authorization and 401s. Fetch as a
+  // blob and open. Mirrors CommercialDocumentsList.handleDownload.
+  async function handleOpenMinutes() {
+    setMinutesLoading(true);
+    setMinutesError(null);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE}/api/v1/tenders/${tenderId}/award/minutes.pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.status === 401 || res.status === 403) {
+        throw new Error('Not authorised to generate Award Minutes.');
+      }
+      if (!res.ok) {
+        throw new Error(`Minutes request failed (HTTP ${res.status}).`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setMinutesError(err instanceof Error ? err.message : 'Minutes request failed');
+    } finally {
+      setMinutesLoading(false);
+    }
+  }
 
   return (
     <div className="bg-card border border-success/40 rounded-xl overflow-hidden shadow-md shadow-success/5">
@@ -154,23 +185,30 @@ export function AwardSummaryCard({ award, tenderId, tenderReference, canGenerate
         </div>
 
         {/* Actions row */}
-        <div className="border-t border-border pt-4 flex items-center gap-3 flex-wrap">
-          {canGenerateMinutes && (
-            <a
-              href={minutesHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-bold hover:opacity-90"
-            >
-              <FileDown className="w-4 h-4" />
-              {award.minutesGeneratedAt ? 'Regenerate Award Minutes' : 'Generate Award Minutes'}
-            </a>
-          )}
-          {award.minutesGeneratedAt && (
-            <p className="text-xs text-text-secondary">
-              Last generated {fmtDateTime(award.minutesGeneratedAt)}
-            </p>
-          )}
+        <div className="border-t border-border pt-4 space-y-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            {canGenerateMinutes && (
+              <button
+                type="button"
+                onClick={handleOpenMinutes}
+                disabled={minutesLoading}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-bold hover:opacity-90 disabled:opacity-60"
+              >
+                <FileDown className="w-4 h-4" />
+                {minutesLoading
+                  ? 'Preparing PDF…'
+                  : award.minutesGeneratedAt
+                    ? 'Regenerate Award Minutes'
+                    : 'Generate Award Minutes'}
+              </button>
+            )}
+            {award.minutesGeneratedAt && (
+              <p className="text-xs text-text-secondary">
+                Last generated {fmtDateTime(award.minutesGeneratedAt)}
+              </p>
+            )}
+          </div>
+          {minutesError && <p className="text-xs text-danger">{minutesError}</p>}
         </div>
       </div>
     </div>

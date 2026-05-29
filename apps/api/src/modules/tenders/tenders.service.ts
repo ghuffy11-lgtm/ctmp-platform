@@ -564,6 +564,36 @@ export class TendersService {
     return updated;
   }
 
+  // WALK-052: final lifecycle step. Confirmed Award → Tender Closed.
+  // No reason field required (the decision is in the Award row).
+  async closeTender(id: string, userId: string) {
+    const tender = await this.prisma.tender.findUnique({
+      where: { id },
+      select: { id: true, status: true, reference: true },
+    });
+    if (!tender) throw new NotFoundException('Tender not found');
+    if (tender.status !== TenderStatus.AWARDED) {
+      throw new BadRequestException(
+        `Cannot close tender from ${tender.status}; must be AWARDED.`,
+      );
+    }
+    const updated = await this.prisma.tender.update({
+      where: { id },
+      data: { status: TenderStatus.TENDER_CLOSED },
+    });
+    await this.audit.log({
+      eventType: 'TENDER_CLOSED',
+      entityType: 'Tender',
+      entityId: id,
+      tenderId: id,
+      actorUserId: userId,
+      beforeValue: { status: tender.status },
+      afterValue: { status: TenderStatus.TENDER_CLOSED },
+      riskLevel: AuditRiskLevel.MEDIUM,
+    });
+    return updated;
+  }
+
   async closeSubmissions(id: string, userId: string) {
     const tender = await this.prisma.tender.findUnique({ where: { id }, select: { id: true, status: true } });
     if (!tender) throw new NotFoundException('Tender not found');
