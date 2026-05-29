@@ -73,6 +73,18 @@ export class TendersService {
     }
     if (query.departmentId) where.departmentId = query.departmentId;
 
+    // BUG-028 Part B: dept-scoping for internal users. Roles holding
+    // `system:view_all_departments` (SYSTEM_ADMIN, AUDITOR, PROCUREMENT_ADMIN)
+    // see everything; everyone else is restricted to their department membership.
+    if (
+      user?.id &&
+      !user?.vendorId &&
+      !((user.permissions ?? []) as string[]).includes('system:view_all_departments')
+    ) {
+      const depts = (user.departments ?? []) as string[];
+      where.departmentId = depts.length > 0 ? { in: depts } : { in: [] };
+    }
+
     // BUG-015 vendor visibility: PUBLIC tenders OR INVITATION_ONLY tenders where the
     // caller appears in tender_vendors. Only PUBLISHED / CLARIFICATION_PERIOD statuses
     // are vendor-visible regardless of visibility mode.
@@ -128,6 +140,20 @@ export class TendersService {
       },
     });
     if (!tender) throw new NotFoundException('Tender not found');
+
+    // BUG-028 Part B: dept-scoping on detail. If the caller is an internal user
+    // who lacks the org-wide bypass perm and the tender belongs to a department
+    // they don't belong to, treat it as not-found (do not leak existence).
+    if (
+      user?.id &&
+      !user?.vendorId &&
+      !((user.permissions ?? []) as string[]).includes('system:view_all_departments')
+    ) {
+      const depts = (user.departments ?? []) as string[];
+      if (!depts.includes(tender.departmentId)) {
+        throw new NotFoundException('Tender not found');
+      }
+    }
 
     // BUG-015 vendor visibility on detail: PUBLIC OR (INVITATION_ONLY + invited).
     // Must also be in PUBLISHED / CLARIFICATION_PERIOD.

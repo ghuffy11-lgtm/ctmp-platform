@@ -83,9 +83,12 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('User not found');
     if (payload.version !== user.tokenVersion) throw new UnauthorizedException('Refresh token has been revoked');
 
-    const permissions = await this.loadPermissions(user.id);
+    const [permissions, departments] = await Promise.all([
+      this.loadPermissions(user.id),
+      this.loadDepartments(user.id),
+    ]);
     const accessToken = this.jwt.sign(
-      { sub: user.id, username: user.adUsername ?? user.email, permissions, type: 'internal' },
+      { sub: user.id, username: user.adUsername ?? user.email, permissions, departments, type: 'internal' },
       { secret: this.config.get<string>('jwt.secret'), expiresIn: this.config.get<string>('jwt.expiresIn') as never },
     );
     return { accessToken };
@@ -119,10 +122,13 @@ export class AuthService {
   }
 
   private async issueTokens(user: { id: string; adUsername: string | null; email: string; tokenVersion: number }) {
-    const permissions = await this.loadPermissions(user.id);
+    const [permissions, departments] = await Promise.all([
+      this.loadPermissions(user.id),
+      this.loadDepartments(user.id),
+    ]);
 
     const accessToken = this.jwt.sign(
-      { sub: user.id, username: user.adUsername ?? user.email, permissions, type: 'internal' },
+      { sub: user.id, username: user.adUsername ?? user.email, permissions, departments, type: 'internal' },
       { secret: this.config.get<string>('jwt.secret'), expiresIn: this.config.get<string>('jwt.expiresIn') as never },
     );
 
@@ -149,6 +155,17 @@ export class AuthService {
     return userRoles.flatMap((ur: any) =>
       ur.role.rolePermissions.map((rp: any) => rp.permission.code as string),
     );
+  }
+
+  private async loadDepartments(userId: string): Promise<string[]> {
+    // BUG-028 Part B: carry the caller's department membership on the JWT so
+    // downstream services can auto-scope reads. SYSTEM_ADMIN / AUDITOR /
+    // PROCUREMENT_ADMIN bypass scoping via `system:view_all_departments`.
+    const rows = await this.prisma.userDepartment.findMany({
+      where: { userId },
+      select: { departmentId: true },
+    });
+    return rows.map(r => r.departmentId);
   }
 
   private async recordFailedLogin(user: { id: string; failedLoginCount: number }) {

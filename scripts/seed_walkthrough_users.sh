@@ -78,10 +78,35 @@ JOIN permissions p ON p.code = g.perm_code
 ON CONFLICT DO NOTHING;
 SQL
 
-echo "==> Bumping token_version for affected users (forces re-login)"
+echo "==> BUG-028 Part B: dept-scoping plumbing"
+$PSQL <<'SQL'
+-- Idempotent: seed the bypass permission row + grants. Roles with this perm
+-- see every department's tenders; everyone else is dept-scoped via JWT claims.
+INSERT INTO permissions (code, name, category, description)
+VALUES ('system:view_all_departments', 'View All Departments', 'system', 'Bypass department-scoped data filtering (see every department).')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r, permissions p
+WHERE r.code IN ('SYSTEM_ADMIN','AUDITOR','PROCUREMENT_ADMIN')
+  AND p.code = 'system:view_all_departments'
+ON CONFLICT DO NOTHING;
+
+-- Assign the 4 test internal users to the Procurement department (PROC).
+-- Owner can re-assign to a different dept later via the admin UI.
+INSERT INTO user_departments (user_id, department_id, is_primary)
+SELECT u.id, d.id, true
+FROM users u, departments d
+WHERE u.email IN ('officer@ctmp.local','engineer@ctmp.local','manager@ctmp.local','finance@ctmp.local')
+  AND d.code = 'PROC'
+ON CONFLICT DO NOTHING;
+SQL
+
+echo "==> Bumping token_version for all active internal users (forces re-login with new JWT shape)"
 $PSQL <<'SQL'
 UPDATE users SET token_version = token_version + 1
-WHERE email IN ('engineer@ctmp.local', 'manager@ctmp.local', 'finance@ctmp.local');
+WHERE status = 'ACTIVE' AND auth_type = 'LOCAL';
 SQL
 
 echo "==> Inserting 3 vendor companies"

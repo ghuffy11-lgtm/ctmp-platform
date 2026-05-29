@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { get, post, del } from '@/lib/api';
-import { getAccessToken } from '@/lib/auth';
+import { getAccessToken, hasPermission } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { ManageInvitedVendors } from '@/components/ManageInvitedVendors';
 import { AmendAwardDialog } from '@/components/comparison/AmendAwardDialog';
@@ -120,6 +120,38 @@ export default function TenderDetailPage() {
   const [amendOpen, setAmendOpen] = useState(false);
   const [generatingMinutes, setGeneratingMinutes] = useState(false);
   const docInputRef = useRef<HTMLInputElement>(null);
+
+  // Per-action permission flags. Token is read after mount so SSR and first
+  // client paint match (BUG-046 hydration pattern). The state-change buttons
+  // below also have status conditions; perm flags AND those conditions gate.
+  const [perms, setPerms] = useState({
+    submit: false,    // tender:edit
+    publish: false,   // tender:publish
+    closeSub: false,  // tender:close_submission
+    techOpen: false,  // technical:open
+    approve: false,   // tender:approve
+    cancel: false,    // tender:cancel
+    edit: false,      // tender:edit
+    award: false,     // award:finalize (legacy Issue Award action)
+    amend: false,     // award:amend
+    minutes: false,   // award:minutes:generate
+  });
+  useEffect(() => {
+    const t = getAccessToken();
+    if (!t) return;
+    setPerms({
+      submit:   hasPermission(t, 'tender:edit'),
+      publish:  hasPermission(t, 'tender:publish'),
+      closeSub: hasPermission(t, 'tender:close_submission'),
+      techOpen: hasPermission(t, 'technical:open'),
+      approve:  hasPermission(t, 'tender:approve'),
+      cancel:   hasPermission(t, 'tender:cancel'),
+      edit:     hasPermission(t, 'tender:edit'),
+      award:    hasPermission(t, 'award:finalize'),
+      amend:    hasPermission(t, 'award:amend'),
+      minutes:  hasPermission(t, 'award:minutes:generate'),
+    });
+  }, []);
 
   // Phase E (BUG-038): on-demand Award Minutes PDF.
   async function handleGenerateMinutes() {
@@ -290,7 +322,7 @@ export default function TenderDetailPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          {tender.status === 'Draft' && (
+          {tender.status === 'Draft' && perms.submit && (
             <button
               onClick={() => handleAction('submit-for-approval')}
               disabled={actionLoading !== null}
@@ -309,7 +341,7 @@ export default function TenderDetailPage() {
               )}
             </button>
           )}
-          {tender.status === 'Approved' && (
+          {tender.status === 'Approved' && perms.publish && (
             <button
               onClick={() => handleAction('publish')}
               disabled={actionLoading !== null}
@@ -319,7 +351,7 @@ export default function TenderDetailPage() {
               {actionLoading === 'publish' ? 'Publishing…' : 'Publish'}
             </button>
           )}
-          {tender.status === 'Published' && (
+          {tender.status === 'Published' && perms.closeSub && (
             <button
               onClick={() => handleAction('close-submissions')}
               disabled={actionLoading !== null}
@@ -328,7 +360,7 @@ export default function TenderDetailPage() {
               {actionLoading === 'close-submissions' ? 'Closing…' : 'Close Submissions'}
             </button>
           )}
-          {tender.status === 'Submission Closed' && (
+          {tender.status === 'Submission Closed' && perms.techOpen && (
             <button
               onClick={() => handleAction('technical-opening')}
               disabled={actionLoading !== null}
@@ -340,38 +372,44 @@ export default function TenderDetailPage() {
           )}
           {tender.status === 'Awarded' && (
             <>
-              <button
-                onClick={handleGenerateMinutes}
-                disabled={generatingMinutes}
-                className="px-4 py-2 border border-border text-text-secondary text-sm font-semibold rounded-lg hover:bg-bg transition-colors disabled:opacity-60 flex items-center gap-1.5"
-                title="Generate the official Award Minutes PDF — a new copy is written every time"
-              >
-                <FileText className="w-4 h-4" />
-                {generatingMinutes ? 'Generating…' : 'Generate Award Minutes'}
-              </button>
-              <button
-                onClick={() => setAmendOpen(true)}
-                className="px-4 py-2 border border-amber-300 text-amber-700 text-sm font-semibold rounded-lg hover:bg-amber-50 transition-colors flex items-center gap-1.5"
-                title="Amend the confirmed award — creates a new record that supersedes the active one"
-              >
-                <Pencil className="w-4 h-4" />
-                Amend Award
-              </button>
-              <button
-                onClick={() => {
-                  if (confirm('Issue formal award? This closes the tender and notifies the winning vendor.')) {
-                    handleAction('award');
-                  }
-                }}
-                disabled={actionLoading !== null}
-                className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
-              >
-                <Check className="w-4 h-4" />
-                {actionLoading === 'award' ? 'Issuing…' : 'Issue Award'}
-              </button>
+              {perms.minutes && (
+                <button
+                  onClick={handleGenerateMinutes}
+                  disabled={generatingMinutes}
+                  className="px-4 py-2 border border-border text-text-secondary text-sm font-semibold rounded-lg hover:bg-bg transition-colors disabled:opacity-60 flex items-center gap-1.5"
+                  title="Generate the official Award Minutes PDF — a new copy is written every time"
+                >
+                  <FileText className="w-4 h-4" />
+                  {generatingMinutes ? 'Generating…' : 'Generate Award Minutes'}
+                </button>
+              )}
+              {perms.amend && (
+                <button
+                  onClick={() => setAmendOpen(true)}
+                  className="px-4 py-2 border border-amber-300 text-amber-700 text-sm font-semibold rounded-lg hover:bg-amber-50 transition-colors flex items-center gap-1.5"
+                  title="Amend the confirmed award — creates a new record that supersedes the active one"
+                >
+                  <Pencil className="w-4 h-4" />
+                  Amend Award
+                </button>
+              )}
+              {perms.award && (
+                <button
+                  onClick={() => {
+                    if (confirm('Issue formal award? This closes the tender and notifies the winning vendor.')) {
+                      handleAction('award');
+                    }
+                  }}
+                  disabled={actionLoading !== null}
+                  className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  {actionLoading === 'award' ? 'Issuing…' : 'Issue Award'}
+                </button>
+              )}
             </>
           )}
-          {EDITABLE_STATUSES.includes(tender.status) && (
+          {EDITABLE_STATUSES.includes(tender.status) && perms.edit && (
             <Link
               href={`/tenders/${tender.id}/edit`}
               className="px-4 py-2 border border-border text-text-secondary text-sm font-semibold rounded-lg hover:bg-bg transition-colors flex items-center gap-1.5"
@@ -380,7 +418,7 @@ export default function TenderDetailPage() {
               Edit
             </Link>
           )}
-          {CANCELLABLE_STATUSES.includes(tender.status) && (
+          {CANCELLABLE_STATUSES.includes(tender.status) && perms.cancel && (
             <button
               onClick={() => {
                 if (confirm('Cancel this tender? This action cannot be undone.')) {

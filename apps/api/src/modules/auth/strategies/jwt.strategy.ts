@@ -18,6 +18,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       id: payload.sub,
       username: payload.username,
       permissions: payload.permissions ?? [],
+      departments: payload.departments ?? [],
       type: 'internal',
     };
   }

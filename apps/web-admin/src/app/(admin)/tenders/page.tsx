@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { get } from '@/lib/api';
-import { getAccessToken } from '@/lib/auth';
+import { getAccessToken, hasPermission } from '@/lib/auth';
 import { Plus, Search, AlertCircle, SearchX, Calendar, Eye, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface TenderListItem {
@@ -71,6 +71,13 @@ export default function TendersPage() {
   const [data, setData] = useState<PaginatedTenders | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Defer token-derived UI to after mount so SSR + first client render match
+  // (BUG-046 hydration pattern).
+  const [canCreate, setCanCreate] = useState(false);
+  useEffect(() => {
+    const t = getAccessToken();
+    setCanCreate(!!t && hasPermission(t, 'tender:create'));
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
@@ -108,13 +115,15 @@ export default function TendersPage() {
           <h2 className="text-headline-md text-primary mb-1 font-semibold">All Tenders</h2>
           <p className="text-body-md text-on-surface-variant">Manage and monitor institutional procurement workflows.</p>
         </div>
-        <Link
-          href="/tenders/new"
-          className="bg-secondary text-on-secondary px-6 py-2.5 rounded-lg text-title-sm flex items-center gap-2 shadow-sm hover:opacity-90 transition-all active:scale-95 duration-75"
-        >
-          <Plus className="w-5 h-5" />
-          Create New Tender
-        </Link>
+        {canCreate && (
+          <Link
+            href="/tenders/new"
+            className="bg-secondary text-on-secondary px-6 py-2.5 rounded-lg text-title-sm flex items-center gap-2 shadow-sm hover:opacity-90 transition-all active:scale-95 duration-75"
+          >
+            <Plus className="w-5 h-5" />
+            Create New Tender
+          </Link>
+        )}
       </div>
 
       {/* Filter bar */}
