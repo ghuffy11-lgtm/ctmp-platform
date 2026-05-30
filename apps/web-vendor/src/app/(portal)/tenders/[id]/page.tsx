@@ -1,14 +1,17 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Check, FileText, Download } from 'lucide-react';
-import { get } from '@/lib/api';
+import { ArrowLeft, Check, Eye, FileText, Download, MessageSquare } from 'lucide-react';
+import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Loading, ErrorBanner } from '@/components/ui/Empty';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { Chip } from '@/components/ui/StatusBadge';
 import { MessageBanner } from '@/components/ui/MessageBanner';
+import { Textarea } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
 import { blockedStateForTender, vendorMessage } from '@/lib/vendor-messages';
 
 interface TenderDetail {
@@ -69,6 +72,46 @@ export default function VendorTenderDetailPage({ params }: { params: Promise<{ i
   }
 
   const canBid = BID_ELIGIBLE_STATUSES.has(tender.status);
+
+  // WALK-016 / WALK-017: vendor-side View + Download for tender RFQ documents.
+  // Server-side audit log happens in the streaming endpoint.
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+  async function fetchDocBlob(docId: string): Promise<Blob> {
+    const token = getAccessToken();
+    const res = await fetch(`${apiBase}/api/v1/tenders/${id}/documents/${docId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
+    return res.blob();
+  }
+
+  async function handleViewDoc(docId: string) {
+    try {
+      const blob = await fetchDocBlob(docId);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to open document');
+    }
+  }
+
+  async function handleDownloadDoc(docId: string, filename: string) {
+    try {
+      const blob = await fetchDocBlob(docId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to download document');
+    }
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -133,28 +176,54 @@ export default function VendorTenderDetailPage({ params }: { params: Promise<{ i
               <section>
                 <h3 className="heading-font text-lg font-semibold mb-4">Tender Documents</h3>
                 <div className="space-y-2">
-                  {tender.documents.map(d => (
-                    <div
-                      key={d.id}
-                      className="flex items-center justify-between gap-4 rounded-2xl bg-slate-900/5 border border-slate-900/10 px-5 py-3"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <FileText className="w-5 h-5 text-electric-500 shrink-0" />
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium truncate">{d.filename}</div>
-                          <div className="text-xs text-slate-900/55">
-                            {(d.fileSize / 1024).toFixed(0)} KB · Uploaded {formatDate(d.uploadedAt)}
+                  {tender.documents.map(d => {
+                    const isPdf = d.mimeType?.includes('pdf');
+                    return (
+                      <div
+                        key={d.id}
+                        className="flex items-center justify-between gap-4 rounded-2xl bg-slate-900/5 border border-slate-900/10 px-5 py-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <FileText className="w-5 h-5 text-electric-500 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium truncate">{d.filename}</div>
+                            <div className="text-xs text-slate-900/55">
+                              {(d.fileSize / 1024).toFixed(0)} KB · Uploaded {formatDate(d.uploadedAt)}
+                            </div>
                           </div>
                         </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isPdf && (
+                            <button
+                              type="button"
+                              onClick={() => handleViewDoc(d.id)}
+                              className="btn-ghost px-3 py-2 rounded-2xl text-xs flex items-center gap-1"
+                              title="View document"
+                            >
+                              <Eye className="w-4 h-4" /> View
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadDoc(d.id, d.filename)}
+                            className="btn-ghost px-3 py-2 rounded-2xl text-xs flex items-center gap-1"
+                            title="Download document"
+                          >
+                            <Download className="w-4 h-4" /> Download
+                          </button>
+                        </div>
                       </div>
-                      <button className="btn-ghost px-4 py-2 rounded-2xl text-xs flex items-center gap-2">
-                        <Download className="w-4 h-4" /> Download
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             )}
+
+            {/* WALK-018: Clarifications live inside the tender detail page so
+                the vendor reads tender info and the Q&A thread on the same
+                surface. The standalone /clarifications nav remains for cross-
+                tender browsing. */}
+            <ClarificationsSection tenderId={id} tenderStatus={tender.status} />
           </div>
 
           <aside className="space-y-4">
@@ -186,7 +255,15 @@ export default function VendorTenderDetailPage({ params }: { params: Promise<{ i
               })()
             )}
             {tender.documents && tender.documents.length > 0 && (
-              <button className="btn-ghost w-full rounded-3xl py-4 text-sm">
+              <button
+                type="button"
+                onClick={async () => {
+                  for (const d of tender.documents ?? []) {
+                    await handleDownloadDoc(d.id, d.filename);
+                  }
+                }}
+                className="btn-ghost w-full rounded-3xl py-4 text-sm"
+              >
                 Download All Documents
               </button>
             )}
@@ -227,4 +304,134 @@ function formatBudget(value: string | number) {
     currency: 'KWD',
     maximumFractionDigits: 0,
   }).format(n);
+}
+
+// WALK-018: inline Clarifications surface on the tender detail page so
+// vendors don't have to leave to ask a question or read public answers.
+interface ClarificationItem {
+  id: string;
+  question: string;
+  status: 'OPEN' | 'ANSWERED' | 'CLOSED';
+  createdAt: string;
+  vendorName?: string | null;
+  replies: Array<{
+    id: string;
+    reply: string;
+    visibility: 'PRIVATE_TO_VENDOR' | 'GENERAL_PUBLIC';
+    repliedAt: string;
+    repliedByName?: string;
+  }>;
+}
+
+const ASK_ELIGIBLE_STATUSES = new Set(['Published', 'Clarification Period']);
+
+function ClarificationsSection({ tenderId, tenderStatus }: { tenderId: string; tenderStatus: string }) {
+  const [items, setItems] = useState<ClarificationItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [question, setQuestion] = useState('');
+  const [posting, setPosting] = useState(false);
+
+  const canAsk = ASK_ELIGIBLE_STATUSES.has(tenderStatus);
+
+  const fetchItems = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      const res = await get<{ items: ClarificationItem[] }>(`/tenders/${tenderId}/clarifications`, token);
+      setItems(res.items ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load clarifications');
+    } finally {
+      setLoading(false);
+    }
+  }, [tenderId]);
+
+  useEffect(() => { fetchItems(); }, [fetchItems]);
+
+  async function handleAsk(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = question.trim();
+    if (!trimmed) return;
+    setPosting(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      await post(`/tenders/${tenderId}/clarifications`, { question: trimmed }, token);
+      setQuestion('');
+      await fetchItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to post question');
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  return (
+    <section>
+      <h3 className="heading-font text-lg font-semibold mb-4 flex items-center gap-2">
+        <MessageSquare className="w-5 h-5 text-electric-500" /> Clarifications
+      </h3>
+
+      {canAsk && (
+        <form onSubmit={handleAsk} className="mb-4 rounded-2xl bg-slate-900/5 border border-slate-900/10 p-4 space-y-3">
+          <Textarea
+            placeholder="Ask a question about this tender. Replies marked as public are visible to all bidders; private replies only to you."
+            value={question}
+            onChange={e => setQuestion(e.target.value)}
+            rows={3}
+          />
+          <div className="flex justify-end">
+            <Button type="submit" disabled={posting || !question.trim()}>
+              {posting ? 'Sending…' : 'Send question'}
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {error && <ErrorBanner message={error} />}
+
+      {loading ? (
+        <Loading />
+      ) : items.length === 0 ? (
+        <p className="text-sm text-slate-900/55 italic">No clarifications posted yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {items.map(c => (
+            <div key={c.id} className="rounded-2xl bg-slate-900/5 border border-slate-900/10 p-4">
+              <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
+                <div>
+                  <p className="text-xs text-slate-900/55">
+                    {c.vendorName ?? 'Anonymised bidder'} · {formatDate(c.createdAt)}
+                  </p>
+                  <p className="text-sm mt-1 whitespace-pre-wrap">{c.question}</p>
+                </div>
+                <Chip>{c.status}</Chip>
+              </div>
+              {c.replies.length > 0 && (
+                <div className="mt-3 border-t border-slate-900/10 pt-3 space-y-2">
+                  {c.replies.map(r => (
+                    <div key={r.id} className="rounded-xl bg-white/40 p-3">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <p className="text-[11px] text-slate-900/60">
+                          {r.repliedByName ?? 'Procurement'} · {formatDate(r.repliedAt)}
+                        </p>
+                        <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
+                          r.visibility === 'GENERAL_PUBLIC' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {r.visibility === 'GENERAL_PUBLIC' ? 'Public' : 'Private to you'}
+                        </span>
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap">{r.reply}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }

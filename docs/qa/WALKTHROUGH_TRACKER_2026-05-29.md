@@ -60,9 +60,9 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
-| WALK-016 | Download Tender document is not working | Bug | 🔴 | |
-| WALK-017 | Need a "View" option that opens the document in the in-app PDF viewer | Bug / UX | 🔴 | |
-| WALK-018 | Clarifications should live **inside the tender detail page**, not as a separate top-level menu. Vendor should view tender info + click clarification for the same tender they're on. | Feature / restructure | 🔴 | |
+| WALK-016 | Download Tender document is not working | Bug | ✅ | Fixed 2026-05-30 (BUG-063). Vendor tender detail document rows had no onClick handler. Now wired to a `handleDownloadDoc` that fetches the streaming endpoint with Bearer Authorization, blobs it, and triggers an anchor-tag download. Same plumbing also wires the previously-stub "Download All Documents" button at the bottom of the aside (loops through `tender.documents`). |
+| WALK-017 | Need a "View" option that opens the document in the in-app PDF viewer | Bug / UX | ✅ | Fixed 2026-05-30 (BUG-063). Each PDF document row now also renders a **View** button (Eye icon) that fetches the same blob and opens it in a new tab via `window.open(blobUrl)`. Browser-native PDF viewer handles display (vendor portal does not yet have a dedicated modal viewer like web-admin's BUG-037, and matching that scope was out of scope for this theme). |
+| WALK-018 | Clarifications should live **inside the tender detail page**, not as a separate top-level menu. Vendor should view tender info + click clarification for the same tender they're on. | Feature / restructure | ✅ | Fixed 2026-05-30 (BUG-063). New `ClarificationsSection` component embedded directly in the tender detail page (under the documents block). Lists existing clarifications (with public/private chip per reply) and offers an inline "Ask a question" textarea + Send button when the tender is in `Published` or `Clarification Period`. The standalone `/clarifications` nav menu remains for cross-tender browsing — owner can deprecate it later if desired. |
 
 ## G. Engineer — Tender detail (tabs)
 

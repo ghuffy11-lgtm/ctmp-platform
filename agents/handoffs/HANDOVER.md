@@ -6,6 +6,35 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-063 shipped: Theme E (Vendor portal — Download + View + Inline Clarifications)
+
+**Date/time:** 2026-05-30 ~04:25 GMT+3 (continuation after BUG-062)
+**Agent/task:** Theme E per locked sequence. WALK-016/017/018.
+
+### What landed
+
+- **`apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx`** — added `handleViewDoc` + `handleDownloadDoc` (blob+Authorization fetch pattern). Document rows now render a View button (PDFs only — opens in new tab via `window.open(blobUrl)`, browser-native PDF) and a Download button (blob + anchor download). The previously-stub "Download All Documents" button at the bottom of the aside loops through `tender.documents`. New `ClarificationsSection` subcomponent at the bottom of the file: fetches `/tenders/:id/clarifications`, renders thread cards with vendor name + question + status pill + reply list (with public/private chip per reply), and an inline "Ask a question" textarea + Send button when tender is in Published or Clarification Period.
+
+Vendor portal does not yet have the PdfViewerModal ported from web-admin (BUG-037 Phase A); `window.open(blobUrl)` is the smallest WALK-017 win without that larger port.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on web-vendor.
+- ✅ `docker compose --project-name ctmp build --no-cache web-vendor` + `up -d --force-recreate web-vendor` → container healthy.
+
+### Files modified this segment
+
+- `apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx`
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-063 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-016/017/018 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Next up (per locked sequence)
+
+Theme H — Admin role management UI (WALK-035/039) — admin can create roles + edit role-permission grants via UI.
+
+---
+
 ## 2026-05-30 — BUG-062 shipped: Theme I (Committee Opening bundle — 6 items)
 
 **Date/time:** 2026-05-30 ~04:10 GMT+3 (continuation after BUG-061)
