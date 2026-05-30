@@ -6,6 +6,37 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-060 shipped: Theme C (Tender Create → criteria editor as next step)
+
+**Date/time:** 2026-05-30 ~03:45 GMT+3 (continuation after BUG-059)
+**Agent/task:** Theme C per locked sequence. WALK-007 (criteria editor missing on Create).
+
+### What landed
+
+- **`apps/web-admin/src/app/(admin)/tenders/new/page.tsx`** — post-create navigation switched from `/tenders/:id` to `/tenders/:id/edit?from=create`.
+- **`apps/web-admin/src/app/(admin)/tenders/[id]/edit/page.tsx`** — added `useSearchParams()` to read `?from=create`; renders a blue accent banner above the criteria editor when present: "Tender created — next: set the Technical Evaluation Criteria. … You can revisit this page anytime before approval." `CheckCircle2` added to lucide imports.
+
+Editor inlining on the Create form was rejected: `TenderCriteriaEditor` PUTs to `/tenders/:id/criteria` and requires an existing tender id; the redirect-with-cue reuses BUG-044 with zero refactor.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean.
+- ✅ `docker compose --project-name ctmp build --no-cache web-admin` + `up -d --force-recreate web-admin` → container healthy.
+
+### Files modified this segment
+
+- `apps/web-admin/src/app/(admin)/tenders/new/page.tsx` — post-create redirect
+- `apps/web-admin/src/app/(admin)/tenders/[id]/edit/page.tsx` — useSearchParams + cue banner
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-060 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-007 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Next up (per locked sequence)
+
+Theme G — Technical Comparison polish (WALK-029/030/031/032/033/034) — 6 items: remove Consensus block, slim Evaluator Breakdown, add tech-proposal PDF link, fix score formatting (83.3/30 issue), remove "Score evaluations", fix matrix values.
+
+---
+
 ## 2026-05-30 — BUG-059 shipped: Theme B (Approval Queue — description fetch + PDF modal docs)
 
 **Date/time:** 2026-05-30 ~03:40 GMT+3 (continuation after BUG-058)

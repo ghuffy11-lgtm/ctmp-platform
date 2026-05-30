@@ -41,7 +41,7 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
-| WALK-007 | Tender Create page (`/tenders/new`) should include the Technical Evaluation Criteria editor — currently officer must save first then go to edit to access it | UX / feature gap | 🔴 | |
+| WALK-007 | Tender Create page (`/tenders/new`) should include the Technical Evaluation Criteria editor — currently officer must save first then go to edit to access it | UX / feature gap | ✅ | Fixed 2026-05-30 (BUG-060). Post-create now routes to `/tenders/:id/edit?from=create` instead of `/tenders/:id`. The edit page hosts `<TenderCriteriaEditor>` (BUG-044) and now shows a blue cue banner ("Tender created — next: set the Technical Evaluation Criteria") when the `?from=create` flag is present. Officer flow becomes: fill Create form → click Save → arrive on edit with banner highlighting criteria as the next step → set weights/criteria → Save → navigate to detail. The editor stays available indefinitely for revisions until Submit-for-Approval. Mounting the editor literally inside Create was rejected because the editor requires an existing tender id for its PUT — the redirect approach reuses BUG-044 with zero refactor. |
 | WALK-008 | Overview tab — working as expected | Confirmation | 🔵 | |
 | WALK-009 | Clarifications tab — vendor sent a clarification but engineer doesn't see it | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
 | WALK-010 | Bids tab — not working | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |

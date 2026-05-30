@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { get, patch } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { TenderCriteriaEditor } from '@/components/TenderCriteriaEditor';
 import {
   AlertCircle,
+  CheckCircle2,
   ChevronRight,
   Lock,
   Info,
@@ -90,6 +91,8 @@ function FieldLabel({ children, required }: { children: React.ReactNode; require
 export default function EditTenderPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromCreate = searchParams.get('from') === 'create';
   const tenderId = params.id as string;
 
   const [tender, setTender] = useState<TenderData | null>(null);
@@ -379,6 +382,20 @@ export default function EditTenderPage() {
           </button>
         </div>
       </div>
+
+      {/* BUG-060 / WALK-007: post-create cue. Officer landed here straight
+          from /tenders/new so they can configure criteria as a next step. */}
+      {fromCreate && (
+        <div className="mt-6 bg-accent/5 border border-accent/30 rounded-xl px-5 py-4 flex items-start gap-3">
+          <CheckCircle2 className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-text-primary">Tender created — next: set the Technical Evaluation Criteria</p>
+            <p className="text-xs text-text-secondary mt-0.5">
+              Define the criteria evaluators will score against (weights must total 100). You can revisit this page anytime before approval.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Phase F (BUG-044): Per-tender criteria editor — visible whenever the
           tender exists; backend rejects saves at non-editable statuses anyway. */}

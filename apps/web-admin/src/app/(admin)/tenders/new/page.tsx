@@ -122,7 +122,10 @@ export default function CreateTenderPage() {
       }
       payload.visibility = form.visibility;
       const result = await post<{ id: string }>('/tenders', payload, token);
-      router.push(`/tenders/${result.id}`);
+      // BUG-060 / WALK-007: drop the officer straight into the edit page so
+      // they can configure the Technical Evaluation Criteria before submitting
+      // for approval. The edit page (BUG-044) hosts the TenderCriteriaEditor.
+      router.push(`/tenders/${result.id}/edit?from=create`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save tender');
     } finally {
