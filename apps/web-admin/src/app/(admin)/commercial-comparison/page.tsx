@@ -94,6 +94,8 @@ function CommercialComparisonContent() {
   const [canView, setCanView] = useState(false);
   const [canEvaluate, setCanEvaluate] = useState(false);
   const [canGenerateMinutes, setCanGenerateMinutes] = useState(false);
+  // WALK-056: text filter so the Completed group stays navigable.
+  const [tenderFilter, setTenderFilter] = useState('');
 
   const [tenders, setTenders] = useState<TenderListItem[]>([]);
   const [tendersLoading, setTendersLoading] = useState(true);
@@ -255,6 +257,15 @@ function CommercialComparisonContent() {
             from the Committee &amp; Commercial page first.
           </p>
         ) : (
+          <>
+          {/* WALK-056: filter input above the picker. */}
+          <input
+            type="text"
+            value={tenderFilter}
+            onChange={e => setTenderFilter(e.target.value)}
+            placeholder="Filter by reference or title…"
+            className="w-full mb-2 px-3 py-2 text-xs border border-border rounded-md bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+          />
           <select
             value={selectedTenderId ?? ''}
             onChange={e => setSelectedTenderId(e.target.value || null)}
@@ -262,8 +273,15 @@ function CommercialComparisonContent() {
           >
             <option value="">Select a tender…</option>
             {(() => {
-              const active = tenders.filter(t => !COMPLETED_SET.has(t.status));
-              const completed = tenders.filter(t => COMPLETED_SET.has(t.status));
+              const q = tenderFilter.trim().toLowerCase();
+              const matches = q
+                ? tenders.filter(t =>
+                    t.referenceNumber.toLowerCase().includes(q) ||
+                    t.title.toLowerCase().includes(q),
+                  )
+                : tenders;
+              const active = matches.filter(t => !COMPLETED_SET.has(t.status));
+              const completed = matches.filter(t => COMPLETED_SET.has(t.status));
               return (
                 <>
                   {active.length > 0 && (
@@ -288,6 +306,7 @@ function CommercialComparisonContent() {
               );
             })()}
           </select>
+          </>
         )}
       </div>
 

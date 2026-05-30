@@ -168,6 +168,8 @@ export default function TechnicalEvaluationPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   const [viewingProposal, setViewingProposal] = useState(false);
+  // WALK-056: filter the side list by reference number or title.
+  const [tenderFilter, setTenderFilter] = useState('');
 
   // ─── Fetch tenders in evaluation phase ──────────────────────────────────────
   useEffect(() => {
@@ -452,13 +454,22 @@ export default function TechnicalEvaluationPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* ── Tender List ─────────────────────────────────────────────────────── */}
         <div className="w-64 flex-shrink-0 border-r border-border bg-bg flex flex-col overflow-hidden">
-          <div className="p-4 border-b border-border bg-card">
-            <p className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">
+          <div className="p-4 border-b border-border bg-card space-y-2">
+            <p className="text-xs font-bold uppercase tracking-wider text-text-secondary">
               Tenders Under Evaluation
             </p>
             <p className="text-xs text-text-secondary">
               {tenders.filter(t => !PAST_SET.has(t.status)).length} active · {tenders.filter(t => PAST_SET.has(t.status)).length} past
             </p>
+            {/* WALK-056: search box so the Past evaluations list stays
+                navigable once dozens of finalised tenders accumulate. */}
+            <input
+              type="text"
+              value={tenderFilter}
+              onChange={e => setTenderFilter(e.target.value)}
+              placeholder="Filter by reference or title…"
+              className="w-full px-2.5 py-1.5 text-xs border border-border rounded-md bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+            />
           </div>
           <div className="flex-1 overflow-y-auto">
             {tendersLoading ? (
@@ -472,8 +483,15 @@ export default function TechnicalEvaluationPage() {
               </div>
             ) : (
               (() => {
-                const active = tenders.filter(t => !PAST_SET.has(t.status));
-                const past = tenders.filter(t => PAST_SET.has(t.status));
+                const q = tenderFilter.trim().toLowerCase();
+                const matches = q
+                  ? tenders.filter(t =>
+                      t.referenceNumber.toLowerCase().includes(q) ||
+                      t.title.toLowerCase().includes(q),
+                    )
+                  : tenders;
+                const active = matches.filter(t => !PAST_SET.has(t.status));
+                const past = matches.filter(t => PAST_SET.has(t.status));
                 const renderItem = (t: TenderSummary, isPast: boolean) => {
                   const isSelected = t.id === selectedTenderId;
                   return (

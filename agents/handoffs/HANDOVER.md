@@ -6,6 +6,58 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-065 shipped: Theme J (filter/search on accumulating lists) — **all WALK items closed**
+
+**Date/time:** 2026-05-30 ~04:40 GMT+3 (continuation after BUG-064)
+**Agent/task:** Theme J per locked sequence. WALK-056. **Final theme of the tracker.**
+
+### What landed
+
+Case-insensitive text filter (matches reference number OR title) added to three list surfaces:
+
+- `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx` — new `tenderFilter` state + input above the side list. Filter applies before the Active / Past split (BUG-055) so both sections shrink together.
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — filter input above the picker `<select>`. Applied before the Active / Completed `<optgroup>` split (BUG-055).
+- `apps/web-admin/src/app/(admin)/committee-opening/page.tsx` — filter input above the side list. Empty-state "No tenders match the filter" when the filter matches nothing.
+
+Kept inline state per page rather than lifting a shared component; the pattern is small enough that early extraction would have cost more than it saved. Lift if/when another list surface wants the same.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean. (Caught one JSX-fragment fix in commercial-comparison where the ternary's else branch needed `<>...</>` wrapping.)
+- ✅ `docker compose --project-name ctmp build --no-cache web-admin` + `up -d --force-recreate web-admin` → container healthy.
+
+### Files modified this segment
+
+- `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx`
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx`
+- `apps/web-admin/src/app/(admin)/committee-opening/page.tsx`
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-065 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-056 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Theme 3 is now unblocked
+
+Locked directive 2026-05-30 was: **all open WALK items must close before Theme 3 begins.** That gate is now cleared. Theme 3 remainders (WALK-053 unified Tender Summary view + WALK-055 overall flow simplification) can be picked up when the owner is ready.
+
+### Commit cadence ledger for the day
+
+| # | BUG | Theme | Items closed |
+|---|---|---|---|
+| `c47c440` | BUG-056 | D — Tender detail tabs | WALK-009/010/011/013/014/015/020/021/022 (9) |
+| `fb0bb07` | BUG-057 | F — Tech Evaluation polish | WALK-024/025/026/027/028 (5) |
+| `1aec419` | BUG-058 | A — Dashboard perm gating | WALK-002/003/G1 (3) |
+| `2bada50` | BUG-059 | B — Approval Queue | WALK-004/005/006 (3) |
+| `8dd2a4b` | BUG-060 | C — Tender Create cue | WALK-007 (1) |
+| `5d9d273` | BUG-061 | G — Tech Comparison polish | WALK-029/030/031/032/033/034 (6) |
+| `accea0c` | BUG-062 | I — Committee Opening | WALK-036/037/040/041/042/043 (6) |
+| `702e9b4` | BUG-063 | E — Vendor portal | WALK-016/017/018 (3) |
+| `fae5075` | BUG-064 | H — Admin role mgmt | WALK-035/039 (2) |
+| _next_ | BUG-065 | J — Filter/search | WALK-056 (1) |
+
+**~39 WALK items closed across 10 themes, in one extended session.** Three migrations shipped (017 close-tender perm, 018 tender:audit:view, 019 committee-session-invitation template). One backend module wiring (`CommitteeModule` ← `NotificationsModule`). Two cross-cutting backend changes (`TendersService` dept-scope OR for committee+evaluator, `audit` per-tender perm split).
+
+---
+
 ## 2026-05-30 — BUG-064 shipped: Theme H (Admin role management UI — create + edit)
 
 **Date/time:** 2026-05-30 ~04:30 GMT+3 (continuation after BUG-063)

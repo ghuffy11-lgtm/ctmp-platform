@@ -115,6 +115,8 @@ export default function CommitteeOpeningPage() {
   const [availableUsers, setAvailableUsers] = useState<UserOption[]>([]);
   const [creatingSession, setCreatingSession] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  // WALK-056: side-list text filter.
+  const [tenderFilter, setTenderFilter] = useState('');
   const [sessionDate, setSessionDate] = useState('');
   const [sessionTime, setSessionTime] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -301,11 +303,20 @@ export default function CommitteeOpeningPage() {
     <div className="flex h-full overflow-hidden -m-8">
       {/* Tender list */}
       <div className="w-72 flex-shrink-0 border-r border-border bg-bg flex flex-col">
-        <div className="p-4 border-b border-border bg-card">
+        <div className="p-4 border-b border-border bg-card space-y-2">
           <p className="text-xs font-bold uppercase tracking-wider text-text-secondary">
             Awaiting Commercial Opening
           </p>
-          <p className="text-xs text-text-secondary mt-0.5">{tenders.length} tenders</p>
+          <p className="text-xs text-text-secondary">{tenders.length} tenders</p>
+          {/* WALK-056: search input — keeps the list navigable once opened
+              tenders pile up at the bottom. */}
+          <input
+            type="text"
+            value={tenderFilter}
+            onChange={e => setTenderFilter(e.target.value)}
+            placeholder="Filter by reference or title…"
+            className="w-full px-2.5 py-1.5 text-xs border border-border rounded-md bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+          />
         </div>
         <div className="flex-1 overflow-y-auto">
           {tendersLoading ? (
@@ -316,7 +327,22 @@ export default function CommitteeOpeningPage() {
               <p className="text-xs text-text-secondary">No tenders awaiting commercial opening.</p>
             </div>
           ) : (
-            tenders.map(t => {
+            (() => {
+              const q = tenderFilter.trim().toLowerCase();
+              const filtered = q
+                ? tenders.filter(t =>
+                    t.referenceNumber.toLowerCase().includes(q) ||
+                    t.title.toLowerCase().includes(q),
+                  )
+                : tenders;
+              if (filtered.length === 0) {
+                return (
+                  <div className="p-6 text-center text-xs text-text-secondary italic">
+                    No tenders match the filter.
+                  </div>
+                );
+              }
+              return filtered.map(t => {
               const isSel = t.id === selectedTenderId;
               return (
                 <div
@@ -346,7 +372,8 @@ export default function CommitteeOpeningPage() {
                   </span>
                 </div>
               );
-            })
+              });
+            })()
           )}
         </div>
       </div>
