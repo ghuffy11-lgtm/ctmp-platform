@@ -18,6 +18,101 @@ Related files:
 
 ## Decisions
 
+### 2026-05-30 — Locked walkthrough resolution sequence + per-theme commit cadence
+
+Date: 2026-05-30
+Decision: Lock a per-theme commit cadence + an impact-first sequence for clearing the 2026-05-29 walkthrough tracker. Hold Theme 3 (WALK-053 + WALK-055) until every other 🔴 / 🟡 item reaches a terminal status.
+
+Context: After Themes 1 and 2 of the post-Confirm refinement work shipped (BUG-052..055), the WALKTHROUGH_TRACKER_2026-05-29.md still carried ~39 open items spread across 11 themes. Owner directive: "lets start fixing all the issues which we documented in WALKTHROUGH_TRACKER_2026-05-29 file, let theme 3 to be after we finish all these issues." Sequence + cadence had to be locked once to avoid per-theme negotiation overhead.
+
+Options considered:
+  - Strict tracker order (A → B → C → … → J) → rejected: walks the easier items first while critical infrastructure (broken tabs across 3 roles, broken scorecard re-load) waits.
+  - One BUG-NNN per WALK item → rejected: 39 commits across many sessions; high process overhead; longer time-to-first-deploy.
+  - Looser cluster commits (one BUG per 3 themes) → rejected: harder to roll back a single piece if something breaks.
+
+Outcome:
+  - **Sequence (highest impact + smallest scope risk first):** K (recover truncated WALK-027/028) → D (Tender detail broken tabs, cross-role) → F (Tech Evaluation polish, WALK-026 critical) → A (Dashboard perm gating) → B (Approval Queue) → C (Tender Create criteria cue) → G (Tech Comparison polish) → I (Committee Opening) → E (Vendor portal) → H (Admin role mgmt UI) → J (Shared filter/search, last so it absorbs requirements from all earlier list surfaces).
+  - **Cadence:** one `BUG-NNN` per theme. Hot patches that surface mid-theme attach to the theme's own commit unless owner explicitly splits them off.
+  - **Theme 3 hold:** WALK-053 (unified Tender Summary view) + WALK-055 (overall Phase D flow simplification) explicitly held until all other items close.
+
+Impact: 10 themes shipped end-to-end in one extended session as BUG-056..065 plus a hot-patch BUG-066 for the WALK-057 regression. All 39 captured WALK items (plus the post-verification WALK-056 and WALK-057) now reach ✅ or 🔵 status; only Theme 3 remains held.
+
+Related files:
+  - `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` (directive recorded at top, locked sequence + cadence)
+  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-056..066 entries)
+  - `agents/handoffs/HANDOVER.md` (per-theme handover entries)
+
+### 2026-05-30 — Cross-departmental committee + commercial-evaluator visibility (WALK-041 / BUG-062)
+
+Date: 2026-05-30
+Decision: Extend the BUG-050 / BUG-028 Part B dept-scoping filter so that users assigned to a committee session OR holding a commercial evaluation row for a given tender can read that tender regardless of department.
+
+Context: Owner walkthrough surfaced that committee members and commercial evaluators are operationally **cross-departmental** — a finance person on a committee for a tender outside their home department must still see it. BUG-050's dept filter (`where.departmentId IN [user.depts]`) treated committee/evaluator participation as identical to having no business with the tender at all, forcing the owner to manually re-assign departments as a workaround.
+
+Options considered:
+  - Grant `system:view_all_departments` to COMMERCIAL_COMMITTEE_MEMBER + COMMERCIAL_EVALUATOR → rejected: too blunt, defeats BUG-050 intent for non-committee work and leaks all org-wide tenders to evaluator-only users.
+  - Per-tender invitation list extending tender_vendors-style membership → rejected: duplicates the existing CommitteeMember + CommercialEvaluation tables.
+  - OR-merge an "assigned tenders" inclusion into the dept filter → accepted: small change, reuses authoritative tables.
+
+Outcome (in `apps/api/src/modules/tenders/tenders.service.ts`):
+  - `findAll` filter changed from `where.departmentId = { in: depts }` to `where.OR = [{departmentId in depts}, {committeeSessions has member}, {bids has commercialEvaluation by user}]`.
+  - `findOne` mirrors the same logic: if the dept check fails, look up committee membership + commercial evaluation before throwing NotFound.
+  - SYSTEM_ADMIN / AUDITOR / PROCUREMENT_ADMIN bypass via `system:view_all_departments` unchanged.
+
+Impact: Finance + committee members no longer need to be temporarily re-assigned to a tender's department to view it. Procurement compliance preserved: only ACTUAL committee/evaluator participation opens visibility, not blanket org-wide access.
+
+Related files:
+  - `apps/api/src/modules/tenders/tenders.service.ts`
+  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-062 entry)
+
+### 2026-05-30 — Per-tender audit permission split (WALK-011/015/022 / BUG-056)
+
+Date: 2026-05-30
+Decision: Introduce a narrower `tender:audit:view` permission for the per-tender audit endpoint, distinct from the system-wide `audit:view`.
+
+Context: The Audit Trail tab on the tender detail page (BUG-056) consumes `GET /tenders/:id/audit-logs`. That endpoint was gated on `audit:view`, which only SYSTEM_ADMIN and AUDITOR hold. Procurement / technical / committee staff working on a specific tender couldn't see its own audit history — only the global audit team could. Locked spec rule "Audit logs are append-only and cannot be edited through the application" doesn't require keeping them invisible to operators of the same tender.
+
+Options considered:
+  - Broaden `audit:view` to procurement roles → rejected: that perm also gates the system-wide audit search; broadening it leaks org-wide events.
+  - Drop the gate on the per-tender endpoint entirely → rejected: still want a perm seam so role design can selectively withdraw access (e.g. ex-employees keeping accounts but losing audit view).
+  - Add a narrower `tender:audit:view` perm → accepted.
+
+Outcome (Migration 018):
+  - New permission `tender:audit:view` seeded.
+  - Granted to: SYSTEM_ADMIN, AUDITOR, PROCUREMENT_ADMIN, PROCUREMENT_OFFICER, TECHNICAL_EVALUATOR, APPROVER, COMMERCIAL_EVALUATOR, COMMERCIAL_COMMITTEE_MEMBER (8 roles — everyone who touches a tender).
+  - `audit.controller.ts:getTenderLogs` switched gate from `audit:view` → `tender:audit:view`. System-wide `GET /audit-logs` stays on `audit:view`.
+  - token_version bumped on all 9 affected users.
+
+Impact: Tender Detail → Audit Trail tab works for all internal participants in the tender (officer/manager/engineer all verified 200 post-migration). System-wide audit access remains gated to SYSTEM_ADMIN + AUDITOR.
+
+Related files:
+  - `database/migrations/018_bug056_tender_audit_view_permission.sql`
+  - `apps/api/src/modules/audit/audit.controller.ts`
+  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-056 entry)
+
+### 2026-05-30 — Score normalisation display contract (BUG-061)
+
+Date: 2026-05-30
+Decision: Treat all stored evaluation scores as a 0–100 normalised percentage at the database layer, and scale to absolute units against `maxScore` at the display layer via a `toAbsolute()` helper.
+
+Context: Owner reported the Technical Comparison page showed values like "83.3 / 30" — the score exceeding the max (WALK-032/034). Root cause: backend stores both `overallScore` and per-criterion `score` rows normalised to 0–100 (per `evaluate()` in `technical-evaluation.service.ts`), but the display passed those numbers through `fmtScore(score, max)` as if they were absolute units. With criteria summing to less than 100 (e.g. 30), the display showed "83.3 / 30".
+
+Options considered:
+  - Convert stored values back to absolute on save → rejected: breaks per-criterion weighted-average computation in the backend; the normalised form is necessary for cross-criterion arithmetic.
+  - Display as percentage everywhere ("83.3 / 100") → rejected: owner expects to see absolute scoring units that match the criteria weights they configured.
+  - Add a `toAbsolute(normalised, max)` display helper → accepted: zero schema change, clear contract that "DB is %; display is absolute".
+
+Outcome:
+  - `VendorTechnicalCard.tsx` + `TechnicalMatrix.tsx` both gained a `toAbsolute(normalised, max) = (normalised/100) * max` helper.
+  - Applied to: card header consensus score (vs. `totalMaxScore`), per-evaluator overall score (vs. `totalMaxScore`), matrix per-criterion cells (vs. `c.maxScore`), matrix Total column (vs. `totalMaxScore`).
+
+Impact: Score columns now display in absolute units consistent with the configured weights (e.g. 25.0 / 30) regardless of whether criteria sum to 100 or to a smaller total.
+
+Related files:
+  - `apps/web-admin/src/components/comparison/VendorTechnicalCard.tsx`
+  - `apps/web-admin/src/components/comparison/TechnicalMatrix.tsx`
+  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-061 entry)
+
 ### 2026-05-29 — Manual commercial-price entry on Commercial Comparison page (BUG-053)
 
 Date: 2026-05-29

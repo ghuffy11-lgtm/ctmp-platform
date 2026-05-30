@@ -6,6 +6,40 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-066 shipped: tender detail Bids stat tile regression
+
+**Date/time:** 2026-05-30 ~09:55 GMT+3 (post-Theme-J spot fix)
+**Agent/task:** Owner spotted the Bids stat tile next to Days Left on `/tenders/[id]` rendered "00" instead of the actual bid count. Captured as WALK-057 and shipped.
+
+### Root cause
+
+`apps/api/src/modules/tenders/tenders.service.ts:serializeDetail` never emitted `bidCount`. The field has been undefined on `findOne` since the BUG-013 serializer sweep; the frontend dutifully rendered `String(tender.bidCount ?? 0).padStart(2, '0')` as "00" for every tender regardless of how many bids existed. Owner's "before it was showing now its not" is most likely a misremembered prior state — `bidCount` has never been on the detail serializer per git history. Either way the fix is the same.
+
+### What landed
+
+- `tenders.service.ts:findOne` Prisma include adds `_count: { select: { bids: true } }`.
+- `serializeDetail` returns `bidCount: t._count?.bids ?? 0`.
+- Create + Update paths fall back to 0 (no bids attach during those flows; detail page reloads via `findOne` after).
+
+### Verification
+
+- ✅ `pnpm exec tsc --noEmit` clean.
+- ✅ `docker compose --project-name ctmp build --no-cache api` + recreate → container healthy.
+- ✅ `GET /tenders/<TDR-2026-0013>` as manager@ returns `bidCount: 2` (and `daysLeft: 19`).
+
+### Files
+
+- `apps/api/src/modules/tenders/tenders.service.ts`
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-066 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — new section N + WALK-057 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Commit ledger updated
+
+After this fix the tracker has **zero open 🔴 items** (Theme 3 held by the owner-locked directive). 15 local commits ahead of `origin/develop`; staging is fully deployed.
+
+---
+
 ## 2026-05-30 — BUG-065 shipped: Theme J (filter/search on accumulating lists) — **all WALK items closed**
 
 **Date/time:** 2026-05-30 ~04:40 GMT+3 (continuation after BUG-064)

@@ -605,3 +605,149 @@ Related files:
 
 `apps/api/src/common/request-context/{request-context.service.ts,request-context.middleware.ts,request-context.module.ts}`, `apps/api/src/app.module.ts` (`configure()`), `apps/api/src/main.ts` (trust proxy), `apps/api/src/modules/audit/audit.service.ts` (consumer).
 
+### Cross-Departmental Visibility via OR-Clause
+
+Use when:
+
+A user role is operationally cross-departmental (committee member, commercial evaluator, future technical evaluator pools) and the existing BUG-028 Part B dept filter would otherwise hide tenders they're actively working on. Owner reported the workaround was to temporarily re-assign people to a tender's department — fragile and a separation-of-duties leak.
+
+Pattern:
+
+1. Identify the authoritative relation that captures the assignment (e.g. `CommitteeMember.userId` + `session.tenderId`, `CommercialEvaluation.evaluatorUserId` + `bid.tenderId`). Reuse what exists; don't introduce a parallel "assigned tenders" table.
+2. In `findAll`, change the simple `where.departmentId = { in: depts }` into `where.OR = [{departmentId in depts}, {assigned-via-relation-1}, {assigned-via-relation-2}]`. Empty `depts` becomes `{ in: [] }` so the dept arm matches nothing while the OR arms still grant access.
+3. In `findOne`, mirror the logic: dept check failing falls through to `Promise.all([memberHit, evaluatorHit])` count queries against the same relations before throwing `NotFound`. Two cheap COUNT queries are fine here; the alternative (loading the full relation graph) is heavier.
+4. Always keep the `system:view_all_departments` bypass arm above the OR — admin/auditor/procurement-lead get everything without paying the OR cost.
+
+```ts
+// findAll (excerpt)
+where.OR = [
+  { departmentId: depts.length > 0 ? { in: depts } : { in: [] } },
+  { committeeSessions: { some: { committeeMembers: { some: { userId: user.id } } } } },
+  { bids: { some: { commercialEvaluations: { some: { evaluatorUserId: user.id } } } } },
+];
+
+// findOne (excerpt — after dept check fails)
+const [memberHit, evaluatorHit] = await Promise.all([
+  this.prisma.committeeMember.count({ where: { userId: user.id, session: { tenderId: tender.id } } }),
+  this.prisma.commercialEvaluation.count({ where: { evaluatorUserId: user.id, bid: { tenderId: tender.id } } }),
+]);
+if (memberHit === 0 && evaluatorHit === 0) throw new NotFoundException('Tender not found');
+```
+
+Do not:
+
+- Do NOT grant `system:view_all_departments` to committee/evaluator roles as a "fix" — it leaks every department's tenders, not just the ones they were assigned to. Re-rejected explicitly during BUG-062.
+- Do NOT introduce a duplicate "tender_assignees" table. The relations exist; reuse them.
+- Do NOT widen the OR to "anyone in this user's tenant" or similar broad scopes. Stay tied to authoritative per-tender assignment rows.
+
+Related files:
+
+`apps/api/src/modules/tenders/tenders.service.ts` (BUG-062 findAll + findOne), `docs/decisions/DECISION_LOG.md` (2026-05-30 cross-dept entry).
+
+### Dual-Perm Gate (Legacy + New)
+
+Use when:
+
+A permission is being split (e.g. `commercial:view` → `comparison:commercial:view`) and existing code paths still check the old name. The safe migration is to make every gate accept EITHER perm during the transition window rather than flip everything atomically.
+
+Pattern:
+
+1. Backend gates that hand-roll the check inside the service should `&&` the OR explicitly: `if (!perms.includes('commercial:view') && !perms.includes('comparison:commercial:view')) throw …` (BUG-052 `bids.service.ts:391`).
+2. Sidebar nav entries gated through the `permission` shorthand → switch to `anyPermission: [newPerm, legacyPerm]` (`Sidebar.tsx`).
+3. Page-level mounted-token checks already accept arrays via `hasPermission(token, A) || hasPermission(token, B)`; mirror the same `[newPerm, legacyPerm]` ordering everywhere so the next reader sees the pattern.
+4. Once every role and every code path has migrated to the new perm, drop the legacy arm. Don't leave the OR in place "just in case" — it becomes invisible scope creep.
+
+Do not:
+
+- Do NOT split a permission inside a migration without updating all gates in the same commit. The gap window (DB has new perm, code still requires old) silently locks legitimate users out.
+- Do NOT use the dual-gate as a permanent escape hatch for a poorly modelled permission. If both names keep stickng around indefinitely, that's a sign the split itself was wrong.
+
+Related files:
+
+`apps/api/src/modules/bids/bids.service.ts` (commercial branch), `apps/web-admin/src/components/layout/Sidebar.tsx` (`/commercial-comparison` entry), `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` (page-level mounted-token check).
+
+### Score-Storage Normalisation Display Contract
+
+Use when:
+
+You're rendering an evaluation score that's stored on a 0–100 percentage scale in the database (because per-criterion weighted averaging requires a uniform scale) but the user expects to see the value in absolute units against the criterion's `maxScore`.
+
+Pattern:
+
+1. Treat the DB value as authoritative and never mutate it at write time.
+2. Add a small helper at display time: `toAbsolute(normalised, max) = (normalised / 100) * max`. Guard for `max <= 0` and `normalised == null` (return `null` so `fmtScore` formats as `—`).
+3. Use it on every display surface that mixes normalised values with max-score context: per-vendor card header (vs. `totalMaxScore`), per-evaluator overall (vs. `totalMaxScore`), per-criterion matrix cell (vs. `c.maxScore`), Total column (vs. `totalMaxScore`).
+4. Keep the helper local to the component file unless three+ components need it; lift to a shared util only on the third use.
+
+```ts
+function toAbsolute(normalised: number | null, max: number): number | null {
+  if (normalised == null || max <= 0) return null;
+  return (normalised / 100) * max;
+}
+// usage
+fmtScore(toAbsolute(vendor.consensusScore, totalMaxScore), totalMaxScore)
+```
+
+Do not:
+
+- Do NOT scale-on-save. Per-criterion weighted-average math depends on a uniform scale; the backend `evaluate()` deliberately normalises before persisting.
+- Do NOT display the raw 0–100 value against an arbitrary `maxScore` (e.g. `fmtScore(83.3, 30)` → "83.3 / 30"). This is the WALK-032/034 regression.
+
+Related files:
+
+`apps/web-admin/src/components/comparison/VendorTechnicalCard.tsx`, `apps/web-admin/src/components/comparison/TechnicalMatrix.tsx`, `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts` (evaluate normalisation).
+
+### Mounted-Token Hydration Pattern (BUG-046)
+
+Use when:
+
+A page or component needs to read the JWT-derived permission set (via `getAccessToken` + `hasPermission`) to gate render decisions. SSR has no `document.cookie` access; the client hydration step does. Reading the token directly during render produces SSR vs. first-client-render DOM divergence → React hydration crash (#418).
+
+Pattern:
+
+1. Initialise per-perm flags to `false` in `useState`.
+2. Compute them inside a `useEffect(() => {...}, [])` on mount, after which the client re-renders with the real values. SSR and first client render produce identical DOM.
+
+```tsx
+const [perms, setPerms] = useState({ canEvaluate: false, canConfirm: false });
+useEffect(() => {
+  const t = getAccessToken();
+  if (!t) return;
+  setPerms({
+    canEvaluate: hasPermission(t, 'commercial:evaluate'),
+    canConfirm: hasPermission(t, 'comparison:commercial:confirm'),
+  });
+}, []);
+```
+
+Do not:
+
+- Do NOT call `getAccessToken()` directly during render (the original BUG-046 crash).
+- Do NOT skip the mount-deferred read just because "this page is client-only" — Next.js still SSRs the page shell for the layout chain. The hydration mismatch propagates upward.
+- Do NOT use `localStorage` or `js-cookie` reads in `useMemo` either — same SSR/CSR divergence trap.
+
+Related files:
+
+`apps/web-admin/src/components/layout/Sidebar.tsx` (the original BUG-046 fix), `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` (per-action perm gating), `apps/web-admin/src/app/(admin)/dashboard/page.tsx` (BUG-058 Quick Actions gating), `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` (BUG-053/054 canEvaluate + canGenerateMinutes).
+
+### Empty-State Tab Subcomponents (TabSkeleton / TabError / TabEmpty)
+
+Use when:
+
+You're wiring multiple tab panels on the same page (Clarifications / Bids / Audit Trail on tender detail) and each needs identical loading + error + empty UI. Repeating the wrapper structure per tab is noise.
+
+Pattern:
+
+1. Extract three small subcomponents at the bottom of the page file: `TabSkeleton({icon, label})`, `TabError({icon, message})`, `TabEmpty({icon, title, body})`. Each renders a centered card with the icon + relevant text.
+2. Each tab panel does its own fetch via `useEffect` + `useState`. It returns `<TabSkeleton/>` while loading, `<TabError/>` on fetch failure, `<TabEmpty/>` when items are empty, otherwise the real list.
+3. Pass the tab's domain icon (`MessageSquare`, `FileText`, `Shield`) through so each state still feels owned by the tab.
+
+Do not:
+
+- Do NOT lift these to a shared `@/components` until a second page needs them. The pattern is cheap to repeat once.
+- Do NOT skip the explicit error state. Audit-history fetch failures should surface clearly, not silently render empty.
+
+Related files:
+
+`apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` (the three Tab*Panel components + the three Tab subcomponents at the bottom).
+

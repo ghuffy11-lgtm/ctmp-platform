@@ -4,6 +4,34 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 
 **Status legend:** 🔴 Open · 🟡 In Progress · ✅ Fixed · 🔵 Confirmation only (no action)
 
+---
+
+## 🟢 Ready for owner verification — 2026-05-30
+
+**All captured items are at terminal status (✅ Fixed or 🔵 Confirmation-only) except the two Theme 3 entries explicitly held by owner directive (WALK-053, WALK-055).** Code is deployed to staging — the local `develop` branch is 15 commits ahead of `origin/develop` and push is held pending owner sign-off.
+
+**How to test:** Re-login as each role (token_version was bumped by migrations 015/016/017/018/019 — old JWTs will lack new perms). For each ✅ item below, open the relevant surface on staging and confirm the described behaviour. Add a follow-up row in **section N** (Regression captured post-Theme J) for anything that needs a return trip.
+
+**Staging URLs:** Admin `https://ctmp-admin.hadiclinic.com.kw:4202` · Vendor `https://vn.hadiclinic.com.kw:4201`. Cast credentials per the walkthrough setup entry in `HANDOVER.md` (shared password `Walkthrough@2026!`, admin uses `Admin@12345!`).
+
+**Cross-reference table for fast lookup of what shipped where:**
+
+| Theme | BUG | WALK items closed |
+|---|---|---|
+| K (truncated recovery) | docs only | WALK-027 + WALK-028 inferred bodies recorded |
+| D — Tender detail tabs | BUG-056 | WALK-009/010/011/013/014/015/020/021/022 |
+| F — Tech Eval polish | BUG-057 | WALK-024/025/026/027/028 |
+| A — Dashboard gating | BUG-058 | WALK-002/003/G1 |
+| B — Approval Queue | BUG-059 | WALK-004/005/006 |
+| C — Tender Create cue | BUG-060 | WALK-007 |
+| G — Tech Comparison polish | BUG-061 | WALK-029/030/031/032/033/034 |
+| I — Committee Opening | BUG-062 | WALK-036/037/040/041/042/043 |
+| E — Vendor portal | BUG-063 | WALK-016/017/018 |
+| H — Admin role mgmt | BUG-064 | WALK-035/039 |
+| J — Filter/search | BUG-065 | WALK-056 |
+| Hot patch | BUG-066 | WALK-057 (Bids tile regression) |
+| Already-shipped pre-walkthrough | BUG-046 (hydration) + BUG-037 (PDF viewer) | WALK-049 (confirmation) + WALK-024 (verified already in place) |
+
 **User accounts in the walkthrough** (shared password `Walkthrough@2026!`):
 
 - `officer@ctmp.local` — PROCUREMENT_OFFICER

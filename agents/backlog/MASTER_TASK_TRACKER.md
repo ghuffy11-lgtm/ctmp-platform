@@ -475,6 +475,49 @@ These items emerged during Phase 7 QA work but are out of scope for Phase 7 comp
 ### Phase 9 commit chain (origin/develop)
 `3e54f5e` (2026-05-26 baseline) → `6262263` → `257a831` → `8500eaf` (Phase B) → `42c817a` (Phase C) → `2f99060` (Phase D) → `85e9715` (Phase E) → `bde114e` → `c12f5f5` (Phase F) → `fc9e484` (Phase G — current head).
 
+## Phase 10 — Owner walkthrough resolution (2026-05-29 → 2026-05-30)
+
+Owner conducted a realistic multi-user procurement walkthrough across all roles (officer / engineer / manager / finance / committee / vendors). 39 findings logged into `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md`, then progressively cleared across 11 themes (one BUG-NNN per theme; impact-first sequencing; Theme 3 explicitly held until everything else closes). Three migrations and one cross-cutting backend perm split shipped in the process.
+
+- [x] BUG-052 — Commercial-flow permission matrix lockdown. SYSTEM_ADMIN revoked from commercial perms; COMMERCIAL_COMMITTEE_MEMBER + COMMERCIAL_EVALUATOR widened to full participation; PROCUREMENT_ADMIN unchanged. Migration 015. Closes WALK-044..049.
+  - Completed 2026-05-29. Key files: `database/migrations/015_bug052_perm_matrix_lockdown.sql`, `apps/api/src/modules/bids/bids.service.ts`, `apps/web-admin/src/components/layout/Sidebar.tsx`, `scripts/seed_walkthrough_users.sh`.
+- [x] BUG-053 — Manual commercial-total entry + PROCUREMENT_ADMIN grants. Migration 016 adds `commercial:view/download/evaluate` to PROCUREMENT_ADMIN. Frontend `CommercialTotalBlock` inline price entry on Commercial Comparison vendor cards.
+  - Completed 2026-05-29. Key files: `database/migrations/016_bug053_procurement_admin_commercial.sql`, `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx`, `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx`.
+- [x] BUG-054 — Post-Confirm AwardSummaryCard on Commercial Comparison. ComparisonService gains `award` block; AwardSummaryCard surfaces winner + price + Minutes link; full comparison collapses into audit-reference expander. Closes WALK-050.
+  - Completed 2026-05-29. Key files: `apps/api/src/modules/comparison/comparison.service.ts`, `apps/web-admin/src/components/comparison/AwardSummaryCard.tsx`.
+- [x] BUG-055 — Theme 2 bundle: Close Tender + picker grouping + evaluator revisit. Migration 017 introduces `tender:close` perm; new `POST /tenders/:id/close-tender`; UI picker `<optgroup>` grouping; evaluator past-evaluations view. Closes WALK-051/052/054.
+  - Completed 2026-05-29. Key files: `database/migrations/017_walk052_tender_close_permission.sql`, `apps/api/src/modules/tenders/{tenders.service.ts,tenders.controller.ts}`, `apps/web-admin/src/app/(admin)/{tenders/[id]/page.tsx,commercial-comparison/page.tsx,technical-evaluation/page.tsx}`.
+- [x] BUG-056 — Theme D: tender detail tabs (Clarifications + Bids + Audit Trail) wired. Three stub tab panels replaced with real fetches. Migration 018 adds `tender:audit:view` (narrower than `audit:view`). Closes WALK-009/010/011/013/014/015/020/021/022.
+  - Completed 2026-05-30. Key files: `database/migrations/018_bug056_tender_audit_view_permission.sql`, `apps/api/src/modules/audit/audit.controller.ts`, `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx`.
+- [x] BUG-057 — Theme F: Technical Evaluation polish. Backend findAll extended with `criterionScores` + `comments` + `evaluatorName`; frontend hydrates scorecard from saved own evaluation; auto-Pass at ≥70; FinalisedSummaryBanner post-finalize; per-vendor Evaluated/Pending pill. Closes WALK-024/025/026/027/028.
+  - Completed 2026-05-30. Key files: `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts`, `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx`.
+- [x] BUG-058 — Theme A: Dashboard Quick Actions per-card perm gating. Mounted-token pattern; panel hides when zero perms match. Closes WALK-002/003/G1.
+  - Completed 2026-05-30. Key files: `apps/web-admin/src/app/(admin)/dashboard/page.tsx`.
+- [x] BUG-059 — Theme B: Approval Queue (description fetch + PDF modal docs). Detail fetched on selection; View (PDF modal) + Download per doc. Closes WALK-004/005/006.
+  - Completed 2026-05-30. Key files: `apps/web-admin/src/app/(admin)/approvals/page.tsx`.
+- [x] BUG-060 — Theme C: Tender Create → criteria editor next step. Post-create redirect to `/tenders/:id/edit?from=create` with cue banner. Closes WALK-007.
+  - Completed 2026-05-30. Key files: `apps/web-admin/src/app/(admin)/tenders/new/page.tsx`, `apps/web-admin/src/app/(admin)/tenders/[id]/edit/page.tsx`.
+- [x] BUG-061 — Theme G: Technical Comparison polish. Removed Consensus block, slimmed Evaluator Breakdown, added proposal-docs block (modal viewer), score-normalisation `toAbsolute` helper across card + matrix. Closes WALK-029/030/031/032/033/034.
+  - Completed 2026-05-30. Key files: `apps/web-admin/src/components/comparison/{VendorTechnicalCard.tsx,TechnicalMatrix.tsx}`, `apps/web-admin/src/app/(admin)/technical-comparison/page.tsx`.
+- [x] BUG-062 — Theme I: Committee Opening bundle. WALK-036 right-pane empty state; WALK-037 Print Agenda wired; WALK-040 invitation email template (Migration 019) + dispatch; WALK-041 cross-dept committee/evaluator OR-clause in dept scope; WALK-042 post-open success banner; WALK-043 opened tenders stay visible with hand-off chip.
+  - Completed 2026-05-30. Key files: `database/migrations/019_walk040_committee_session_email_template.sql`, `apps/api/src/modules/committee/{committee.module.ts,committee.service.ts}`, `apps/api/src/modules/tenders/tenders.service.ts`, `apps/web-admin/src/app/(admin)/committee-opening/page.tsx`.
+- [x] BUG-063 — Theme E: Vendor portal Download + View + inline Clarifications. Closes WALK-016/017/018.
+  - Completed 2026-05-30. Key files: `apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx`.
+- [x] BUG-064 — Theme H: Admin role management UI (create + edit). Removed `isSystem` lock so admin can edit grants; new Create Role inline form. Closes WALK-035/039.
+  - Completed 2026-05-30. Key files: `apps/web-admin/src/app/(admin)/settings/page.tsx`.
+- [x] BUG-065 — Theme J: filter/search inputs on accumulating lists (technical-evaluation, commercial-comparison picker, committee-opening). Closes WALK-056.
+  - Completed 2026-05-30. Key files: `apps/web-admin/src/app/(admin)/{technical-evaluation/page.tsx,commercial-comparison/page.tsx,committee-opening/page.tsx}`.
+- [x] BUG-066 — Tender detail Bids stat tile shows 00 (serializer gap). Hot-patch: `findOne` `_count.bids` + `serializeDetail` returns `bidCount`. Closes WALK-057.
+  - Completed 2026-05-30. Key files: `apps/api/src/modules/tenders/tenders.service.ts`.
+
+### Held for next session (Theme 3)
+
+- [!] WALK-053 — Unified Tender Summary view. Held by owner directive 2026-05-30 until owner-verification of Themes D–J passes.
+- [!] WALK-055 — Overall Phase D flow simplification ("too many steps"). Held with WALK-053.
+
+### Phase 10 commit chain (local develop, 15 commits ahead of `origin/develop`)
+`a7869ff` (BUG-052) → `f83e1c8` (BUG-053) → `70c7941` (BUG-054) → `776a766` (BUG-055) → `c47c440` (BUG-056) → `fb0bb07` (BUG-057) → `1aec419` (BUG-058) → `2bada50` (BUG-059) → `8dd2a4b` (BUG-060) → `5d9d273` (BUG-061) → `accea0c` (BUG-062) → `702e9b4` (BUG-063) → `fae5075` (BUG-064) → `8922b97` (BUG-065) → `299a3e8` (BUG-066 current local head). NOT yet pushed; staging is fully deployed.
+
 ## Post-Completion / Post-Launch Items
 
 Work explicitly deferred until after the project is complete. Tracked here so it isn't forgotten; do NOT pull into a pre-launch phase without an explicit re-prioritization decision.

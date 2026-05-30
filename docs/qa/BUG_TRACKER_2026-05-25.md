@@ -21,11 +21,12 @@ The user reports observations in chat → this doc captures them with file:line 
 
 | ID | Sev | Type | Component | One-line symptom |
 |---|---|---|---|---|
-| BUG-016 | High | Feature | Admin → Tender → Publish | Notification dispatch on publish — deferred; needs new notification templates + recipient enumeration (depends on existing notifications module) |
+| BUG-016 | High | Feature | Admin → Tender → Publish | Notification dispatch on publish — deferred; needs new notification templates + recipient enumeration. Partially addressed by BUG-062 (committee-session invitation template pattern + module wiring), but the on-publish dispatch is still TODO. |
 | BUG-017 | Medium | Feature | Admin → Clarifications | Attachments on questions + replies — deferred; needs new DB tables + storage service + UI |
 | BUG-018 | Medium | Bug | Admin → Clarifications | Print shipped; Export disabled with tooltip ("Coming in next release — depends on Reports module renderer") |
-| BUG-020 | — | Question | Admin → Technical Evaluation | Who is supposed to perform technical evaluation? How are they notified that envelopes are open? |
-| BUG-028 | Critical | Feature | Admin RBAC enforcement | Part A (Sidebar gating) shipped 2026-05-27. Part B (tender list + detail dept-scoping) shipped 2026-05-29 — see Fixed table. Same dept-scoping pattern still TODO for clarifications / audit / reports / technical-evaluation / committee / commercial-comparison lists; tracked as BUG-051. |
+| BUG-020 | — | Question | Admin → Technical Evaluation | Who is supposed to perform technical evaluation? How are they notified that envelopes are open? Partially answered by BUG-057 (per-vendor Evaluated/Pending pill on the evaluator's queue), but the "who is notified when envelopes open" dispatch step is still TODO. |
+| BUG-028 | Critical | Feature | Admin RBAC enforcement | Part A (Sidebar gating) shipped 2026-05-27. Part B Tenders dept-scoping shipped 2026-05-29 (BUG-050) + extended for cross-dept committee/evaluator visibility 2026-05-30 (BUG-062). Same dept-scoping pattern still TODO for clarifications / audit / reports / technical-evaluation / committee / commercial-comparison lists (originally tracked as BUG-051). |
+| Theme 3 | — | Feature | Cross-app | WALK-053 (unified Tender Summary view) + WALK-055 (overall Phase D flow simplification). Held by owner directive 2026-05-30 until owner-verification of Themes D–J passes. See `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` "Locked directive" header. |
 
 ### In progress
 *(none)*
