@@ -145,6 +145,8 @@ export class TendersService {
         createdByUser: { select: { displayName: true } },
         tenderDocuments: true,
         tenderVendors: { include: { vendor: { select: { id: true, companyName: true } } } },
+        // WALK-057: bidCount for the detail page's Bids stat tile next to Days Left.
+        _count: { select: { bids: true } },
       },
     });
     if (!tender) throw new NotFoundException('Tender not found');
@@ -774,6 +776,9 @@ export class TendersService {
   private serializeDetail(t: any) {
     return {
       ...this.serializeSummary(t),
+      // WALK-057: Bids stat tile next to Days Left. `_count.bids` is set when
+      // findOne includes it; safe fallback to 0 if a caller path skips that.
+      bidCount: t._count?.bids ?? 0,
       description: t.description ?? undefined,
       clarificationDeadline: t.clarificationCloseAt?.toISOString() ?? null,
       documents: (t.tenderDocuments ?? []).map((d: any) => ({
