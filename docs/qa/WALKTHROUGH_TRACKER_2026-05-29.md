@@ -92,12 +92,12 @@ Owner manually changed `engineer@ctmp.local`'s role from **APPROVER → TECHNICA
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
-| WALK-029 | Per-vendor detail: **remove** the "Consensus per criterion" block entirely | Spec change | 🔴 | |
-| WALK-030 | Per-vendor detail: in "Evaluator Breakdown" block, keep only **Notes** and **Recommendation**; drop the per-criterion scores | Spec change | 🔴 | |
-| WALK-031 | Per-vendor detail: **add** a one-click link to the vendor's submitted technical proposal PDF (opens in in-app PDF viewer) | New feature | 🔴 | |
-| WALK-032 | Score display shows values like `83.3 / 30` where the number exceeds the max — formatting/calculation is wrong | Bug | 🔴 | Owner confirmed Q1 = (b) — score formatting wrong, not the label |
-| WALK-033 | Remove "Score evaluations" — no use for it | Spec change | 🔴 | |
-| WALK-034 | Technical comparison matrix values are not correct (root cause likely tied to WALK-032 and the unresolved per-criterion persistence gap from BUG-047) | Critical bug | 🔴 | |
+| WALK-029 | Per-vendor detail: **remove** the "Consensus per criterion" block entirely | Spec change | ✅ | Fixed 2026-05-30 (BUG-061). Block deleted from `VendorTechnicalCard`. The Technical Matrix above the per-vendor cards already shows the same data. |
+| WALK-030 | Per-vendor detail: in "Evaluator Breakdown" block, keep only **Notes** and **Recommendation**; drop the per-criterion scores | Spec change | ✅ | Fixed 2026-05-30 (BUG-061). Evaluator breakdown now renders only the recommendation (PASS/FAIL pill), overall score (in absolute units — see WALK-032), and Notes (with explicit "No notes recorded" fallback). Per-criterion `<ul>` removed. |
+| WALK-031 | Per-vendor detail: **add** a one-click link to the vendor's submitted technical proposal PDF (opens in in-app PDF viewer) | New feature | ✅ | Fixed 2026-05-30 (BUG-061). On card expand, fetches `/bids/:bidId/envelopes/TECHNICAL/documents` and renders each document with a **View** button that opens the file in the shared `PdfViewerModal` via `usePdfViewer` (blob+Authorization pattern). Matches owner's locked answer (Q2) — link to ALL technical envelope documents, each opens in the viewer. |
+| WALK-032 | Score display shows values like `83.3 / 30` where the number exceeds the max — formatting/calculation is wrong | Bug | ✅ | Fixed 2026-05-30 (BUG-061). Root cause: backend stores scores normalised to 0–100 (percentage), but the display passed them through `fmtScore(score, max)` as if they were absolute units. New `toAbsolute(normalised, max)` helper scales the value back: `(normalised / 100) * max`. Applied to (a) per-vendor card header consensus score against `totalMaxScore`, (b) per-evaluator overall score against `totalMaxScore`, (c) Technical Matrix cells against `c.maxScore`, (d) Technical Matrix Total column against `totalMaxScore`. |
+| WALK-033 | Remove "Score evaluations" — no use for it | Spec change | ✅ | Fixed 2026-05-30 (BUG-061). The "Score evaluations" link in the tender-header card was removed; evaluators reach scoring via the sidebar. |
+| WALK-034 | Technical comparison matrix values are not correct (root cause likely tied to WALK-032 and the unresolved per-criterion persistence gap from BUG-047) | Critical bug | ✅ | Fixed 2026-05-30 (BUG-061). Same root cause as WALK-032 — cells displayed normalised 0–100 values as if they were absolute. `toAbsolute(score, c.maxScore)` applied in both vendor-as-rows and criterion-as-rows modes. Per-criterion persistence is fine post-BUG-047 + BUG-057. |
 
 ## K. Manager — Committee & Commercial Opening
 

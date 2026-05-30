@@ -35,6 +35,14 @@ interface Props {
 
 type Layout = 'vendor-rows' | 'criterion-rows';
 
+// BUG-061 / WALK-032/034: scale 0–100 stored scores back to absolute units
+// against the supplied max so the matrix shows e.g. "25/30" instead of the
+// confusing "83.3/30" the owner reported.
+function toAbsolute(normalised: number | null, max: number): number | null {
+  if (normalised == null || max <= 0) return null;
+  return (normalised / 100) * max;
+}
+
 function fmtScore(v: number | null, max?: number) {
   if (v == null) return '—';
   const fmt = Number.isInteger(v) ? v.toFixed(0) : v.toFixed(1);
@@ -209,7 +217,7 @@ export function TechnicalMatrix({
                       </td>
                       <td className="px-4 py-3">{resultBadge(v.consensusResult)}</td>
                       <td className="px-4 py-3 text-right font-mono text-sm font-semibold text-text-primary">
-                        {fmtScore(v.consensusScore, totalMaxScore || undefined)}
+                        {fmtScore(toAbsolute(v.consensusScore, totalMaxScore), totalMaxScore || undefined)}
                       </td>
                       {criteria.map(c => {
                         const score = scoreByPair.get(`${v.vendorId}|${c.id}`) ?? null;
@@ -218,7 +226,7 @@ export function TechnicalMatrix({
                             key={c.id}
                             className="px-3 py-3 text-center font-mono text-sm text-text-primary"
                           >
-                            {fmtScore(score, c.maxScore)}
+                            {fmtScore(toAbsolute(score, c.maxScore), c.maxScore)}
                           </td>
                         );
                       })}
@@ -246,7 +254,7 @@ export function TechnicalMatrix({
                           key={v.vendorId}
                           className="px-3 py-3 text-center font-mono text-sm text-text-primary"
                         >
-                          {fmtScore(score, c.maxScore)}
+                          {fmtScore(toAbsolute(score, c.maxScore), c.maxScore)}
                         </td>
                       );
                     })}

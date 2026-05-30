@@ -1,7 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { ChevronDown, ChevronRight, Shield, CheckCircle2, AlertTriangle, Clock, User } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Clock, Eye, FileText, User } from 'lucide-react';
+import { get } from '@/lib/api';
+import { getAccessToken } from '@/lib/auth';
+import { usePdfViewer } from '@/components/viewer/PdfViewerProvider';
 
 export interface CardCriterion {
   id: string;
@@ -61,6 +64,15 @@ function fmtScore(v: number | null, max?: number) {
   return max != null ? `${fmt} / ${max}` : fmt;
 }
 
+// BUG-061 / WALK-032: scores in the DB are stored on a 0–100 (percentage)
+// scale. The display historically passed those numbers as if they were
+// absolute units, producing things like "83.3 / 30" when criteria summed to
+// a smaller maxScore. Scale to absolute units against the supplied max.
+function toAbsolute(normalised: number | null, max: number): number | null {
+  if (normalised == null || max <= 0) return null;
+  return (normalised / 100) * max;
+}
+
 function resultPill(result: 'PASS' | 'FAIL' | 'PENDING') {
   switch (result) {
     case 'PASS':
@@ -93,6 +105,49 @@ function resultPill(result: 'PASS' | 'FAIL' | 'PENDING') {
 export function VendorTechnicalCard({ vendor, criteria, totalMaxScore, initialExpanded, highlight }: Props) {
   const [expanded, setExpanded] = useState(!!initialExpanded);
   const failed = vendor.consensusResult === 'FAIL';
+  void criteria; // matrix uses the criteria list directly; card no longer needs it after WALK-029.
+
+  // BUG-061 / WALK-031: surface every technical-envelope document for the
+  // selected bid with a one-click open in the shared PDF viewer.
+  type TechDoc = { id: string; filename: string; mimeType?: string };
+  const [docs, setDocs] = useState<TechDoc[] | null>(null);
+  const [docsError, setDocsError] = useState<string | null>(null);
+  const { openPdfViewer } = usePdfViewer();
+
+  useEffect(() => {
+    if (!expanded || docs !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getAccessToken();
+        const res = await get<{ documents: TechDoc[] }>(
+          `/bids/${vendor.bidId}/envelopes/TECHNICAL/documents`,
+          token,
+        );
+        if (!cancelled) setDocs(res.documents ?? []);
+      } catch (err) {
+        if (!cancelled) setDocsError(err instanceof Error ? err.message : 'Failed to load documents');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [expanded, docs, vendor.bidId]);
+
+  async function handleViewDoc(doc: TechDoc) {
+    try {
+      const token = getAccessToken();
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const res = await fetch(
+        `${apiBase}/api/v1/bids/${vendor.bidId}/envelopes/TECHNICAL/documents/${doc.id}/view`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      );
+      if (!res.ok) throw new Error(`Open failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      openPdfViewer({ src: url, title: doc.filename, onClose: () => URL.revokeObjectURL(url) });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to open document');
+    }
+  }
 
   return (
     <div
@@ -125,44 +180,56 @@ export function VendorTechnicalCard({ vendor, criteria, totalMaxScore, initialEx
         <div className="flex items-center gap-3 flex-shrink-0">
           {resultPill(vendor.consensusResult)}
           <span className="font-mono text-sm font-semibold text-text-primary">
-            {fmtScore(vendor.consensusScore, totalMaxScore || undefined)}
+            {fmtScore(toAbsolute(vendor.consensusScore, totalMaxScore), totalMaxScore || undefined)}
           </span>
         </div>
       </button>
 
       {expanded && (
         <div className="border-t border-border bg-bg/40">
-          {vendor.consensusByCriterion.length > 0 && (
-            <div className="px-5 py-4">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-3">
-                Consensus per criterion
-              </h4>
+          {/* BUG-061 / WALK-031: technical envelope documents, one-click open in modal viewer. */}
+          <div className="px-5 py-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-3">
+              Technical proposal documents
+            </h4>
+            {docs === null && !docsError ? (
+              <p className="text-xs text-text-secondary italic">Loading documents…</p>
+            ) : docsError ? (
+              <p className="text-xs text-danger">{docsError}</p>
+            ) : (docs ?? []).length === 0 ? (
+              <p className="text-xs text-text-secondary italic">No technical documents uploaded for this bid.</p>
+            ) : (
               <ul className="space-y-2">
-                {vendor.consensusByCriterion.map(c => (
-                  <li key={c.criterionId} className="flex items-center justify-between gap-3 px-3 py-2 bg-card rounded-lg border border-border">
-                    <div className="min-w-0 flex items-center gap-2">
-                      {c.mandatory && <Shield className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />}
-                      <span className="text-sm font-semibold text-text-primary truncate">{c.criterionName}</span>
-                      {c.weight != null && (
-                        <span className="text-[10px] text-text-secondary">· weight {c.weight}%</span>
-                      )}
+                {(docs ?? []).map(d => (
+                  <li
+                    key={d.id}
+                    className="flex items-center justify-between gap-3 px-3 py-2 bg-card rounded-lg border border-border"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="w-3.5 h-3.5 text-text-secondary flex-shrink-0" />
+                      <span className="text-sm text-text-primary truncate" title={d.filename}>{d.filename}</span>
                     </div>
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      <span className="text-[10px] text-text-secondary">
-                        {c.evaluatorCount} eval{c.evaluatorCount === 1 ? '' : 's'}
-                      </span>
-                      <span className="font-mono text-sm font-semibold text-text-primary">
-                        {fmtScore(c.consensusScore, c.maxScore)}
-                      </span>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleViewDoc(d)}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-accent hover:bg-accent/10 rounded transition-colors flex-shrink-0"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> View
+                    </button>
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
+            )}
+          </div>
 
+          {/* BUG-061 / WALK-029: "Consensus per criterion" block removed entirely.
+              The Technical Matrix (above this card) already carries that data. */}
+
+          {/* BUG-061 / WALK-030: Evaluator breakdown slimmed — keep only the
+              evaluator's recommendation (PASS/FAIL pill + overall score) and
+              their notes. Per-criterion scores were redundant with the matrix. */}
           {vendor.evaluators.length === 0 ? (
-            <div className="px-5 py-6 text-center text-sm text-text-secondary">
+            <div className="px-5 py-6 text-center text-sm text-text-secondary border-t border-border">
               No evaluator has scored this bid yet.
             </div>
           ) : (
@@ -172,13 +239,11 @@ export function VendorTechnicalCard({ vendor, criteria, totalMaxScore, initialEx
               </h4>
               <div className="space-y-3">
                 {vendor.evaluators.map(ev => (
-                  <details key={ev.evaluationId} className="bg-card border border-border rounded-lg overflow-hidden">
-                    <summary className="px-4 py-2.5 cursor-pointer flex items-center justify-between gap-3 hover:bg-bg/40">
+                  <div key={ev.evaluationId} className="bg-card border border-border rounded-lg overflow-hidden">
+                    <div className="px-4 py-2.5 flex items-center justify-between gap-3 border-b border-border">
                       <div className="flex items-center gap-2 min-w-0">
                         <User className="w-3.5 h-3.5 text-text-secondary flex-shrink-0" />
-                        <span className="text-sm font-semibold text-text-primary truncate">
-                          {ev.evaluatorName}
-                        </span>
+                        <span className="text-sm font-semibold text-text-primary truncate">{ev.evaluatorName}</span>
                         {ev.finalizedAt && (
                           <span className="text-[10px] text-text-secondary">
                             · finalised {new Date(ev.finalizedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
@@ -188,40 +253,19 @@ export function VendorTechnicalCard({ vendor, criteria, totalMaxScore, initialEx
                       <div className="flex items-center gap-3 flex-shrink-0">
                         {resultPill(ev.result)}
                         <span className="font-mono text-sm text-text-primary">
-                          {fmtScore(ev.overallScore, totalMaxScore || undefined)}
+                          {fmtScore(toAbsolute(ev.overallScore, totalMaxScore), totalMaxScore || undefined)}
                         </span>
                       </div>
-                    </summary>
-                    <div className="px-4 py-3 border-t border-border bg-bg/30 space-y-3">
-                      {ev.perCriterion.length === 0 ? (
-                        <p className="text-xs text-text-secondary italic">
-                          No per-criterion breakdown recorded.
-                        </p>
-                      ) : (
-                        <ul className="space-y-1">
-                          {ev.perCriterion.map((p, i) => (
-                            <li
-                              key={`${ev.evaluationId}-${i}`}
-                              className="flex items-center justify-between gap-3 text-sm"
-                            >
-                              <span className={`truncate ${p.inDefinedCriteria ? 'text-text-primary' : 'text-text-secondary italic'}`}>
-                                {p.criterion}{!p.inDefinedCriteria && ' (not in current criteria)'}
-                              </span>
-                              <span className="font-mono text-text-primary flex-shrink-0">
-                                {fmtScore(p.score, p.maxScore ?? undefined)}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {ev.comments && (
-                        <div className="text-xs text-text-secondary bg-card border border-border rounded p-2.5">
-                          <p className="font-semibold uppercase text-[10px] tracking-wider mb-1">Notes</p>
-                          <p className="whitespace-pre-wrap leading-relaxed">{ev.comments}</p>
-                        </div>
-                      )}
                     </div>
-                  </details>
+                    {ev.comments ? (
+                      <div className="px-4 py-3 bg-bg/30">
+                        <p className="font-semibold uppercase text-[10px] tracking-wider text-text-secondary mb-1">Notes</p>
+                        <p className="text-xs text-text-primary whitespace-pre-wrap leading-relaxed">{ev.comments}</p>
+                      </div>
+                    ) : (
+                      <p className="px-4 py-3 bg-bg/30 text-xs text-text-secondary italic">No notes recorded.</p>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>

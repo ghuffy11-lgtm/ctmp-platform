@@ -6,6 +6,45 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-061 shipped: Theme G (Technical Comparison polish — 6 items)
+
+**Date/time:** 2026-05-30 ~03:55 GMT+3 (continuation after BUG-060)
+**Agent/task:** Theme G per locked sequence. 6 WALK items closed.
+
+### What landed
+
+**`apps/web-admin/src/components/comparison/VendorTechnicalCard.tsx`:**
+- WALK-029 — removed the "Consensus per criterion" block. Same data lives in the Technical Matrix above the cards.
+- WALK-030 — slimmed Evaluator Breakdown: kept the recommendation pill + overall score in the summary row and the Notes section. Dropped the per-criterion `<ul>` (matrix already shows this).
+- WALK-031 — added Technical Proposal Documents block at the top of the expanded view. Fetches `/bids/:bidId/envelopes/TECHNICAL/documents` on first expand. Each document row gets a one-click View button that opens the shared `PdfViewerModal` via `usePdfViewer` (blob + Authorization fetch pattern). Matches owner's locked answer Q2 — link to ALL technical envelope documents.
+- WALK-032 — added `toAbsolute(normalised, max) = (normalised/100) * max` helper. Applied to the card-header consensus score against `totalMaxScore` and the per-evaluator overall score against `totalMaxScore`. Scores in the DB are stored on a 0–100 scale; previously displayed as if they were absolute units → "83.3 / 30" reported by the owner.
+
+**`apps/web-admin/src/components/comparison/TechnicalMatrix.tsx`:**
+- WALK-034 — same `toAbsolute` helper applied to every cell (per-criterion score against `c.maxScore`) and to the Total column (consensus score against `totalMaxScore`). Both vendor-as-rows and criterion-as-rows modes.
+
+**`apps/web-admin/src/app/(admin)/technical-comparison/page.tsx`:**
+- WALK-033 — removed the "Score evaluations" link from the tender-header card. Owner considers it noise; sidebar already provides the route.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean.
+- ✅ `docker compose --project-name ctmp build --no-cache web-admin` + `up -d --force-recreate web-admin` → container healthy.
+
+### Files modified this segment
+
+- `apps/web-admin/src/components/comparison/VendorTechnicalCard.tsx` — block surgery + documents block + score normalisation
+- `apps/web-admin/src/components/comparison/TechnicalMatrix.tsx` — `toAbsolute` helper, cell + total normalisation
+- `apps/web-admin/src/app/(admin)/technical-comparison/page.tsx` — Score-evaluations link removed
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-061 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-029/030/031/032/033/034 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Next up (per locked sequence)
+
+Theme I — Committee Opening (WALK-036/037/040/041/042/043) — 6 items: right pane blank, Print Agenda broken, email notifications missing, cross-dept committee visibility, manager 403 UX, tender disappears after envelope opening.
+
+---
+
 ## 2026-05-30 — BUG-060 shipped: Theme C (Tender Create → criteria editor as next step)
 
 **Date/time:** 2026-05-30 ~03:45 GMT+3 (continuation after BUG-059)

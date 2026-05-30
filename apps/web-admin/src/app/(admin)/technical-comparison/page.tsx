@@ -251,14 +251,8 @@ function TechnicalComparisonContent() {
                 {' '}{comparison.summary.evaluatorTotal} evaluator-records
               </p>
             </div>
-            <Link
-              href={`/technical-evaluation`}
-              className="px-4 py-2 text-xs font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-1.5"
-              title="Go to Technical Evaluation (scoring)"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              Score evaluations
-            </Link>
+            {/* BUG-061 / WALK-033: "Score evaluations" link removed — owner
+                considers it noise. Evaluators reach scoring via the sidebar. */}
           </div>
 
           {/* Matrix */}
