@@ -6,6 +6,52 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-057 shipped: Theme F bundle (Technical Evaluation polish — hydration + auto-Pass + finalised summary + Evaluated pill)
+
+**Date/time:** 2026-05-30 ~03:25 GMT+3 (continuation after BUG-056)
+**Agent/task:** Theme F per the locked sequence. 5 WALK items closed: WALK-026 (critical scorecard re-load), WALK-025 (auto-Pass at ≥70), WALK-024 (proposal modal — verified already shipped), WALK-027 (post-finalize summary — Claude-recovered intent), WALK-028 (Evaluated/Pending pill — Claude-recovered intent).
+
+### Root cause of WALK-026 (the critical one)
+
+`/api/v1/tenders/:id/technical-evaluations` previously returned only `{id, bidId, evaluatorUserId, result, score}` per row. No `comments`, no per-criterion `TechnicalEvaluationScore[]`, no `evaluatorName`. The frontend `useEffect` watching `[selectedBidId, tenderCriteria]` did `setCriteria(emptyCriteria(tenderCriteria))` etc — a hard reset every time. So even if data existed in DB, nothing hydrated. WALK-046 had previously surfaced this for the technical-comparison surface; this commit fixes it for the scorecard input surface too.
+
+### What landed
+
+**Backend** — `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts` `findAll()`:
+- `include: { scores: true, evaluatorUser: { select: { displayName: true } } }`
+- Response row gains: `evaluatorName`, `comments`, `finalizedAt`, `updatedAt`, `criterionScores: [{criterion, weight, score, comments}]`
+
+**Frontend** — `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx`:
+- `TechnicalEvaluation` interface extended with the new hydration fields
+- `currentUserId` state populated from JWT `sub` claim on mount (same hydration pattern as elsewhere)
+- `recommendationDirty` flag tracks whether the evaluator has manually clicked Pass/Fail
+- **WALK-026** — hydration `useEffect` now matches own evaluation by `(bidId, evaluatorUserId == currentUserId)`. Maps saved per-criterion scores back into the template by criterion name. Reverses the 0–100 normalisation (saved as percentage, displayed as 0..maxScore). Restores recommendation + notes; strips the duplicated "Recommendation: PASS|FAIL" prefix that the save handler injects.
+- **WALK-025** — new `useEffect` watching `totalScore / maxTotal` auto-flips recommendation to PASS once the ratio crosses ≥70. Halts once the user manually clicks (via `setRecommendationManual`).
+- **WALK-027** — new `FinalisedSummaryBanner` component shown at the top of the scorecard column when the tender is past Technical Evaluation. Green-banded card with Lock icon + latest finalizedAt timestamp + per-vendor PASS/FAIL outcome row (`pass/fail` evaluator counts + final result by majority).
+- **WALK-028** — bid card pill block always renders: green "Evaluated" + PASS/FAIL pill + score/maxTotal when own evaluation exists, amber "Pending" pill otherwise.
+- **WALK-024** — verified already shipped via BUG-037 (the View Full Proposal handler already calls `openPdfViewer({src, title, onClose})` with a blob URL — no code change needed).
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on both apps.
+- ✅ `docker compose --project-name ctmp build --no-cache api web-admin` → both built clean.
+- ✅ `docker compose up -d --force-recreate api web-admin` → containers healthy.
+- ✅ `GET /tenders/<TDR-2026-0013>/technical-evaluations` as engineer@ now returns 2 rows, each with `evaluatorName='Technical Engineer'`, `result='PASS'`, `score=86 / 85`, `criterionScores.length=4`, `comments.length=56/88`. Hydration data is real and complete.
+
+### Files modified this segment
+
+- `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts` — findAll join + serialise extension
+- `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx` — interface, currentUserId, hydration effect, auto-Pass effect, Evaluated/Pending pill, FinalisedSummaryBanner subcomponent
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-057 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-024/025/026/027/028 ✅ Fixed
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Next up (per locked sequence)
+
+Theme A — Dashboard + Quick Actions perm gating (WALK-002/003/G1).
+
+---
+
 ## 2026-05-30 — BUG-056 shipped: Theme D bundle (tender detail tabs Clarifications + Bids + Audit Trail)
 
 **Date/time:** 2026-05-30 ~03:05 GMT+3

@@ -64,18 +64,35 @@ export class TechnicalEvaluationService {
   }
 
   async findAll(tenderId: string) {
+    // BUG-057 / WALK-026: include `comments` and per-criterion `scores` so
+    // the frontend scorecard hydrates from the caller's previously-saved
+    // evaluation instead of resetting to blanks on every bid switch.
     const evaluations = await this.prisma.technicalEvaluation.findMany({
       where: { bid: { tenderId } },
       orderBy: { createdAt: 'desc' },
-      include: { bid: { select: { vendorId: true } } },
+      include: {
+        bid: { select: { vendorId: true } },
+        evaluatorUser: { select: { displayName: true } },
+        scores: true,
+      },
     });
     return {
       items: evaluations.map(e => ({
         id: e.id,
         bidId: e.bidId,
         evaluatorUserId: e.evaluatorUserId,
+        evaluatorName: e.evaluatorUser?.displayName ?? undefined,
         result: e.result === 'PENDING' ? undefined : e.result,
         score: e.overallScore ? Number(e.overallScore) : undefined,
+        comments: e.comments ?? undefined,
+        finalizedAt: e.finalizedAt?.toISOString() ?? undefined,
+        updatedAt: e.updatedAt.toISOString(),
+        criterionScores: e.scores.map(s => ({
+          criterion: s.criterion,
+          weight: Number(s.weight),
+          score: Number(s.score),
+          comments: s.comments ?? undefined,
+        })),
       })),
       page: 1,
       pageSize: evaluations.length,

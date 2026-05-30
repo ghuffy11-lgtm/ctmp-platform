@@ -55,8 +55,19 @@ interface TechnicalEvaluation {
   id: string;
   bidId: string;
   evaluatorUserId?: string;
-  result: 'PASS' | 'FAIL';
+  evaluatorName?: string;
+  result?: 'PASS' | 'FAIL';
   score?: number;
+  // BUG-057 / WALK-026: hydration fields surfaced by the backend extension.
+  comments?: string;
+  finalizedAt?: string;
+  updatedAt?: string;
+  criterionScores?: Array<{
+    criterion: string;
+    weight: number;
+    score: number;
+    comments?: string;
+  }>;
 }
 
 // Fallback used when the tender has no per-tender criteria configured yet
@@ -234,13 +245,68 @@ export default function TechnicalEvaluationPage() {
     if (selectedTenderId) fetchTenderData(selectedTenderId);
   }, [selectedTenderId, fetchTenderData]);
 
-  // ─── Reset scorecard when bid or per-tender criteria change ─────────────────
+  // BUG-057 / WALK-026: hydrate the scorecard from the caller's saved
+  // evaluation for this bid. If no saved row exists for this evaluator, fall
+  // back to a blank scorecard. Hydration only fires when the bid OR the
+  // tender criteria OR the evaluation list changes.
+  const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
   useEffect(() => {
-    setCriteria(emptyCriteria(tenderCriteria));
-    setRecommendation('FAIL');
-    setNotes('');
+    const token = getAccessToken();
+    if (!token) return;
+    try {
+      const [, payload] = token.split('.');
+      const decoded = JSON.parse(atob(payload)) as { sub?: string };
+      setCurrentUserId(decoded?.sub);
+    } catch {
+      setCurrentUserId(undefined);
+    }
+  }, []);
+
+  // BUG-057 / WALK-025: lets us auto-flip the recommendation pill to PASS
+  // when the overall score crosses ≥70 — but only until the evaluator has
+  // manually picked a side, at which point we leave their choice alone.
+  const [recommendationDirty, setRecommendationDirty] = useState(false);
+
+  useEffect(() => {
+    const own = currentUserId
+      ? evaluations.find(e => e.bidId === selectedBidId && e.evaluatorUserId === currentUserId)
+      : undefined;
+    if (own && own.criterionScores && own.criterionScores.length > 0) {
+      // Hydrate criteria by matching saved rows to the current template by
+      // criterion name. Saved scores are normalised 0–100; the form input is
+      // an absolute number in 0..maxScore so convert back.
+      const tmpl = emptyCriteria(tenderCriteria);
+      const hydrated = tmpl.map(c => {
+        const saved = own.criterionScores!.find(s => s.criterion === c.criterion);
+        if (!saved) return c;
+        const absScore = Math.round((saved.score / 100) * c.maxScore * 100) / 100;
+        return { ...c, score: absScore, passed: absScore >= c.maxScore * 0.7 };
+      });
+      setCriteria(hydrated);
+      setRecommendation(own.result === 'PASS' ? 'PASS' : 'FAIL');
+      // Strip the "Recommendation: …" prefix added by save (it duplicates the toggle state).
+      const rawNotes = own.comments ?? '';
+      const stripped = rawNotes
+        .replace(/^Recommendation:\s*(PASS|FAIL)\s*\n?/, '')
+        .replace(/^Evaluator notes:\s*/, '');
+      setNotes(stripped);
+      setRecommendationDirty(true);
+    } else {
+      setCriteria(emptyCriteria(tenderCriteria));
+      setRecommendation('FAIL');
+      setNotes('');
+      setRecommendationDirty(false);
+    }
     setSubmitError(null);
-  }, [selectedBidId, tenderCriteria]);
+  }, [selectedBidId, tenderCriteria, evaluations, currentUserId]);
+
+  // BUG-057 / WALK-025: auto-flip recommendation to PASS once the running
+  // total crosses ≥70. Stops once the evaluator has manually touched the
+  // toggle so we never overwrite an explicit choice.
+  function setRecommendationManual(next: 'PASS' | 'FAIL') {
+    setRecommendation(next);
+    setRecommendationDirty(true);
+  }
 
   // ─── Derived ────────────────────────────────────────────────────────────────
   const selectedTender = tenders.find(t => t.id === selectedTenderId) ?? null;
@@ -258,6 +324,20 @@ export default function TechnicalEvaluationPage() {
     () => criteria.reduce((sum, c) => sum + c.maxScore, 0),
     [criteria],
   );
+
+  // BUG-057 / WALK-025: auto-flip the Pass toggle to PASS once the total
+  // score crosses ≥70 (normalised to a 0–100 percentage of maxTotal). Only
+  // fires until the evaluator explicitly clicks Pass or Fail.
+  useEffect(() => {
+    if (recommendationDirty) return;
+    if (maxTotal <= 0) return;
+    const pct = (totalScore / maxTotal) * 100;
+    if (pct >= PASS_THRESHOLD && recommendation !== 'PASS') {
+      setRecommendation('PASS');
+    } else if (pct < PASS_THRESHOLD && recommendation !== 'FAIL') {
+      setRecommendation('FAIL');
+    }
+  }, [totalScore, maxTotal, recommendation, recommendationDirty]);
 
   function evaluationFor(bidId: string): TechnicalEvaluation | undefined {
     return evaluations.find(e => e.bidId === bidId);
@@ -512,22 +592,32 @@ export default function TechnicalEvaluationPage() {
                     <p className="text-xs text-text-secondary">
                       Submitted: {formatDate(b.submittedAt)}
                     </p>
-                    {existing && (
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                          existing.result === 'PASS'
-                            ? 'bg-success/10 text-success'
-                            : 'bg-danger/10 text-danger'
-                        }`}>
-                          {existing.result}
-                        </span>
-                        {typeof existing.score === 'number' && (
-                          <span className="text-xs text-text-secondary font-mono">
-                            {existing.score}/{maxTotal}
+                    {/* BUG-057 / WALK-028: progress indicator per bid. */}
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      {existing ? (
+                        <>
+                          <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-success/15 text-success">
+                            Evaluated
                           </span>
-                        )}
-                      </div>
-                    )}
+                          <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                            existing.result === 'PASS'
+                              ? 'bg-success/10 text-success'
+                              : 'bg-danger/10 text-danger'
+                          }`}>
+                            {existing.result ?? 'PENDING'}
+                          </span>
+                          {typeof existing.score === 'number' && (
+                            <span className="text-[11px] text-text-secondary font-mono">
+                              {existing.score}/{maxTotal}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                          Pending
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })
@@ -558,6 +648,14 @@ export default function TechnicalEvaluationPage() {
                 <ChevronRight className="w-3.5 h-3.5" />
                 <span className="text-text-primary font-medium">Technical Evaluation</span>
               </nav>
+
+              {/* BUG-057 / WALK-027: post-finalize summary banner. Shown when the
+                  tender has moved past Technical Evaluation, with the per-vendor
+                  PASS/FAIL outcome list. Lifts the "what was decided" answer to
+                  the top instead of leaving the page looking like it's mid-work. */}
+              {PAST_SET.has(selectedTender.status) && (
+                <FinalisedSummaryBanner bids={bids} evaluations={evaluations} maxTotal={maxTotal} />
+              )}
 
               <div className="flex justify-between items-start mb-5">
                 <div>
@@ -671,7 +769,7 @@ export default function TechnicalEvaluationPage() {
                     <div className="flex bg-bg p-1 rounded-lg border border-border">
                       <button
                         type="button"
-                        onClick={() => setRecommendation('FAIL')}
+                        onClick={() => setRecommendationManual('FAIL')}
                         className={`px-6 py-2 text-sm font-bold rounded-md transition-all ${
                           recommendation === 'FAIL'
                             ? 'bg-danger text-white shadow-sm'
@@ -682,7 +780,7 @@ export default function TechnicalEvaluationPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setRecommendation('PASS')}
+                        onClick={() => setRecommendationManual('PASS')}
                         className={`px-6 py-2 text-sm font-bold rounded-md transition-all ${
                           recommendation === 'PASS'
                             ? 'bg-success text-white shadow-sm'
@@ -758,6 +856,86 @@ export default function TechnicalEvaluationPage() {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// BUG-057 / WALK-027: post-finalize summary block. Shown at the top of the
+// scorecard column when the tender has moved past Technical Evaluation, so the
+// engineer landing on the page sees "this is what was decided" instead of
+// reading an empty action card.
+function FinalisedSummaryBanner({
+  bids,
+  evaluations,
+  maxTotal,
+}: {
+  bids: BidSummary[];
+  evaluations: TechnicalEvaluation[];
+  maxTotal: number;
+}) {
+  // Group evaluations by bid; pick the latest finalizedAt (or updatedAt) per bid
+  // so the timestamp shown is the most recent meaningful action.
+  let latestFinalisedAt: string | undefined;
+  const perBid = new Map<string, TechnicalEvaluation[]>();
+  for (const e of evaluations) {
+    perBid.set(e.bidId, [...(perBid.get(e.bidId) ?? []), e]);
+    const t = e.finalizedAt ?? e.updatedAt;
+    if (t && (!latestFinalisedAt || t > latestFinalisedAt)) latestFinalisedAt = t;
+  }
+
+  return (
+    <div className="bg-card border border-success/40 rounded-xl overflow-hidden mb-5 shadow-sm">
+      <div className="bg-success/10 px-5 py-3 border-b border-success/20 flex items-center gap-2">
+        <Lock className="w-4 h-4 text-success" />
+        <p className="text-xs uppercase tracking-wider font-bold text-success">Finalised</p>
+        {latestFinalisedAt && (
+          <p className="text-xs text-text-secondary ml-auto">
+            {new Date(latestFinalisedAt).toLocaleString('en-GB', {
+              day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+            })}
+          </p>
+        )}
+      </div>
+      <div className="px-5 py-4">
+        <p className="text-sm text-text-primary font-semibold mb-3">
+          Technical evaluation outcome
+        </p>
+        <div className="space-y-1.5">
+          {bids.map(b => {
+            const evals = perBid.get(b.id) ?? [];
+            const pass = evals.filter(e => e.result === 'PASS').length;
+            const fail = evals.filter(e => e.result === 'FAIL').length;
+            const finalResult = evals.length === 0
+              ? 'No evaluations'
+              : pass * 2 >= evals.length ? 'PASS' : 'FAIL';
+            return (
+              <div key={b.id} className="flex items-center justify-between gap-3 py-1.5 border-b border-border last:border-0">
+                <p className="text-sm text-text-primary truncate">{b.vendorCompany}</p>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {evals.length > 0 && (
+                    <span className="text-[10px] text-text-secondary uppercase tracking-wider">
+                      {pass} pass · {fail} fail
+                    </span>
+                  )}
+                  <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                    finalResult === 'PASS'
+                      ? 'bg-success/15 text-success'
+                      : finalResult === 'FAIL'
+                        ? 'bg-danger/15 text-danger'
+                        : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {finalResult}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-text-secondary italic mt-3">
+          Scorecards below remain accessible for reference. The decision was locked at finalize and cannot be edited from this page.
+          {' '}Per-vendor consensus uses majority of evaluator PASS results — see Technical Comparison for the matrix view.
+        </p>
       </div>
     </div>
   );
