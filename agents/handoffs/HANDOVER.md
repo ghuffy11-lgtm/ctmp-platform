@@ -6,6 +6,50 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-062 shipped: Theme I (Committee Opening bundle — 6 items)
+
+**Date/time:** 2026-05-30 ~04:10 GMT+3 (continuation after BUG-061)
+**Agent/task:** Theme I per locked sequence. 6 WALK items closed across frontend + backend + migration.
+
+### What landed
+
+**Frontend** — `apps/web-admin/src/app/(admin)/committee-opening/page.tsx`:
+- WALK-036 — wrapped the Attendance + Vendors grid in `{session && (...)}`; the missing-session warning + Create Session form remain the only meaningful UI in the empty state.
+- WALK-037 — wired Print Agenda to `window.print()`. Reuses the `@media print` rules from BUG-018.
+- WALK-042 — after `open-commercial-envelopes` succeeds, the page renders a green success banner ("Envelopes opened — N envelope(s) unsealed. Hand-off to finance + committee. Open in Commercial Comparison →"). Post-open fetches that 403 due to manager lacking `commercial:view` are caught and swallowed.
+- WALK-043 — `COMMITTEE_STATUSES` includes `Commercial Evaluation / Comparison`. Opened tenders stay in the list with a slate "Opened — handed off" pill (vs. amber for actionable rows).
+
+**Backend** — `apps/api/src/modules/tenders/tenders.service.ts`:
+- WALK-041 — dept-scoping `findAll` filter changed from single `where.departmentId = { in: depts }` to `where.OR = [{departmentId in depts}, {committeeSessions has member}, {bids has commercialEvaluation by user}]`. `findOne` mirrors the same: dept fail → check committee/evaluator before NotFound.
+
+**Backend** — `apps/api/src/modules/committee/{committee.module,committee.service}.ts`:
+- WALK-040 — `CommitteeModule` imports `NotificationsModule`. `CommitteeService` constructor takes `NotificationsService`. After session creation + audit log, a new `dispatchInvitationEmails(sessionId)` fans out to each member via `notifications.sendEmail(to, 'COMMITTEE_SESSION_INVITATION', vars)`. Best-effort dispatch; failures logged but session creation is not rolled back.
+
+**DB** — Migration 019: seeds `COMMITTEE_SESSION_INVITATION` notification template with subject + multi-line body. Idempotent via `ON CONFLICT (code) DO NOTHING`.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on both apps.
+- ✅ Migration 019 applied: `BEGIN / INSERT 0 1 / COMMIT`.
+- ✅ `docker compose --project-name ctmp build --no-cache api web-admin` + `up -d --force-recreate api web-admin` → containers healthy.
+
+### Files modified this segment
+
+- `database/migrations/019_walk040_committee_session_email_template.sql` (NEW)
+- `apps/api/src/modules/committee/committee.module.ts` — NotificationsModule import
+- `apps/api/src/modules/committee/committee.service.ts` — NotificationsService dep + dispatchInvitationEmails
+- `apps/api/src/modules/tenders/tenders.service.ts` — cross-dept OR clauses in findAll + findOne
+- `apps/web-admin/src/app/(admin)/committee-opening/page.tsx` — WALK-036/037/042/043
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-062 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-036/037/040/041/042/043 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Next up (per locked sequence)
+
+Theme E — Vendor portal (WALK-016/017/018) — 3 items: download not working, no View option, Clarifications restructure into tender detail.
+
+---
+
 ## 2026-05-30 — BUG-061 shipped: Theme G (Technical Comparison polish — 6 items)
 
 **Date/time:** 2026-05-30 ~03:55 GMT+3 (continuation after BUG-060)

@@ -75,7 +75,11 @@ interface CommercialOpeningRecord {
   openedAt?: string;
 }
 
-const COMMITTEE_STATUSES = ['Commercial Sealed', 'Committee Commercial Opening'];
+// WALK-043: tender stays on this page after envelopes are opened (status
+// flips to COMMERCIAL_EVALUATION) so the user does not feel stuck. The page
+// shows a "handed off to Commercial Comparison" cue for those rows.
+const COMMITTEE_STATUSES = ['Commercial Sealed', 'Committee Commercial Opening', 'Commercial Evaluation / Comparison'];
+const OPENED_STATUS = 'Commercial Evaluation / Comparison';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -105,6 +109,9 @@ export default function CommitteeOpeningPage() {
   const [loading, setLoading] = useState(false);
   const [openingEnvelopes, setOpeningEnvelopes] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // WALK-042: success banner shown after open-commercial-envelopes succeeds,
+  // even when the post-open fetches 403 due to commercial:view separation.
+  const [openedNotice, setOpenedNotice] = useState<{ count: number; at: string } | null>(null);
   const [availableUsers, setAvailableUsers] = useState<UserOption[]>([]);
   const [creatingSession, setCreatingSession] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -270,8 +277,18 @@ export default function CommitteeOpeningPage() {
         { remarks },
         token,
       );
+      // WALK-042: the open call succeeded. Post-open follow-up fetches may
+      // 403 the caller (PROCUREMENT_ADMIN intentionally lacks `commercial:view`
+      // — separation of duties), but that does NOT mean the open failed. Show
+      // a success banner instead of bubbling the 403 as an error.
       setRecords(result.records ?? []);
-      if (selectedTenderId) await fetchSessionData(selectedTenderId);
+      setOpenedNotice({
+        count: result.openedEnvelopeCount ?? (result.records?.length ?? 0),
+        at: new Date().toISOString(),
+      });
+      if (selectedTenderId) {
+        try { await fetchSessionData(selectedTenderId); } catch { /* see note above */ }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open envelopes');
     } finally {
@@ -317,8 +334,15 @@ export default function CommitteeOpeningPage() {
                   }`}>
                     {t.title}
                   </p>
-                  <span className="inline-block mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-100 text-amber-800">
-                    {t.status}
+                  {/* WALK-043: opened sessions stay visible with a slate
+                      "handoff" chip so users can see they progressed instead
+                      of feeling the tender disappeared. */}
+                  <span className={`inline-block mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                    t.status === OPENED_STATUS
+                      ? 'bg-slate-200 text-slate-700'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {t.status === OPENED_STATUS ? 'Opened — handed off' : t.status}
                   </span>
                 </div>
               );
@@ -395,7 +419,14 @@ export default function CommitteeOpeningPage() {
                 )}
               </div>
               <div className="flex gap-2">
-                <button className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-bg flex items-center gap-2">
+                {/* WALK-037: wire Print Agenda. Browser's print dialog uses
+                    the @media print rules in globals.css to hide nav/sidebar. */}
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-bg flex items-center gap-2"
+                  title="Open the browser print dialog for the current session view"
+                >
                   <Printer className="w-4 h-4" />
                   Print Agenda
                 </button>
@@ -405,6 +436,38 @@ export default function CommitteeOpeningPage() {
             {error && (
               <div className="bg-danger/10 border border-danger/30 rounded-lg p-3 text-sm text-danger">
                 {error}
+              </div>
+            )}
+
+            {/* WALK-042: post-open success cue. PROCUREMENT_ADMIN doesn't hold
+                `commercial:view` so subsequent fetches may 403 — that's not a
+                failure; the envelopes did open. Hand-off to Commercial Comparison. */}
+            {openedNotice && (
+              <div className="bg-success/5 border border-success/30 rounded-lg p-4 flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-success flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-text-primary">
+                    Envelopes opened — {openedNotice.count} commercial envelope{openedNotice.count === 1 ? '' : 's'} unsealed.
+                  </p>
+                  <p className="text-xs text-text-secondary mt-0.5">
+                    Hand-off to finance + committee for evaluation.{' '}
+                    {selectedTenderId && (
+                      <Link
+                        href={`/commercial-comparison?tenderId=${selectedTenderId}`}
+                        className="font-semibold text-accent hover:underline"
+                      >
+                        Open in Commercial Comparison →
+                      </Link>
+                    )}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOpenedNotice(null)}
+                  className="text-xs text-text-secondary hover:text-text-primary"
+                >
+                  Dismiss
+                </button>
               </div>
             )}
 
@@ -525,6 +588,10 @@ export default function CommitteeOpeningPage() {
               </div>
             )}
 
+            {/* WALK-036: gracefully hide the heavy grid when there's no
+                session yet. The missing-session warning + create form above
+                are the only meaningful UI in that empty state. */}
+            {session && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Attendance + remarks */}
               <div className="lg:col-span-5 space-y-6">
@@ -700,6 +767,7 @@ export default function CommitteeOpeningPage() {
                 </div>
               </div>
             </div>
+            )}
           </div>
         )}
       </div>

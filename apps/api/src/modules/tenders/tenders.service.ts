@@ -76,13 +76,21 @@ export class TendersService {
     // BUG-028 Part B: dept-scoping for internal users. Roles holding
     // `system:view_all_departments` (SYSTEM_ADMIN, AUDITOR, PROCUREMENT_ADMIN)
     // see everything; everyone else is restricted to their department membership.
+    // BUG-062 / WALK-041: committee members + commercial evaluators are
+    // cross-departmental by nature — broaden the filter so a user assigned to
+    // a session or commercial evaluation for an out-of-dept tender can still
+    // see that tender.
     if (
       user?.id &&
       !user?.vendorId &&
       !((user.permissions ?? []) as string[]).includes('system:view_all_departments')
     ) {
       const depts = (user.departments ?? []) as string[];
-      where.departmentId = depts.length > 0 ? { in: depts } : { in: [] };
+      where.OR = [
+        { departmentId: depts.length > 0 ? { in: depts } : { in: [] } },
+        { committeeSessions: { some: { committeeMembers: { some: { userId: user.id } } } } },
+        { bids: { some: { commercialEvaluations: { some: { evaluatorUserId: user.id } } } } },
+      ];
     }
 
     // BUG-015 vendor visibility: PUBLIC tenders OR INVITATION_ONLY tenders where the
@@ -144,6 +152,9 @@ export class TendersService {
     // BUG-028 Part B: dept-scoping on detail. If the caller is an internal user
     // who lacks the org-wide bypass perm and the tender belongs to a department
     // they don't belong to, treat it as not-found (do not leak existence).
+    // BUG-062 / WALK-041: committee members + commercial evaluators are
+    // cross-departmental — allow access when the caller is assigned to a
+    // session or has a commercial evaluation row for this tender.
     if (
       user?.id &&
       !user?.vendorId &&
@@ -151,7 +162,17 @@ export class TendersService {
     ) {
       const depts = (user.departments ?? []) as string[];
       if (!depts.includes(tender.departmentId)) {
-        throw new NotFoundException('Tender not found');
+        const [memberHit, evaluatorHit] = await Promise.all([
+          this.prisma.committeeMember.count({
+            where: { userId: user.id, session: { tenderId: tender.id } },
+          }),
+          this.prisma.commercialEvaluation.count({
+            where: { evaluatorUserId: user.id, bid: { tenderId: tender.id } },
+          }),
+        ]);
+        if (memberHit === 0 && evaluatorHit === 0) {
+          throw new NotFoundException('Tender not found');
+        }
       }
     }
 

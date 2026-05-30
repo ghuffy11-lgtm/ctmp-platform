@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { AuditRiskLevel, CommitteeSessionStatus, EnvelopeStatus, EnvelopeType, TechnicalResult, TenderStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { RecordAttendanceDto } from './dto/record-attendance.dto';
 
@@ -12,6 +13,7 @@ export class CommitteeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async createSession(tenderId: string, dto: CreateSessionDto, userId: string) {
@@ -59,7 +61,47 @@ export class CommitteeService {
       riskLevel: AuditRiskLevel.MEDIUM,
     });
 
+    // BUG-062 / WALK-040: dispatch invitation emails to every committee
+    // member. Best-effort — failures are logged but do not roll back the
+    // session creation, matching the dispatchAwardNotifications pattern.
+    void this.dispatchInvitationEmails(session.id).catch(err =>
+      this.logger.error(`Committee session invitation dispatch failed: ${err}`),
+    );
+
     return session;
+  }
+
+  private async dispatchInvitationEmails(sessionId: string) {
+    const session = await this.prisma.committeeSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        tender: { select: { reference: true, title: true } },
+        committeeMembers: {
+          include: { user: { select: { email: true, displayName: true } } },
+        },
+      },
+    });
+    if (!session) return;
+    const variables = {
+      tenderReference: session.tender.reference,
+      tenderTitle: session.tender.title,
+      scheduledAt: session.scheduledAt.toISOString().replace('T', ' ').replace(/:\d\d\.\d+Z$/, ' UTC'),
+      location: session.location ?? '—',
+      requiredQuorumCount: session.requiredQuorumCount?.toString() ?? '—',
+      requiredRoleCode: session.requiredRoleCode ?? 'CHAIR',
+    };
+    for (const m of session.committeeMembers) {
+      const to = m.user?.email;
+      if (!to) continue;
+      try {
+        await this.notifications.sendEmail(to, 'COMMITTEE_SESSION_INVITATION', {
+          ...variables,
+          recipientName: m.user.displayName ?? to,
+        });
+      } catch (err) {
+        this.logger.warn(`Failed to send COMMITTEE_SESSION_INVITATION to ${to}: ${err}`);
+      }
+    }
   }
 
   async recordAttendance(sessionId: string, dto: RecordAttendanceDto, userId: string) {
