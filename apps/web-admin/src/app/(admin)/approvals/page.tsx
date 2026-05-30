@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { usePdfViewer } from '@/components/viewer/PdfViewerProvider';
 import {
   ClipboardList,
   RefreshCw,
@@ -11,6 +12,7 @@ import {
   X,
   AlertCircle,
   CheckCircle2,
+  Eye,
   Gavel,
   Trophy,
   FileText,
@@ -42,6 +44,19 @@ interface TaskDocument {
   id: string;
   name: string;
   mimeType: string;
+}
+
+// BUG-059 / WALK-004/005: full detail fetched when a task is selected — list
+// endpoint omits description + documents, so we re-fetch via /tenders/:id to
+// populate both.
+interface TenderDetail {
+  id: string;
+  description?: string | null;
+  documents?: Array<{
+    id: string;
+    filename: string;
+    mimeType: string;
+  }>;
 }
 
 interface TenderListItem {
@@ -180,6 +195,9 @@ export default function ApprovalsPage() {
   const [comments, setComments] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // BUG-059 / WALK-004/005: full tender detail (description + documents).
+  const [detail, setDetail] = useState<TenderDetail | null>(null);
+  const { openPdfViewer } = usePdfViewer();
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
@@ -212,7 +230,65 @@ export default function ApprovalsPage() {
   useEffect(() => {
     setComments('');
     setActionError(null);
+    setDetail(null);
+    if (!selectedId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getAccessToken();
+        const d = await get<TenderDetail>(`/tenders/${selectedId}`, token);
+        if (!cancelled) setDetail(d);
+      } catch {
+        // detail fetch failure is non-fatal — caller still sees the task summary.
+      }
+    })();
+    return () => { cancelled = true; };
   }, [selectedId]);
+
+  // BUG-059 / WALK-005: one-click View opens the PDF in the shared modal viewer.
+  async function handleViewDoc(docId: string, filename: string) {
+    if (!selectedTask) return;
+    try {
+      const token = getAccessToken();
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const res = await fetch(`${apiBase}/api/v1/tenders/${selectedTask.id}/documents/${docId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Open failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      openPdfViewer({
+        src: url,
+        title: filename,
+        onClose: () => URL.revokeObjectURL(url),
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to open document');
+    }
+  }
+
+  async function handleDownloadDoc(docId: string, filename: string) {
+    if (!selectedTask) return;
+    try {
+      const token = getAccessToken();
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const res = await fetch(`${apiBase}/api/v1/tenders/${selectedTask.id}/documents/${docId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Download failed');
+    }
+  }
 
   // ─── Filtered view ─────────────────────────────────────────────────────────
   const filteredTasks = tasks.filter(task => {
@@ -485,9 +561,11 @@ export default function ApprovalsPage() {
                   <FileText className="w-3.5 h-3.5" />
                   Tender Description
                 </label>
-                <div className="bg-card border border-border rounded-lg p-4 text-sm text-text-secondary leading-relaxed max-h-36 overflow-y-auto">
-                  {selectedTask.description
-                    ? selectedTask.description
+                <div className="bg-card border border-border rounded-lg p-4 text-sm text-text-secondary leading-relaxed max-h-36 overflow-y-auto whitespace-pre-wrap">
+                  {/* WALK-004: prefer the detail-fetched description (full text);
+                      fall back to the summary description, then to placeholder. */}
+                  {detail?.description || selectedTask.description
+                    ? (detail?.description ?? selectedTask.description)
                     : <span className="italic text-text-secondary/50">No description provided.</span>}
                 </div>
               </div>
@@ -511,25 +589,47 @@ export default function ApprovalsPage() {
                 )}
               </div>
 
-              {/* Related Documents */}
-              {selectedTask.documents.length > 0 && (
+              {/* Related Documents — WALK-005 wires View (PDF modal) + Download. */}
+              {(detail?.documents?.length ?? 0) > 0 && (
                 <div className="space-y-2">
                   <label className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
                     Related Documents
                   </label>
                   <div className="space-y-2">
-                    {selectedTask.documents.map(doc => {
+                    {(detail?.documents ?? []).map(doc => {
                       const { icon } = fileIcon(doc.mimeType);
+                      const isPdf = doc.mimeType?.includes('pdf');
                       return (
                         <div
                           key={doc.id}
-                          className="flex items-center justify-between p-3 bg-card border border-border rounded-lg hover:border-accent cursor-pointer transition-colors group"
+                          className="flex items-center justify-between gap-2 p-3 bg-card border border-border rounded-lg hover:border-accent transition-colors"
                         >
-                          <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
                             {icon}
-                            <span className="text-sm text-text-primary truncate">{doc.name}</span>
+                            <span className="text-sm text-text-primary truncate" title={doc.filename}>{doc.filename}</span>
                           </div>
-                          <Download className="w-4.5 h-4.5 text-text-secondary group-hover:text-accent transition-colors flex-shrink-0" />
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {isPdf && (
+                              <button
+                                type="button"
+                                onClick={() => handleViewDoc(doc.id, doc.filename)}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-accent hover:bg-accent/10 rounded transition-colors"
+                                title="View in modal"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                View
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadDoc(doc.id, doc.filename)}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-text-secondary hover:text-text-primary hover:bg-bg rounded transition-colors"
+                              title="Download file"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              Download
+                            </button>
+                          </div>
                         </div>
                       );
                     })}

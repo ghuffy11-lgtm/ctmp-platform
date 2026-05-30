@@ -6,6 +6,34 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-059 shipped: Theme B (Approval Queue — description fetch + PDF modal docs)
+
+**Date/time:** 2026-05-30 ~03:40 GMT+3 (continuation after BUG-058)
+**Agent/task:** Theme B per locked sequence. WALK-004 (empty description), WALK-005 (no PDF view on docs), WALK-006 (Edit button leak).
+
+### What landed
+
+- **`apps/web-admin/src/app/(admin)/approvals/page.tsx`** — list endpoint returns the summary serialiser (no `description`, no `documents`), so on task selection the page now does `GET /tenders/:id` to populate a `detail` state. Description block prefers `detail.description`, falls back to summary, renders multi-paragraph safe via `whitespace-pre-wrap`. Documents block lists `detail.documents` with per-row **View** (PDFs only — opens `PdfViewerModal` via `usePdfViewer` with the standard blob+Authorization fetch pattern) + **Download** (existing flow). `Eye` icon added to lucide imports.
+- **WALK-006** — verified not actually present. The Approval Queue rows render only Review + View action buttons; no Edit button. Edit on the tender detail page itself is gated by `perms.edit` from BUG-050.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean.
+- ✅ `docker compose --project-name ctmp build --no-cache web-admin` + `up -d --force-recreate web-admin` → container healthy.
+
+### Files modified this segment
+
+- `apps/web-admin/src/app/(admin)/approvals/page.tsx` — detail fetch on selection, description fallback, View/Download docs
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-059 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-004/005/006 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Next up (per locked sequence)
+
+Theme C — Tender Create criteria editor (WALK-007).
+
+---
+
 ## 2026-05-30 — BUG-058 shipped: Theme A (Dashboard Quick Actions perm gating)
 
 **Date/time:** 2026-05-30 ~03:30 GMT+3 (continuation after BUG-057)

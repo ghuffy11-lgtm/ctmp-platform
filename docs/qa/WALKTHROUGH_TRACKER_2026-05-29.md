@@ -33,9 +33,9 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
-| WALK-004 | Tender description shows empty — should display what officer wrote in the Description field | Bug | 🔴 | |
-| WALK-005 | Uploaded tender documents have no one-click "View" — currently forces a download. Engineer needs to view the PDF in the in-app viewer modal | Bug / UX | 🔴 | |
-| WALK-006 | Edit button visible on tender card — must be hidden from engineer (no `tender:edit` on their role) | UI gating gap | 🔴 | |
+| WALK-004 | Tender description shows empty — should display what officer wrote in the Description field | Bug | ✅ | Fixed 2026-05-30 (BUG-059). The Approval Queue right pane was rendering `selectedTask.description` from the list endpoint, which returns the summary serialiser (no description). On task selection the page now fetches `GET /tenders/:id` via the detail endpoint and renders `detail.description` (falls back to summary description for safety, then to italic placeholder when truly empty). Includes `whitespace-pre-wrap` so multi-paragraph descriptions render correctly. |
+| WALK-005 | Uploaded tender documents have no one-click "View" — currently forces a download. Engineer needs to view the PDF in the in-app viewer modal | Bug / UX | ✅ | Fixed 2026-05-30 (BUG-059). Documents block now lists items from the freshly-fetched detail and renders two action buttons per row: **View** (only for PDFs — opens the document in the shared `PdfViewerModal` via `usePdfViewer`, using the same blob+Authorization pattern as Technical Evaluation's View Full Proposal) and **Download** (existing behaviour preserved). |
+| WALK-006 | Edit button visible on tender card — must be hidden from engineer (no `tender:edit` on their role) | UI gating gap | ✅ | Confirmed 2026-05-30 — no Edit button exists on Approval Queue rows (only Review and View). Edit action on the tender detail page itself is already gated by `perms.edit` (`tender:edit` perm) from BUG-050. No additional change required. |
 
 ## D. Officer — Tender detail (tabs)
 
