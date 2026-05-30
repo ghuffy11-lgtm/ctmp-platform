@@ -7,6 +7,7 @@ import { get, patch } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { TenderCriteriaEditor } from '@/components/TenderCriteriaEditor';
+import { TenderBoqEditor } from '@/components/TenderBoqEditor';
 import {
   AlertCircle,
   CheckCircle2,
@@ -384,14 +385,14 @@ export default function EditTenderPage() {
       </div>
 
       {/* BUG-060 / WALK-007: post-create cue. Officer landed here straight
-          from /tenders/new so they can configure criteria as a next step. */}
+          from /tenders/new so they can configure criteria + BOQ as next steps. */}
       {fromCreate && (
         <div className="mt-6 bg-accent/5 border border-accent/30 rounded-xl px-5 py-4 flex items-start gap-3">
           <CheckCircle2 className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-semibold text-text-primary">Tender created — next: set the Technical Evaluation Criteria</p>
+            <p className="text-sm font-semibold text-text-primary">Tender created — next: set the Technical Evaluation Criteria AND the Bill of Quantities</p>
             <p className="text-xs text-text-secondary mt-0.5">
-              Define the criteria evaluators will score against (weights must total 100). You can revisit this page anytime before approval.
+              Criteria drive technical scoring (weights must total 100). BOQ defines what vendors price per line — they enter unit prices at bid time and the system aggregates automatically. Both can be revised any time before approval.
             </p>
           </div>
         </div>
@@ -401,6 +402,15 @@ export default function EditTenderPage() {
           tender exists; backend rejects saves at non-editable statuses anyway. */}
       <div className="mt-6">
         <TenderCriteriaEditor
+          tenderId={tenderId}
+          editable={['Draft', 'Internal Review', 'Approved'].includes(tender.status)}
+        />
+      </div>
+
+      {/* BUG-068 / Phase F BOQ: Per-tender BOQ editor — same status gate as
+          the criteria editor. Vendors will fill unit prices against these lines. */}
+      <div className="mt-6">
+        <TenderBoqEditor
           tenderId={tenderId}
           editable={['Draft', 'Internal Review', 'Approved'].includes(tender.status)}
         />

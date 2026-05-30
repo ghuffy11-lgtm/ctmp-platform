@@ -54,6 +54,16 @@ interface CommercialComparisonResponse {
   lowestPassBidId: string | null;
   vendors: CardVendor[];
   award: AwardSummary | null;
+  // BUG-068 / Phase F BOQ: real template rows (placeholder filtered server-side).
+  // Empty when tender has no BOQ — Itemized view + per-vendor BOQ block are
+  // hidden, manual-entry CommercialTotalBlock (BUG-053) stays as the fallback.
+  boqTemplate: Array<{
+    id: string;
+    itemNo: string;
+    description: string;
+    qty: number;
+    unit: string;
+  }>;
 }
 
 const ACTIVE_STATUSES = [
@@ -214,6 +224,7 @@ function CommercialComparisonContent() {
         commercialTotal: v.commercialTotal,
         currency: v.currency,
         commercialEnvelopeStatus: v.commercialEnvelopeStatus,
+        boqLines: v.boqLines,
       })) ?? [],
     [comparison],
   );
@@ -393,6 +404,7 @@ function CommercialComparisonContent() {
                   lowestPassBidId={comparison.lowestPassBidId}
                   selectedBidId={selectedBidId}
                   onSelect={handleSelectBid}
+                  boqTemplate={comparison.boqTemplate}
                 />
                 {comparison.vendors.length > 0 && (
                   <section className="space-y-3">
@@ -410,6 +422,7 @@ function CommercialComparisonContent() {
                         selected={false}
                         canEvaluate={false}
                         onRecommend={handleRecommend}
+                        boqTemplate={comparison.boqTemplate}
                       />
                     ))}
                   </section>
@@ -423,6 +436,7 @@ function CommercialComparisonContent() {
                 lowestPassBidId={comparison.lowestPassBidId}
                 selectedBidId={selectedBidId}
                 onSelect={handleSelectBid}
+                boqTemplate={comparison.boqTemplate}
               />
               {comparison.vendors.length > 0 && (
                 <section className="space-y-3">
@@ -441,6 +455,7 @@ function CommercialComparisonContent() {
                       canEvaluate={canEvaluate}
                       onRecommend={handleRecommend}
                       onPriceSaved={() => selectedTenderId && loadComparison(selectedTenderId)}
+                      boqTemplate={comparison.boqTemplate}
                     />
                   ))}
                 </section>

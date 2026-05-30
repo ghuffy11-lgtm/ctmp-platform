@@ -13,6 +13,22 @@ export interface CommercialMatrixVendor {
   commercialTotal: number | null;
   currency: string;
   commercialEnvelopeStatus: string | null;
+  // BUG-068 / Phase F BOQ: per-line entries the vendor submitted. Empty for
+  // legacy tenders (no BOQ template) — Itemized view falls back to placeholder.
+  boqLines?: Array<{
+    tenderBoqItemId: string;
+    status: 'BIDDING' | 'NOT_BIDDING';
+    unitPrice: number | null;
+    lineTotal: number | null;
+  }>;
+}
+
+export interface CommercialMatrixBoqRow {
+  id: string;
+  itemNo: string;
+  description: string;
+  qty: number;
+  unit: string;
 }
 
 interface Props {
@@ -20,6 +36,10 @@ interface Props {
   lowestPassBidId: string | null;
   selectedBidId: string | null;
   onSelect: (bidId: string) => void;
+  // BUG-068 / Phase F BOQ: real template (placeholder rows already filtered
+  // out server-side). Empty array = legacy / no-BOQ tender; Itemized view
+  // renders a placeholder note.
+  boqTemplate?: CommercialMatrixBoqRow[];
 }
 
 type Layout = 'summary' | 'itemized';
@@ -70,8 +90,9 @@ function resultBadge(result: 'PASS' | 'FAIL' | 'PENDING') {
  * with the Award icon per F1; clicking the row bubbles selection upward so the
  * detail card below the matrix expands.
  */
-export function CommercialMatrix({ vendors, lowestPassBidId, selectedBidId, onSelect }: Props) {
+export function CommercialMatrix({ vendors, lowestPassBidId, selectedBidId, onSelect, boqTemplate }: Props) {
   const [layout, setLayout] = useState<Layout>('summary');
+  const hasBoq = (boqTemplate?.length ?? 0) > 0;
 
   // Sort: lowest-PASS first, then ascending price among PASS, then FAIL/PENDING at the bottom.
   const sortedVendors = [...vendors].sort((a, b) => {
@@ -112,15 +133,80 @@ export function CommercialMatrix({ vendors, lowestPassBidId, selectedBidId, onSe
       </div>
 
       {layout === 'itemized' ? (
-        <div className="px-6 py-10 text-center bg-bg/40">
-          <p className="text-sm text-text-secondary">
-            Per-line-item breakdown will appear here once a BOQ template is configured for the tender
-            (Phase F).
-          </p>
-          <p className="text-xs text-text-secondary mt-2">
-            Switch back to Summary view to compare totals.
-          </p>
-        </div>
+        hasBoq ? (
+          /* BUG-068 / Phase F BOQ: rows = template lines, columns = vendors.
+             Cells show line total (unit_price * qty) when the vendor is
+             BIDDING that line; "—" when NOT_BIDDING or no row submitted. */
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-bg border-b border-border">
+                <tr>
+                  <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary w-20">Item</th>
+                  <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary">Description</th>
+                  <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary text-right w-24">Qty</th>
+                  <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary w-20">Unit</th>
+                  {sortedVendors.map(v => (
+                    <th
+                      key={v.bidId}
+                      className={`px-3 py-2 text-xs font-bold uppercase tracking-wider text-right ${
+                        v.bidId === lowestPassBidId ? 'text-success' : 'text-text-secondary'
+                      }`}
+                    >
+                      {v.vendorName}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {(boqTemplate ?? []).map(row => (
+                  <tr key={row.id} className="hover:bg-bg/40">
+                    <td className="px-3 py-2 font-mono text-xs text-text-secondary">{row.itemNo}</td>
+                    <td className="px-3 py-2 text-text-primary">{row.description}</td>
+                    <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">{row.qty}</td>
+                    <td className="px-3 py-2 text-xs text-text-secondary">{row.unit}</td>
+                    {sortedVendors.map(v => {
+                      const line = (v.boqLines ?? []).find(l => l.tenderBoqItemId === row.id);
+                      if (!line || line.status === 'NOT_BIDDING') {
+                        return (
+                          <td key={v.bidId} className="px-3 py-2 text-right text-xs text-text-secondary/60 italic">
+                            Not bidding
+                          </td>
+                        );
+                      }
+                      return (
+                        <td key={v.bidId} className="px-3 py-2 text-right font-mono text-sm text-text-primary">
+                          {fmtCurrency(line.lineTotal, v.currency)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+                <tr className="bg-bg/60 font-semibold">
+                  <td className="px-3 py-2" colSpan={4}>Total</td>
+                  {sortedVendors.map(v => (
+                    <td
+                      key={v.bidId}
+                      className={`px-3 py-2 text-right font-mono text-sm ${
+                        v.bidId === lowestPassBidId ? 'text-success' : 'text-text-primary'
+                      }`}
+                    >
+                      {fmtCurrency(v.commercialTotal, v.currency)}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="px-6 py-10 text-center bg-bg/40">
+            <p className="text-sm text-text-secondary">
+              This tender has no BOQ template configured (legacy / pre-Phase F).
+            </p>
+            <p className="text-xs text-text-secondary mt-2">
+              Switch back to Summary view to compare totals.
+            </p>
+          </div>
+        )
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">

@@ -30,6 +30,7 @@ import { CommitteeModule } from './modules/committee/committee.module';
 import { CommercialEvaluationModule } from './modules/commercial-evaluation/commercial-evaluation.module';
 import { ComparisonModule } from './modules/comparison/comparison.module';
 import { EvaluationCriteriaModule } from './modules/evaluation-criteria/evaluation-criteria.module';
+import { BoqModule } from './modules/boq/boq.module';
 import { AwardModule } from './modules/award/award.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -65,6 +66,7 @@ import { SystemSettingsModule } from './modules/system-settings/system-settings.
     CommercialEvaluationModule,
     ComparisonModule,
     EvaluationCriteriaModule,
+    BoqModule,
     AwardModule,
     AuditModule,
     NotificationsModule,

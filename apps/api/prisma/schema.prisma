@@ -599,6 +599,7 @@ model Tender {
   auditLogs             AuditLog[]              @relation("AuditLogTender")
   notificationLogs      NotificationLog[]       @relation("NotificationLogTender")
   technicalCriteria     TenderTechnicalCriterion[]
+  boqItems              TenderBoqItem[]
 
   @@map("tenders")
 }
@@ -930,6 +931,7 @@ model Bid {
   bidSubmissionReceipt    BidSubmissionReceipt?
   technicalEvaluations    TechnicalEvaluation[]
   commercialEvaluations   CommercialEvaluation[]
+  bidBoqItems             BidBoqItem[]
   auditLogs               AuditLog[]              @relation("AuditLogBid")
 
   @@unique([tenderId, vendorId, isAlternative])
@@ -1287,6 +1289,54 @@ model TenderTechnicalCriterion {
   @@unique([tenderId, code])
   @@index([tenderId])
   @@map("tender_technical_criteria")
+}
+
+// =============================================================================
+// BOQ — Bill of Quantities (migration 020 / BUG-068 / Phase F unlock)
+// =============================================================================
+
+enum BidBoqStatus {
+  BIDDING
+  NOT_BIDDING
+
+  @@map("bid_boq_status")
+}
+
+model TenderBoqItem {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenderId    String   @map("tender_id") @db.Uuid
+  itemNo      String   @map("item_no") @db.VarChar(50)
+  description String   @db.Text
+  qty         Decimal  @db.Decimal(15, 3)
+  unit        String   @db.VarChar(50)
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tender      Tender       @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  bidBoqItems BidBoqItem[]
+
+  @@unique([tenderId, itemNo])
+  @@index([tenderId, sortOrder])
+  @@map("tender_boq_items")
+}
+
+model BidBoqItem {
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bidId             String       @map("bid_id") @db.Uuid
+  tenderBoqItemId   String       @map("tender_boq_item_id") @db.Uuid
+  status            BidBoqStatus @default(BIDDING)
+  unitPrice         Decimal?     @map("unit_price") @db.Decimal(15, 3)
+  remarks           String?      @db.Text
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @default(now()) @map("updated_at")
+
+  bid           Bid           @relation(fields: [bidId], references: [id], onDelete: Cascade)
+  tenderBoqItem TenderBoqItem @relation(fields: [tenderBoqItemId], references: [id], onDelete: Restrict)
+
+  @@unique([bidId, tenderBoqItemId])
+  @@index([bidId])
+  @@index([tenderBoqItemId])
+  @@map("bid_boq_items")
 }
 
 // =============================================================================

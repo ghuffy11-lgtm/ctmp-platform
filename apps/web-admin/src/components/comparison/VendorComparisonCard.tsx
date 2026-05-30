@@ -43,6 +43,21 @@ export interface CardVendor {
   currency: string;
   commercialDocuments: CardCommercialDoc[];
   commentsByEvaluator: Array<{ evaluatorUserId: string; comments: string }>;
+  // BUG-068 / Phase F BOQ: per-line entries the vendor submitted.
+  boqLines?: Array<{
+    tenderBoqItemId: string;
+    status: 'BIDDING' | 'NOT_BIDDING';
+    unitPrice: number | null;
+    lineTotal: number | null;
+  }>;
+}
+
+export interface CardBoqRow {
+  id: string;
+  itemNo: string;
+  description: string;
+  qty: number;
+  unit: string;
 }
 
 interface Props {
@@ -55,6 +70,9 @@ interface Props {
   canEvaluate?: boolean;
   onRecommend: (bidId: string, isLowestPass: boolean) => void;
   onPriceSaved?: () => void;
+  // BUG-068 / Phase F BOQ: template rows so the card can show a per-line
+  // breakdown when the bid has boqLines. Empty for legacy / no-BOQ tenders.
+  boqTemplate?: CardBoqRow[];
 }
 
 function fmtCurrency(amount: number | null, currency: string) {
@@ -112,9 +130,14 @@ export function VendorComparisonCard({
   canEvaluate,
   onRecommend,
   onPriceSaved,
+  boqTemplate,
 }: Props) {
   const [expanded, setExpanded] = useState(!!initialExpanded);
   const isFail = vendor.technicalResult === 'FAIL';
+  // BUG-068 / Phase F BOQ: when the bid has per-line entries, render a real
+  // line breakdown. Otherwise the existing CommercialTotalBlock (BUG-053)
+  // continues to handle manual price entry / display for legacy tenders.
+  const hasBoq = (boqTemplate?.length ?? 0) > 0 && (vendor.boqLines?.length ?? 0) > 0;
 
   return (
     <div
@@ -157,14 +180,19 @@ export function VendorComparisonCard({
 
       {expanded && (
         <div className="border-t border-border bg-bg/30">
-          {/* Block 1: Commercial total — manual price entry by procurement/finance.
-              Future: auto-extract from the commercial PDF on vendor submission. */}
-          <CommercialTotalBlock
-            vendor={vendor}
-            canEvaluate={!!canEvaluate}
-            tenderCurrency={tenderCurrency}
-            onSaved={onPriceSaved}
-          />
+          {/* Block 1: Commercial total. When the bid carries per-line BOQ
+              entries (Phase F / BUG-068), render the structured breakdown.
+              Otherwise fall back to BUG-053's manual-entry block. */}
+          {hasBoq ? (
+            <BoqBreakdownBlock vendor={vendor} boqTemplate={boqTemplate!} />
+          ) : (
+            <CommercialTotalBlock
+              vendor={vendor}
+              canEvaluate={!!canEvaluate}
+              tenderCurrency={tenderCurrency}
+              onSaved={onPriceSaved}
+            />
+          )}
 
           {/* Block 2: Technical detail (read-only) */}
           <section className="px-5 py-4 border-b border-border">
@@ -402,6 +430,82 @@ function CommercialTotalBlock({
           Awaiting price entry by procurement / finance. The comparison cannot be finalised until a total is recorded for this vendor.
         </div>
       )}
+    </section>
+  );
+}
+
+// BUG-068 / Phase F BOQ: per-line breakdown rendered on the per-vendor card
+// when the bid carries boqLines + the tender has a real BOQ template. Mirrors
+// the Itemized view in CommercialMatrix but for a single vendor.
+function BoqBreakdownBlock({
+  vendor,
+  boqTemplate,
+}: {
+  vendor: CardVendor;
+  boqTemplate: CardBoqRow[];
+}) {
+  const linesByItem = new Map(
+    (vendor.boqLines ?? []).map(l => [l.tenderBoqItemId, l]),
+  );
+
+  return (
+    <section className="px-5 py-4 border-b border-border">
+      <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2 flex items-center gap-1.5">
+        <TrendingDown className="w-3.5 h-3.5" /> Commercial breakdown (BOQ)
+      </h4>
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-bg/40 border-b border-border">
+            <tr className="text-[10px] uppercase tracking-wider text-text-secondary">
+              <th className="px-3 py-2 text-left font-bold w-16">Item</th>
+              <th className="px-3 py-2 text-left font-bold">Description</th>
+              <th className="px-3 py-2 text-right font-bold w-20">Qty</th>
+              <th className="px-3 py-2 text-left font-bold w-14">Unit</th>
+              <th className="px-3 py-2 text-right font-bold w-32">Unit price</th>
+              <th className="px-3 py-2 text-right font-bold w-32">Line total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {boqTemplate.map(row => {
+              const line = linesByItem.get(row.id);
+              const notBidding = !line || line.status === 'NOT_BIDDING';
+              return (
+                <tr key={row.id} className={notBidding ? 'opacity-60' : ''}>
+                  <td className="px-3 py-2 font-mono text-xs text-text-secondary">{row.itemNo}</td>
+                  <td className="px-3 py-2 text-text-primary">{row.description}</td>
+                  <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">{row.qty}</td>
+                  <td className="px-3 py-2 text-xs text-text-secondary">{row.unit}</td>
+                  {notBidding ? (
+                    <>
+                      <td className="px-3 py-2 text-right text-xs italic text-text-secondary/70" colSpan={2}>
+                        Not bidding
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-3 py-2 text-right font-mono text-text-primary">
+                        {fmtCurrency(line!.unitPrice, vendor.currency)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-text-primary">
+                        {fmtCurrency(line!.lineTotal, vendor.currency)}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
+            <tr className="bg-bg/50 font-bold">
+              <td className="px-3 py-2" colSpan={5}>Bid total</td>
+              <td className="px-3 py-2 text-right font-mono text-text-primary">
+                {fmtCurrency(vendor.commercialTotal, vendor.currency)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-text-secondary italic mt-2">
+        Submitted by the vendor at bid time. Read-only here; values are locked once the bid is SUBMITTED.
+      </p>
     </section>
   );
 }

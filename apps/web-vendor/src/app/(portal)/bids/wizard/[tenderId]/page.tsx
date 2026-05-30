@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, use } from 'react';
+import { useState, useEffect, useCallback, useMemo, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { get, post, patch, ApiError } from '@/lib/api';
+import { get, post, put, patch, ApiError } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { FileDropZone } from '@/components/forms/FileDropZone';
@@ -61,7 +61,26 @@ interface SubmitReceipt {
   }>;
 }
 
-const STEPS = ['Tender', 'Technical Envelope', 'Commercial Envelope', 'Review & Submit'] as const;
+// BUG-068 / Phase F BOQ. Procurement defines BOQ rows; vendor enters a unit
+// price or marks NOT_BIDDING per row. Sum drives the commercial total used
+// for comparison. PDF on the commercial envelope is now OPTIONAL.
+interface BoqTemplateRow {
+  id: string;
+  itemNo: string;
+  description: string;
+  qty: number;
+  unit: string;
+}
+type BoqLineStatus = 'BIDDING' | 'NOT_BIDDING';
+interface BoqLineDraft {
+  tenderBoqItemId: string;
+  status: BoqLineStatus;
+  unitPrice: string; // form state — stringly typed for the input
+}
+const PLACEHOLDER_ITEM_NO = '0';
+const PLACEHOLDER_DESCRIPTION = 'Legacy tender — no BOQ defined';
+
+const STEPS = ['Tender', 'Technical Envelope', 'Commercial Pricing', 'Commercial PDF (optional)', 'Review & Submit'] as const;
 
 export default function BidWizardPage({ params }: { params: Promise<{ tenderId: string }> }) {
   const { tenderId } = use(params);
@@ -76,6 +95,14 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // BUG-068 / Phase F BOQ — template + per-line vendor entry draft state.
+  const [boqTemplate, setBoqTemplate] = useState<BoqTemplateRow[]>([]);
+  const [boqLines, setBoqLines] = useState<BoqLineDraft[]>([]);
+  const [boqSaving, setBoqSaving] = useState(false);
+  const hasRealBoq = useMemo(
+    () => boqTemplate.some(r => !(r.itemNo === PLACEHOLDER_ITEM_NO && r.description === PLACEHOLDER_DESCRIPTION)),
+    [boqTemplate],
+  );
 
   // ─── Initial load: tender + draft-or-resume bid + envelope contents ─────────
   useEffect(() => {
@@ -102,22 +129,48 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
               documentChecksums: (r.snapshot?.documents ?? []) as SubmitReceipt['documentChecksums'],
             };
             setReceipt(synthetic);
-            setStep(3);
+            setStep(4);
           } catch {
-            setStep(3);
+            setStep(4);
           }
         }
 
-        const [tech, comm] = await Promise.all([
+        const [tech, comm, boqTpl, boqOwn] = await Promise.all([
           get<EnvelopeContents>(`/bids/${bidRes.id}/envelopes/TECHNICAL/documents`, token).catch(
             () => ({ envelopeId: '', envelopeType: 'TECHNICAL' as const, status: 'DRAFT', documents: [] }),
           ),
           get<EnvelopeContents>(`/bids/${bidRes.id}/envelopes/COMMERCIAL/documents`, token).catch(
             () => ({ envelopeId: '', envelopeType: 'COMMERCIAL' as const, status: 'DRAFT', documents: [] }),
           ),
+          // BUG-068: tender BOQ template (real rows only — placeholder filtered below).
+          get<{ items: BoqTemplateRow[] }>(`/tenders/${tenderId}/boq`, token).catch(
+            () => ({ items: [] as BoqTemplateRow[] }),
+          ),
+          // BUG-068: vendor's existing BOQ draft on this bid (empty for a fresh draft).
+          get<{ items: Array<{ tenderBoqItemId: string; status: BoqLineStatus; unitPrice: number | null }> }>(
+            `/bids/${bidRes.id}/boq-items`,
+            token,
+          ).catch(() => ({ items: [] })),
         ]);
         setTechnicalDocs(tech.documents);
         setCommercialDocs(comm.documents);
+
+        const realRows = (boqTpl.items ?? []).filter(
+          r => !(r.itemNo === PLACEHOLDER_ITEM_NO && r.description === PLACEHOLDER_DESCRIPTION),
+        );
+        setBoqTemplate(realRows);
+        // Hydrate the form: prefer the vendor's saved draft per row, otherwise default to BIDDING with empty price.
+        const draftByTenderItem = new Map(
+          (boqOwn.items ?? []).map(l => [l.tenderBoqItemId, l]),
+        );
+        setBoqLines(realRows.map(r => {
+          const d = draftByTenderItem.get(r.id);
+          return {
+            tenderBoqItemId: r.id,
+            status: d?.status ?? 'BIDDING',
+            unitPrice: d?.unitPrice != null ? String(d.unitPrice) : '',
+          };
+        }));
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
           setError('You already submitted this bid. Redirecting to your bid list…');
@@ -155,10 +208,48 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
     }
   }
 
+  // BUG-068: validate + PUT vendor's BOQ entries. Allowed any time pre-submit.
+  async function handleSaveBoq() {
+    if (!bid || !hasRealBoq) return;
+    for (const line of boqLines) {
+      if (line.status === 'BIDDING') {
+        const n = Number(line.unitPrice);
+        if (line.unitPrice === '' || !Number.isFinite(n) || n < 0) {
+          setError('Every BIDDING line needs a non-negative unit price. NOT_BIDDING lines opt out instead.');
+          return;
+        }
+      }
+    }
+    setBoqSaving(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      await put(`/bids/${bid.id}/boq-items`, {
+        items: boqLines.map(l => ({
+          tenderBoqItemId: l.tenderBoqItemId,
+          status: l.status,
+          unitPrice: l.status === 'BIDDING' ? Number(l.unitPrice) : undefined,
+        })),
+      }, token);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'BOQ save failed');
+      throw err;
+    } finally {
+      setBoqSaving(false);
+    }
+  }
+
   async function handleSubmit() {
     if (!bid) return;
-    if (technicalDocs.length === 0 || commercialDocs.length === 0) {
-      setError('Both envelopes must contain at least one document');
+    if (technicalDocs.length === 0) {
+      setError('Technical envelope must contain at least one document');
+      return;
+    }
+    // Commercial PDF is OPTIONAL when the tender has a real BOQ template; the
+    // BOQ is the legal price record. For legacy tenders (no BOQ) it remains
+    // mandatory per the backend submit gate.
+    if (!hasRealBoq && commercialDocs.length === 0) {
+      setError('Commercial envelope must contain at least one document');
       return;
     }
     if (!confirm('Submit bid? Submitted bids are immutable.')) return;
@@ -166,9 +257,13 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
     setError(null);
     try {
       const token = getAccessToken();
+      // Persist BOQ first (best-effort — if it succeeded earlier, this is a no-op overwrite).
+      if (hasRealBoq) {
+        try { await handleSaveBoq(); } catch { setSubmitting(false); return; }
+      }
       const result = await post<SubmitReceipt>(`/bids/${bid.id}/submit`, {}, token);
       setReceipt(result);
-      setStep(3);
+      setStep(4);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Submit failed');
     } finally {
@@ -263,30 +358,56 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
           onDelete={id => handleDeleteDoc('TECHNICAL', id)}
           onPrev={() => setStep(0)}
           onNext={() => setStep(2)}
+          required
         />
       )}
       {step === 2 && (
+        <Step2BoqPricing
+          hasRealBoq={hasRealBoq}
+          boqTemplate={boqTemplate}
+          boqLines={boqLines}
+          setBoqLines={setBoqLines}
+          saving={boqSaving}
+          onSaveDraft={async () => { try { await handleSaveBoq(); } catch { /* error already in state */ } }}
+          onPrev={() => setStep(1)}
+          onNext={async () => {
+            if (hasRealBoq) {
+              try { await handleSaveBoq(); } catch { return; }
+            }
+            setStep(3);
+          }}
+        />
+      )}
+      {step === 3 && (
         <Step1Envelope
-          title="Commercial Envelope"
-          description="Upload pricing documents. These remain sealed until the committee opens commercial envelopes."
+          title={hasRealBoq ? 'Commercial PDF (optional reference)' : 'Commercial Envelope'}
+          description={
+            hasRealBoq
+              ? 'Optional supporting document. Per-line prices in the previous step are the legal record. Upload only if you want to attach a supplementary brochure or quotation letter.'
+              : 'Upload pricing documents. These remain sealed until the committee opens commercial envelopes.'
+          }
           bidId={bid.id}
           envelopeType="COMMERCIAL"
           docs={commercialDocs}
           onUploaded={doc => setCommercialDocs(prev => [...prev, doc])}
           onDelete={id => handleDeleteDoc('COMMERCIAL', id)}
-          onPrev={() => setStep(1)}
-          onNext={() => setStep(3)}
+          onPrev={() => setStep(2)}
+          onNext={() => setStep(4)}
+          required={!hasRealBoq}
         />
       )}
-      {step === 3 && (
-        <Step3Review
+      {step === 4 && (
+        <Step4Review
           tender={tender}
           bid={bid}
           technicalDocs={technicalDocs}
           commercialDocs={commercialDocs}
+          hasRealBoq={hasRealBoq}
+          boqTemplate={boqTemplate}
+          boqLines={boqLines}
           receipt={receipt}
           submitting={submitting}
-          onPrev={() => !receipt && setStep(2)}
+          onPrev={() => !receipt && setStep(3)}
           onSubmit={handleSubmit}
         />
       )}
@@ -347,6 +468,7 @@ function Step1Envelope({
   onDelete,
   onPrev,
   onNext,
+  required = true,
 }: {
   title: string;
   description: string;
@@ -357,6 +479,7 @@ function Step1Envelope({
   onDelete: (id: string) => void;
   onPrev: () => void;
   onNext: () => void;
+  required?: boolean;
 }) {
   return (
     <div className="bg-card border border-border rounded-xl p-6 space-y-4">
@@ -421,23 +544,185 @@ function Step1Envelope({
         </button>
         <button
           onClick={onNext}
-          disabled={docs.length === 0}
+          disabled={required && docs.length === 0}
           className="px-5 py-2 bg-accent text-white rounded-lg font-bold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Continue →
+          {required || docs.length > 0 ? 'Continue →' : 'Skip (no upload) →'}
         </button>
       </div>
     </div>
   );
 }
 
-// ─── Step 3: Review + Submit / Receipt ─────────────────────────────────────────
+// ─── Step 2: Commercial Pricing (BOQ) ───────────────────────────────────────────
+// BUG-068 / Phase F BOQ. Vendor fills unit price per template line, or marks
+// NOT_BIDDING to opt out of that line. Live grand-total at the bottom. Save
+// Draft persists progress; Continue persists then advances.
+function Step2BoqPricing({
+  hasRealBoq,
+  boqTemplate,
+  boqLines,
+  setBoqLines,
+  saving,
+  onSaveDraft,
+  onPrev,
+  onNext,
+}: {
+  hasRealBoq: boolean;
+  boqTemplate: BoqTemplateRow[];
+  boqLines: BoqLineDraft[];
+  setBoqLines: (next: BoqLineDraft[]) => void;
+  saving: boolean;
+  onSaveDraft: () => Promise<void>;
+  onPrev: () => void;
+  onNext: () => Promise<void>;
+}) {
+  if (!hasRealBoq) {
+    return (
+      <div className="bg-card border border-border rounded-xl p-6 space-y-4">
+        <h2 className="text-lg font-bold text-text-primary">Commercial Pricing</h2>
+        <p className="text-sm text-text-secondary">
+          This tender has no structured Bill of Quantities. The commercial PDF you upload in the next step is the price record. Click Continue.
+        </p>
+        <div className="flex justify-between border-t border-border pt-4">
+          <button onClick={onPrev} className="px-4 py-2 border border-border text-text-secondary rounded-lg font-semibold hover:bg-bg">← Back</button>
+          <button onClick={() => onNext()} className="px-5 py-2 bg-accent text-white rounded-lg font-bold hover:opacity-90">Continue →</button>
+        </div>
+      </div>
+    );
+  }
 
-function Step3Review({
+  function updateLine(idx: number, patch: Partial<BoqLineDraft>) {
+    setBoqLines(boqLines.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  }
+
+  // Live grand total — sums only BIDDING lines with parseable prices.
+  const grandTotal = boqLines.reduce((sum, l, i) => {
+    if (l.status !== 'BIDDING') return sum;
+    const row = boqTemplate[i];
+    const n = Number(l.unitPrice);
+    if (!Number.isFinite(n) || n < 0 || !row) return sum;
+    return sum + n * row.qty;
+  }, 0);
+
+  const allValid = boqLines.every(l => {
+    if (l.status === 'NOT_BIDDING') return true;
+    const n = Number(l.unitPrice);
+    return l.unitPrice !== '' && Number.isFinite(n) && n >= 0;
+  });
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-6 space-y-4">
+      <div>
+        <h2 className="text-lg font-bold text-text-primary">Commercial Pricing — Bill of Quantities</h2>
+        <p className="text-sm text-text-secondary mt-1">
+          Enter your <strong>unit price</strong> for each line in <strong>KWD</strong>, or switch a line to <strong>Not bidding</strong> if you do not want to bid on it. The system multiplies unit price × quantity for each line and rolls up to your bid total.
+        </p>
+      </div>
+
+      <div className="overflow-x-auto border border-border rounded-lg">
+        <table className="w-full text-sm">
+          <thead className="bg-bg/50 border-b border-border">
+            <tr>
+              <th className="px-3 py-2 text-left text-[10px] font-bold uppercase text-text-secondary w-20">Item</th>
+              <th className="px-3 py-2 text-left text-[10px] font-bold uppercase text-text-secondary">Description</th>
+              <th className="px-3 py-2 text-right text-[10px] font-bold uppercase text-text-secondary w-20">Qty</th>
+              <th className="px-3 py-2 text-left text-[10px] font-bold uppercase text-text-secondary w-16">Unit</th>
+              <th className="px-3 py-2 text-left text-[10px] font-bold uppercase text-text-secondary w-32">Bidding?</th>
+              <th className="px-3 py-2 text-right text-[10px] font-bold uppercase text-text-secondary w-32">Unit price (KWD)</th>
+              <th className="px-3 py-2 text-right text-[10px] font-bold uppercase text-text-secondary w-32">Line total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {boqTemplate.map((row, i) => {
+              const line = boqLines[i];
+              if (!line) return null;
+              const notBidding = line.status === 'NOT_BIDDING';
+              const priceNum = Number(line.unitPrice);
+              const priceValid = !notBidding && line.unitPrice !== '' && Number.isFinite(priceNum) && priceNum >= 0;
+              const lineTotal = priceValid ? priceNum * row.qty : null;
+              return (
+                <tr key={row.id} className={notBidding ? 'opacity-60' : ''}>
+                  <td className="px-3 py-2 font-mono text-xs text-text-secondary">{row.itemNo}</td>
+                  <td className="px-3 py-2 text-text-primary">{row.description}</td>
+                  <td className="px-3 py-2 text-right font-mono text-xs">{row.qty}</td>
+                  <td className="px-3 py-2 text-xs text-text-secondary">{row.unit}</td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={line.status}
+                      onChange={e => updateLine(i, { status: e.target.value as BoqLineStatus, unitPrice: e.target.value === 'NOT_BIDDING' ? '' : line.unitPrice })}
+                      className="w-full px-2 py-1.5 text-xs border border-border rounded bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+                    >
+                      <option value="BIDDING">Bidding</option>
+                      <option value="NOT_BIDDING">Not bidding</option>
+                    </select>
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      value={notBidding ? '' : line.unitPrice}
+                      onChange={e => updateLine(i, { unitPrice: e.target.value })}
+                      disabled={notBidding}
+                      placeholder={notBidding ? '—' : '0.000'}
+                      className={`w-28 px-2 py-1.5 text-sm font-mono text-right border rounded bg-bg focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 ${
+                        !notBidding && line.unitPrice !== '' && !priceValid ? 'border-danger' : 'border-border'
+                      }`}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono text-sm text-text-primary">
+                    {notBidding ? <span className="italic text-text-secondary text-xs">Not bidding</span> : (lineTotal != null ? lineTotal.toFixed(3) : '—')}
+                  </td>
+                </tr>
+              );
+            })}
+            <tr className="bg-bg/60 font-bold">
+              <td className="px-3 py-2" colSpan={6}>Grand total (KWD)</td>
+              <td className="px-3 py-2 text-right font-mono">{grandTotal.toFixed(3)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex justify-between border-t border-border pt-4 gap-2 flex-wrap">
+        <button
+          onClick={onPrev}
+          className="px-4 py-2 border border-border text-text-secondary rounded-lg font-semibold hover:bg-bg"
+        >
+          ← Back
+        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onSaveDraft()}
+            disabled={saving || !allValid}
+            className="px-4 py-2 border border-border text-text-secondary rounded-lg font-semibold hover:bg-bg disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save draft'}
+          </button>
+          <button
+            onClick={() => onNext()}
+            disabled={saving || !allValid}
+            className="px-5 py-2 bg-accent text-white rounded-lg font-bold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Continue →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Step 4: Review + Submit / Receipt ─────────────────────────────────────────
+
+function Step4Review({
   tender,
   bid,
   technicalDocs,
   commercialDocs,
+  hasRealBoq,
+  boqTemplate,
+  boqLines,
   receipt,
   submitting,
   onPrev,
@@ -447,6 +732,9 @@ function Step3Review({
   bid: Bid;
   technicalDocs: BidDocument[];
   commercialDocs: BidDocument[];
+  hasRealBoq: boolean;
+  boqTemplate: BoqTemplateRow[];
+  boqLines: BoqLineDraft[];
   receipt: SubmitReceipt | null;
   submitting: boolean;
   onPrev: () => void;
@@ -512,7 +800,54 @@ function Step3Review({
       </div>
 
       <ReviewBlock title="Technical Envelope" docs={technicalDocs} />
-      <ReviewBlock title="Commercial Envelope" docs={commercialDocs} />
+      {/* BUG-068: BOQ summary block when the tender uses structured pricing. */}
+      {hasRealBoq && (
+        <div className="border border-border rounded-lg p-4">
+          <p className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">Commercial pricing (BOQ)</p>
+          <table className="w-full text-xs">
+            <thead className="border-b border-border">
+              <tr className="text-left text-text-secondary">
+                <th className="py-1 pr-3">Item</th>
+                <th className="py-1 pr-3">Description</th>
+                <th className="py-1 pr-3 text-right">Qty</th>
+                <th className="py-1 pr-3">Unit</th>
+                <th className="py-1 pr-3 text-right">Unit price</th>
+                <th className="py-1 pr-3 text-right">Line total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {boqTemplate.map((row, i) => {
+                const line = boqLines[i];
+                const notBidding = !line || line.status === 'NOT_BIDDING';
+                const price = Number(line?.unitPrice);
+                const lt = !notBidding && Number.isFinite(price) ? price * row.qty : null;
+                return (
+                  <tr key={row.id} className={notBidding ? 'opacity-60' : ''}>
+                    <td className="py-1 pr-3 font-mono">{row.itemNo}</td>
+                    <td className="py-1 pr-3">{row.description}</td>
+                    <td className="py-1 pr-3 text-right font-mono">{row.qty}</td>
+                    <td className="py-1 pr-3">{row.unit}</td>
+                    <td className="py-1 pr-3 text-right font-mono">{notBidding ? '—' : price.toFixed(3)}</td>
+                    <td className="py-1 pr-3 text-right font-mono">{notBidding ? <em className="text-text-secondary">Not bidding</em> : lt?.toFixed(3)}</td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-bg/40 font-bold">
+                <td className="py-1 pr-3" colSpan={5}>Total (KWD)</td>
+                <td className="py-1 pr-3 text-right font-mono">
+                  {boqLines.reduce((s, l, i) => {
+                    if (l.status !== 'BIDDING') return s;
+                    const p = Number(l.unitPrice);
+                    const q = boqTemplate[i]?.qty ?? 0;
+                    return Number.isFinite(p) ? s + p * q : s;
+                  }, 0).toFixed(3)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      <ReviewBlock title={hasRealBoq ? 'Commercial PDF (optional reference)' : 'Commercial Envelope'} docs={commercialDocs} optional={hasRealBoq} />
 
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex gap-2">
         <span className="material-symbols-outlined text-[18px]">warning</span>
@@ -528,7 +863,11 @@ function Step3Review({
         </button>
         <button
           onClick={onSubmit}
-          disabled={submitting || technicalDocs.length === 0 || commercialDocs.length === 0}
+          disabled={
+            submitting
+            || technicalDocs.length === 0
+            || (!hasRealBoq && commercialDocs.length === 0)
+          }
           className="px-6 py-2 bg-success text-white rounded-lg font-bold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {submitting ? 'Submitting…' : 'Submit Bid'}
@@ -538,12 +877,14 @@ function Step3Review({
   );
 }
 
-function ReviewBlock({ title, docs }: { title: string; docs: BidDocument[] }) {
+function ReviewBlock({ title, docs, optional }: { title: string; docs: BidDocument[]; optional?: boolean }) {
   return (
     <div className="border border-border rounded-lg p-4">
       <p className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">{title}</p>
       {docs.length === 0 ? (
-        <p className="text-sm text-danger italic">No documents — required.</p>
+        optional
+          ? <p className="text-sm text-text-secondary italic">No documents attached (optional).</p>
+          : <p className="text-sm text-danger italic">No documents — required.</p>
       ) : (
         <ul className="text-sm space-y-1">
           {docs.map(d => (

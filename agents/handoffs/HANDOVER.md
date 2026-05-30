@@ -6,6 +6,88 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-31 — BUG-068 shipped: Phase F BOQ unlock + WALK-055 auto-minutes
+
+**Date/time:** 2026-05-31 ~02:15 GMT+3
+**Agent/task:** Owner's proposal `docs/qa/Proposed_Automatic_Bid_Comparison.md` accepted after viability assessment + 4 locked decisions. This implements master plan §D1 (locked 2026-05-27, deferred to Phase F). Theme 3 standby's WALK-055 (auto-minutes) bundled in as a one-liner bonus per the standby plan note.
+
+### Locked decisions (recap)
+
+1. PDF on commercial envelope: OPTIONAL when tender has real BOQ. BOQ is the legal price record.
+2. Legacy tenders: auto-backfill placeholder row so the schema invariant holds; comparison falls back to `commercial_evaluations.totalPrice` on bids that have no BOQ rows.
+3. Vendor partial bids: explicit `NOT_BIDDING` per-row selector. Blanks rejected at submit.
+4. BOQ template editable: Draft / Internal Review / Approved only (same gate as Technical Criteria editor).
+
+### What landed
+
+**DB — Migration 020** (`database/migrations/020_phase_f_boq.sql`):
+- `tender_boq_items` (id, tender_id, item_no, description, qty, unit, sort_order) — UNIQUE(tender_id, item_no), idx by sort.
+- `bid_boq_items` (id, bid_id, tender_boq_item_id, status, unit_price, remarks) — UNIQUE(bid_id, tender_boq_item_id), CHECK status/price consistency.
+- `bid_boq_status` enum: BIDDING | NOT_BIDDING.
+- Auto-backfill: 15/15 existing tenders got the placeholder row.
+
+**Backend — new boq module** (`apps/api/src/modules/boq/`):
+- 4 endpoints: GET/PUT `/tenders/:id/boq` (admin: `tender:edit` + status gate; vendor: read via OptionalVendorOrUserGuard), GET/PUT `/bids/:bidId/boq-items` (vendor own-bid in DRAFT only).
+- `boq.service.ts`: atomic-replace template (validates unique item_no), atomic-replace bid entries (validates coverage = template, validates BIDDING/NOT_BIDDING/price consistency, audit row).
+- Audit events: `BOQ_TEMPLATE_REPLACED` (HIGH), `BID_BOQ_REPLACED` (LOW).
+
+**Backend — aggregator + submit gate**:
+- `comparison.service.ts:commercialComparison` now includes `bidBoqItems` (with template qty), computes `commercialTotal = sum(unit_price × qty)` of BIDDING rows. Falls back to `commercial_evaluations.totalPrice` for legacy bids. Response top-level includes `boqTemplate` (placeholder filtered out); per-vendor block includes `boqLines`.
+- `bids.service.ts:submit` requires every real BOQ row to be covered by the bid (BIDDING+price OR NOT_BIDDING). Commercial envelope PDF check relaxed: required only when no real BOQ template.
+
+**Backend — WALK-055 auto-minutes**:
+- `award.service.ts:confirmAward` now also calls `awardMinutesService.generate` best-effort after notification dispatch. Failures logged but Confirm does NOT roll back; manual Regenerate button on AwardSummaryCard remains as recovery.
+- AwardService constructor gains AwardMinutesService dep (was already provided by AwardModule).
+
+**Admin frontend**:
+- NEW `apps/web-admin/src/components/TenderBoqEditor.tsx` — clone of TenderCriteriaEditor pattern. Columns: Item No (text), Description (text), Qty (number 3dp), Unit (select with EA/M/KG/LS/set/hour/day/L/m²/m³). Hides the placeholder backfill row from the editor; replaces on Save.
+- Mounted on `/tenders/[id]/edit` below the TenderCriteriaEditor. Banner text on `?from=create` updated to cue both editors.
+- `CommercialMatrix.tsx` Itemized view ACTIVATED. Rows = template lines; columns = vendors; cells = line total (currency-formatted) or "Not bidding" italic. Total row at the bottom. Placeholder text from BUG-035 removed.
+- `VendorComparisonCard.tsx` new `BoqBreakdownBlock` subcomponent: when bid has `boqLines` + tender has real `boqTemplate`, renders per-line table with status pill, unit price, line total, grand total. `CommercialTotalBlock` (BUG-053) kept as fallback for legacy tenders.
+- `commercial-comparison/page.tsx` threads `boqTemplate` through to CommercialMatrix and to each VendorComparisonCard in both branches (awarded + non-awarded).
+
+**Vendor frontend**:
+- `apps/web-vendor/src/lib/api.ts` — added `put()` helper.
+- `apps/web-vendor/src/app/(portal)/bids/wizard/[tenderId]/page.tsx` — wizard restructured from 4 steps to 5: Tender → Technical → **Commercial Pricing (BOQ)** → Commercial PDF (optional reference) → Review. New Step2BoqPricing subcomponent. New Step4Review includes BOQ summary table. On Continue from BOQ step, auto-PUTs the entries (validation: BIDDING needs price ≥ 0; NOT_BIDDING clears price). Submit also persists BOQ before flipping to SUBMITTED. For legacy tenders (no real BOQ) the BOQ step shows a brief "no BOQ — proceed" note and the PDF step retains "required" semantics.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on api + web-admin + web-vendor.
+- ✅ Migration 020 applied: `BEGIN / DO / CREATE TABLE×2 / CREATE INDEX×3 / COMMENT×2 / INSERT 0 15 / COMMIT`. Backfill verified: tenders_total=15, with_boq=15.
+- ✅ `docker compose --project-name ctmp build --no-cache api web-admin web-vendor` → all 3 built clean.
+- ✅ `docker compose up -d --force-recreate api web-admin web-vendor` → all healthy.
+- ✅ Endpoint smokes:
+  - PUT BOQ template on PUBLISHED tender → HTTP 400 (status gate working)
+  - PUT BOQ template on DRAFT tender, 3 rows {Network Switch×10 EA, Fiber Cable×500 M, Installation×1 LS} → 200, placeholder replaced
+  - GET BOQ template as vendor1@ → returns 3 rows
+- ✅ Backend Prisma client regenerated (new models accessible).
+
+### Held in standby (Theme 3 — Tender Summary tab)
+
+WALK-053 (unified Tender Summary tab) stays in `C:\Users\Administrator\.claude\plans\for-theme3-i-want-synchronous-dream.md` as the standby plan. Now better positioned because vendors submit per-line data — the Summary tab's "vendor outcomes" section will pull from BOQ when present, giving it richer content than it would have had pre-BUG-068.
+
+### Files modified this segment
+
+- `database/migrations/020_phase_f_boq.sql` (NEW)
+- `apps/api/prisma/schema.prisma` — TenderBoqItem + BidBoqItem models + BidBoqStatus enum + relations on Tender and Bid
+- `apps/api/src/app.module.ts` — register BoqModule
+- `apps/api/src/modules/boq/` (NEW): module + controller + service + 2 DTOs
+- `apps/api/src/modules/comparison/comparison.service.ts` — BOQ aggregation + boqTemplate response
+- `apps/api/src/modules/bids/bids.service.ts` — BOQ coverage gate at submit + relaxed commercial PDF check
+- `apps/api/src/modules/award/award.service.ts` — auto-minutes hook in confirmAward
+- `apps/web-admin/src/components/TenderBoqEditor.tsx` (NEW)
+- `apps/web-admin/src/app/(admin)/tenders/[id]/edit/page.tsx` — mount editor + banner text
+- `apps/web-admin/src/components/comparison/CommercialMatrix.tsx` — Itemized view activated
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — BoqBreakdownBlock + threading
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — boqTemplate state + props threading
+- `apps/web-vendor/src/lib/api.ts` — put() helper
+- `apps/web-vendor/src/app/(portal)/bids/wizard/[tenderId]/page.tsx` — 5-step wizard + BOQ pricing step
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-055 ✅
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-068 Fixed entry
+- `agents/handoffs/HANDOVER.md` — this entry
+
+---
+
 ## 2026-05-31 — BUG-067 shipped: owner verification follow-ups (5 regression items)
 
 **Date/time:** 2026-05-31 ~00:30 GMT+3

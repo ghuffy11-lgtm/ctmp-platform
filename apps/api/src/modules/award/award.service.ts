@@ -6,6 +6,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AwardStorageService } from './award-storage.service';
+import { AwardMinutesService } from './award-minutes.service';
 import { AwardRecommendationDto } from './dto/award-recommendation.dto';
 import { AwardApprovalDto } from './dto/award-approval.dto';
 import { ConfirmAwardDto } from './dto/confirm-award.dto';
@@ -43,6 +44,7 @@ export class AwardService {
     private readonly storage: AwardStorageService,
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService,
+    private readonly awardMinutes: AwardMinutesService,
   ) {}
 
   private static gcPending() {
@@ -326,6 +328,18 @@ export class AwardService {
       } catch (err) {
         this.logger.error(`Notification dispatch on Confirm ${award.id} failed: ${err instanceof Error ? err.message : err}`);
       }
+    }
+
+    // BUG-068 / WALK-055: auto-generate Award Minutes PDF on Confirm so the
+    // owner doesn't have to click again. Best-effort — failures are logged
+    // and the manual "Generate Award Minutes" button on AwardSummaryCard
+    // remains as the recovery path. The AwardMinutesService writes its own
+    // audit row + storage object, and AwardSummaryCard polls
+    // `minutesGeneratedAt` so the link populates automatically.
+    try {
+      await this.awardMinutes.generate(tenderId, userId);
+    } catch (err) {
+      this.logger.error(`Auto-generate minutes on Confirm for tender ${tenderId} failed: ${err instanceof Error ? err.message : err}`);
     }
 
     return award;

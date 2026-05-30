@@ -105,9 +105,39 @@ export class BidsService {
       }
     }
 
-    // Both envelopes must have at least one document.
+    // BUG-068 / Phase F BOQ: when the tender has a real BOQ template (not the
+    // legacy placeholder backfill), the bid must cover every BOQ line with an
+    // explicit BIDDING (with unit_price) or NOT_BIDDING status. The commercial
+    // PDF envelope becomes OPTIONAL per owner decision 2026-05-31 — the BOQ is
+    // the legal price record now. Technical envelope still requires ≥1 doc.
+    const realBoqTemplate = await this.prisma.tenderBoqItem.findMany({
+      where: {
+        tenderId: bid.tenderId,
+        NOT: { itemNo: '0', description: 'Legacy tender — no BOQ defined' },
+      },
+      select: { id: true },
+    });
+    const hasRealBoq = realBoqTemplate.length > 0;
+    if (hasRealBoq) {
+      const submitted = await this.prisma.bidBoqItem.findMany({
+        where: { bidId: bid.id },
+        select: { tenderBoqItemId: true },
+      });
+      const submittedIds = new Set(submitted.map(s => s.tenderBoqItemId));
+      const missing = realBoqTemplate.filter(t => !submittedIds.has(t.id));
+      if (missing.length > 0) {
+        throw new BadRequestException(
+          `Commercial BOQ incomplete: ${missing.length} line(s) have no status. Open the bid wizard and confirm every line (BIDDING with unit price OR NOT_BIDDING).`,
+        );
+      }
+    }
+
+    // Envelope content checks: technical always requires docs; commercial
+    // requires docs only when no real BOQ template (legacy fallback path).
     for (const env of bid.bidEnvelopes) {
-      if (env.bidDocuments.length === 0) {
+      const isTechnical = env.envelopeType === EnvelopeType.TECHNICAL;
+      const requiresDocs = isTechnical || !hasRealBoq;
+      if (requiresDocs && env.bidDocuments.length === 0) {
         throw new BadRequestException(`${env.envelopeType} envelope is empty`);
       }
     }

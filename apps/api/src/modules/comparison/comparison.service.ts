@@ -237,6 +237,13 @@ export class ComparisonService {
         },
         technicalEvaluations: { select: { overallScore: true } },
         commercialEvaluations: { select: { totalPrice: true, currency: true, comments: true, evaluatorUserId: true } },
+        // BUG-068 / Phase F BOQ: when vendor submitted per-line prices, the
+        // commercial total is sum(unit_price * qty) of BIDDING rows. Falls back
+        // to commercialEvaluations.totalPrice (BUG-053 manual entry) for legacy
+        // bids that have no boq rows.
+        bidBoqItems: {
+          include: { tenderBoqItem: { select: { qty: true } } },
+        },
       },
       orderBy: { submittedAt: 'asc' },
     });
@@ -258,9 +265,23 @@ export class ComparisonService {
       const prices = bid.commercialEvaluations
         .map(e => (e.totalPrice != null ? Number(e.totalPrice) : null))
         .filter((v): v is number => typeof v === 'number');
-      const commercialTotal = prices.length > 0
-        ? prices.reduce((s, v) => s + v, 0) / prices.length
+      // BUG-068: BOQ-driven total trumps manual entry. If the vendor submitted
+      // any BIDDING rows, sum unit_price * qty; otherwise fall back to the
+      // average manual entry (BUG-053 path) for legacy / no-BOQ tenders.
+      const biddingLines = bid.bidBoqItems.filter(
+        (i: any) => i.status === 'BIDDING' && i.unitPrice != null,
+      );
+      const boqTotal = biddingLines.length > 0
+        ? biddingLines.reduce(
+            (s: number, i: any) => s + Number(i.unitPrice) * Number(i.tenderBoqItem.qty),
+            0,
+          )
         : null;
+      const commercialTotal = boqTotal != null
+        ? boqTotal
+        : prices.length > 0
+          ? prices.reduce((s, v) => s + v, 0) / prices.length
+          : null;
       const currency =
         bid.commercialEvaluations.find(e => e.currency)?.currency ?? 'KWD';
 
@@ -294,6 +315,16 @@ export class ComparisonService {
         commentsByEvaluator: bid.commercialEvaluations
           .filter(e => e.comments)
           .map(e => ({ evaluatorUserId: e.evaluatorUserId, comments: e.comments ?? '' })),
+        // BUG-068 / Phase F BOQ: per-line breakdown for the Itemized matrix
+        // and the per-vendor card's Line Items block.
+        boqLines: bid.bidBoqItems.map((i: any) => ({
+          tenderBoqItemId: i.tenderBoqItemId,
+          status: i.status,
+          unitPrice: i.unitPrice == null ? null : Number(i.unitPrice),
+          lineTotal: i.status === 'BIDDING' && i.unitPrice != null
+            ? Number(i.unitPrice) * Number(i.tenderBoqItem.qty)
+            : null,
+        })),
       };
     });
 
@@ -317,6 +348,25 @@ export class ComparisonService {
     // per-vendor comparison cards. "Active" = not yet superseded by an amendment.
     const award = await this.activeAwardSummary(tenderId);
 
+    // BUG-068 / Phase F BOQ: surface the template so the Itemized matrix can
+    // render rows = template items, cols = vendors. Filters out the legacy
+    // placeholder row (auto-backfilled by migration 020 for existing tenders)
+    // so the Itemized view doesn't show a fake "no BOQ defined" row.
+    const boqRows = await this.prisma.tenderBoqItem.findMany({
+      where: {
+        tenderId,
+        NOT: { itemNo: '0', description: 'Legacy tender — no BOQ defined' },
+      },
+      orderBy: [{ sortOrder: 'asc' }, { itemNo: 'asc' }],
+    });
+    const boqTemplate = boqRows.map(r => ({
+      id: r.id,
+      itemNo: r.itemNo,
+      description: r.description,
+      qty: Number(r.qty),
+      unit: r.unit,
+    }));
+
     return {
       tender: {
         id: tender.id,
@@ -339,6 +389,7 @@ export class ComparisonService {
       lowestPassBidId,
       vendors,
       award,
+      boqTemplate,
     };
   }
 
