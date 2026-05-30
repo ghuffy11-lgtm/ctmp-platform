@@ -115,8 +115,8 @@ Owner manually changed `engineer@ctmp.local`'s role from **APPROVER → TECHNICA
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
-| WALK-035 | Admin (SYSTEM_ADMIN) must be able to **create new roles by themselves**. Reason: multiple roles are sometimes needed combined as one, or custom variants are required. Admin should be able to define a role + assign permissions to it via the Settings UI, without waiting on a developer to add a migration. | New feature | 🔴 | |
-| WALK-039 | Admin cannot edit role-permission grants through the Settings UI — all the role/permission checkboxes are **disabled** for admin. Admin holds `roles:manage` + `permissions:manage` perms but the UI doesn't let them act on those. Related to WALK-035 (the whole admin-side role/permission management surface is missing or broken). | Critical bug | 🔴 | Workaround for the walkthrough: SQL grants directly against the DB |
+| WALK-035 | Admin (SYSTEM_ADMIN) must be able to **create new roles by themselves**. | New feature | ✅ | Fixed 2026-05-30 (BUG-064). Backend already supported `POST /roles` with `{code, name, description}` (gated by `roles:manage`). Settings page now has a "+ Create Role" button in the header that toggles an inline form (Code mono uppercase + Display name + Description). On submit, POSTs to `/roles`, reloads the list, and auto-selects the new role so the admin can tick perm checkboxes on the right pane. |
+| WALK-039 | Admin cannot edit role-permission grants through the Settings UI — all the role/permission checkboxes are **disabled** for admin. | Critical bug | ✅ | Fixed 2026-05-30 (BUG-064). Root cause: per-checkbox `disabled={selectedRole.isSystem}` AND Save button `disabled={..|| selectedRole.isSystem}` blocked editing on every seeded role (all 8 baseline roles carry `isSystem=true`). Removed both. Admin can now edit grants on system roles too — they hold the `roles:manage` perm, and the backend already accepts the change. |
 
 ## L. Finance — Commercial Comparison (sidebar + perm chain)
 

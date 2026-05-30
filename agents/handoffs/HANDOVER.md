@@ -6,6 +6,35 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-064 shipped: Theme H (Admin role management UI — create + edit)
+
+**Date/time:** 2026-05-30 ~04:30 GMT+3 (continuation after BUG-063)
+**Agent/task:** Theme H per locked sequence. WALK-035/039.
+
+### What landed
+
+- **`apps/web-admin/src/app/(admin)/settings/page.tsx`** —
+  - WALK-039 — removed `disabled={selectedRole.isSystem}` from every per-permission checkbox and from the Save button. All 8 baseline roles carry `isSystem=true`, so the prior gate blocked admin from editing any grants even though they hold `roles:manage`. Backend already accepted the PATCH; the lock was purely cosmetic.
+  - WALK-035 — added `+ Create Role` button in the Settings page header. Toggling shows an inline form (Code mono uppercase, Display name, optional Description). On submit, POSTs to `/roles` (backend route already existed, gated on `roles:manage`). Auto-reloads the role list and pre-selects the new role so admin can immediately tick permission checkboxes on the right pane and click Save. New roles start with zero permissions.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean.
+- ✅ `docker compose --project-name ctmp build --no-cache web-admin` + `up -d --force-recreate web-admin` → container healthy.
+
+### Files modified this segment
+
+- `apps/web-admin/src/app/(admin)/settings/page.tsx` — Create Role inline form, removed isSystem locks
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-064 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-035/039 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Next up (per locked sequence)
+
+Theme J — Shared filter/search component (WALK-056). Last theme. After that, Theme 3 (WALK-053 Tender Summary + WALK-055 flow simplification) is unblocked.
+
+---
+
 ## 2026-05-30 — BUG-063 shipped: Theme E (Vendor portal — Download + View + Inline Clarifications)
 
 **Date/time:** 2026-05-30 ~04:25 GMT+3 (continuation after BUG-062)

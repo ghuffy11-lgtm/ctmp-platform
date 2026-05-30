@@ -129,6 +129,10 @@ function RolesTab() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // WALK-035: minimal create-role form state.
+  const [showCreate, setShowCreate] = useState(false);
+  const [createDraft, setCreateDraft] = useState({ code: '', name: '', description: '' });
+  const [creating, setCreating] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -196,6 +200,36 @@ function RolesTab() {
     }
   }
 
+  // WALK-035: admin-driven role creation. Backend already supports
+  // POST /roles with `{ code, name, description }`. New roles start with
+  // zero permissions and can be configured via the right-pane checkboxes.
+  async function handleCreate() {
+    const code = createDraft.code.trim().toUpperCase();
+    const name = createDraft.name.trim();
+    if (!code || !name) {
+      setError('Role code and name are required.');
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      const created = await post<{ id: string }>(
+        '/roles',
+        { code, name, description: createDraft.description.trim() || null },
+        token,
+      );
+      setShowCreate(false);
+      setCreateDraft({ code: '', name: '', description: '' });
+      await loadAll();
+      if (created?.id) setSelectedRoleId(created.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create role');
+    } finally {
+      setCreating(false);
+    }
+  }
+
   const selectedRole = roles.find(r => r.id === selectedRoleId) ?? null;
   const grouped = permissions.reduce<Record<string, Permission[]>>((acc, p) => {
     const g = p.group ?? 'General';
@@ -208,6 +242,76 @@ function RolesTab() {
   return (
     <div className="grid grid-cols-12 gap-5">
       <div className="col-span-12 lg:col-span-7 bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+        {/* WALK-035: admin-driven role creation. Inline form keeps the
+            workflow on this page rather than a modal. */}
+        <div className="px-5 py-3 border-b border-border flex items-center justify-between gap-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+            Roles & permissions
+          </p>
+          {!showCreate ? (
+            <button
+              onClick={() => { setShowCreate(true); setError(null); }}
+              className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-bold hover:opacity-90"
+            >
+              + Create Role
+            </button>
+          ) : (
+            <button
+              onClick={() => { setShowCreate(false); setCreateDraft({ code: '', name: '', description: '' }); setError(null); }}
+              className="px-3 py-1.5 border border-border rounded-lg text-xs font-semibold text-text-secondary hover:bg-bg"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+        {showCreate && (
+          <div className="px-5 py-4 border-b border-border bg-bg/30 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-secondary mb-1">Code</label>
+                <input
+                  type="text"
+                  value={createDraft.code}
+                  onChange={e => setCreateDraft(d => ({ ...d, code: e.target.value }))}
+                  placeholder="e.g. PROCUREMENT_ASSISTANT"
+                  className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-card font-mono uppercase focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-secondary mb-1">Display name</label>
+                <input
+                  type="text"
+                  value={createDraft.name}
+                  onChange={e => setCreateDraft(d => ({ ...d, name: e.target.value }))}
+                  placeholder="e.g. Procurement Assistant"
+                  className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-card focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-text-secondary mb-1">Description (optional)</label>
+              <input
+                type="text"
+                value={createDraft.description}
+                onChange={e => setCreateDraft(d => ({ ...d, description: e.target.value }))}
+                placeholder="What this role is for"
+                className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-card focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={handleCreate}
+                disabled={creating || !createDraft.code.trim() || !createDraft.name.trim()}
+                className="px-4 py-1.5 bg-accent text-white rounded-lg text-sm font-bold hover:opacity-90 disabled:opacity-40"
+              >
+                {creating ? 'Creating…' : 'Create role'}
+              </button>
+            </div>
+            <p className="text-[11px] text-text-secondary italic">
+              New role starts with zero permissions. Tick the boxes on the right pane after creation and click Save.
+            </p>
+          </div>
+        )}
         <table className="w-full text-sm">
           <thead className="bg-bg border-b border-border">
             <tr>
@@ -278,7 +382,8 @@ function RolesTab() {
                           type="checkbox"
                           checked={rolePerms.has(p.id)}
                           onChange={() => togglePerm(p.id)}
-                          disabled={selectedRole.isSystem}
+                          /* WALK-039: previously disabled when selectedRole.isSystem;
+                             admin must be able to edit grants on system roles too. */
                           className="mt-0.5 w-4 h-4 rounded text-accent border-border focus:ring-1 focus:ring-accent"
                         />
                         <div className="flex-1 min-w-0">
@@ -300,7 +405,7 @@ function RolesTab() {
               </p>
               <button
                 onClick={handleSave}
-                disabled={!dirty || saving || selectedRole.isSystem}
+                disabled={!dirty || saving}
                 className="px-4 py-1.5 bg-accent text-white rounded-lg text-sm font-bold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {saving ? 'Saving…' : 'Save'}
