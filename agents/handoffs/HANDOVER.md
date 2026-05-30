@@ -6,6 +6,50 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-056 shipped: Theme D bundle (tender detail tabs Clarifications + Bids + Audit Trail)
+
+**Date/time:** 2026-05-30 ~03:05 GMT+3
+**Agent/task:** Owner directive: "fix all the issues which we documented in WALKTHROUGH_TRACKER_2026-05-29 file" and "complete all" without further confirmation. Recorded a sequence directive in the tracker (themes prioritised by impact, one BUG-NNN per theme), recovered the two truncated WALK-027 / WALK-028 entries with best-guess inferences (flagged in the cells), then opened Theme D — broken tender detail tabs.
+
+### What landed
+
+**Root cause discovery.** `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` lines 723-740 (pre-fix): the Clarifications / Bids / Audit Trail tabs were literally a single stub block (`{/* Stub tabs */}`) rendering a placeholder card that said "will appear here." Same code path for all three roles — confirms why WALK-009/013/020 (clarifications), WALK-010/014/021 (bids), WALK-011/015/022 (audit) were identical across roles.
+
+**Frontend** — three real tab panel components added inline at the bottom of the file (mirrors the BUG-053 CommercialTotalBlock pattern, keeps the change to one file):
+- `ClarificationsTabPanel` — fetches `GET /tenders/:id/clarifications`. Renders each thread as a card with vendor name (or "Vendor (anonymised)" for redacted entries), question, status pill (green ANSWERED / amber OPEN), inline reply list with author/timestamp/visibility chip (Public vs Private to vendor).
+- `BidsTabPanel` — fetches `GET /tenders/:id/bids?pageSize=100`. Table view: vendor, submitted timestamp, technical envelope `EnvelopePill` (OPENED green / SEALED amber / LOCKED slate / others muted), commercial envelope pill, technical result `TechnicalResultPill` (PASS green / FAIL danger / `—` when pending).
+- `AuditTrailTabPanel` — fetches `GET /tenders/:id/audit-logs?pageSize=100`. Chronological table: when (formatted), event type (mono), actor (display name + role chip; falls back to "system" for system events), entity (type + first 8 chars of id), risk-level pill (HIGH danger / MEDIUM amber / LOW slate).
+- Shared `TabSkeleton` / `TabError` / `TabEmpty` subcomponents replace the old single-stub block for uniform empty/error/loading states.
+
+**Backend perm reshuffle (Migration 018)** — `database/migrations/018_bug056_tender_audit_view_permission.sql`:
+- New permission `tender:audit:view` (narrower than `audit:view`). Granted to SYSTEM_ADMIN, AUDITOR, PROCUREMENT_ADMIN, PROCUREMENT_OFFICER, TECHNICAL_EVALUATOR, APPROVER, COMMERCIAL_EVALUATOR, COMMERCIAL_COMMITTEE_MEMBER (8 roles).
+- `apps/api/src/modules/audit/audit.controller.ts` — the per-tender endpoint `GET /tenders/:tenderId/audit-logs` switched gate from `audit:view` to `tender:audit:view`. System-wide `GET /audit-logs` stays restricted to AUDITOR + SYSTEM_ADMIN.
+- token_version bumped on 9 affected users so stale JWTs without the new perm can't bypass.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` passed on web-admin (also caught a dangling `TAB_STUB_ICONS` const which I removed).
+- ✅ Migration 018 applied: `BEGIN / INSERT 0 1 / INSERT 0 8 / UPDATE 9 / COMMIT`.
+- ✅ `docker compose --project-name ctmp build --no-cache web-admin api` → both built clean.
+- ✅ `docker compose up -d --force-recreate web-admin api` → containers healthy.
+- ✅ Pre-API-fix endpoint test (TDR-2026-0013) as officer/manager/engineer: clarifications=200, bids=200, audit=403 (perm gap surfaced).
+- ✅ Post-API-fix: clarifications=200, bids=200, audit=200 — **9/9 green across 3 endpoints × 3 roles**.
+
+### Files modified this segment
+
+- `database/migrations/018_bug056_tender_audit_view_permission.sql` (NEW)
+- `apps/api/src/modules/audit/audit.controller.ts` — per-tender endpoint perm switch
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — 3 panel components + 3 shared state subcomponents + stub removal
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-056 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-009/010/011/013/014/015/020/021/022 ✅ Fixed; WALK-027/028 recovered with Claude-inferred bodies (flagged in cells); locked owner directive + theme sequence + commit cadence recorded
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Next up (per locked sequence)
+
+Theme F — Technical Evaluation polish (WALK-024/025/026/027/028) — WALK-026 scorecard re-load is critical. After F: A (Dashboard gating), B (Approval Queue), C (Tender Create criteria), G (Tech Comparison polish), I (Committee Opening), E (Vendor portal), H (Admin role mgmt UI), J (Shared filter/search). Theme 3 (WALK-053 + WALK-055) remains held until all of the above land.
+
+---
+
 ## 2026-05-29 — BUG-055 shipped: Theme 2 bundle (Close Tender + picker grouping + evaluator revisit) + BUG-054 patch
 
 **Date/time:** 2026-05-29 ~22:55 GMT+3 (continuation directly after BUG-054)

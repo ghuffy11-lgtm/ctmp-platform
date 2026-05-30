@@ -66,13 +66,6 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'audit', label: 'Audit Trail', icon: <Shield className="w-4 h-4" /> },
 ];
 
-const TAB_STUB_ICONS: Record<TabId, React.ReactNode> = {
-  overview: <Info className="w-12 h-12 text-text-secondary/20" />,
-  clarifications: <MessageSquare className="w-12 h-12 text-text-secondary/20" />,
-  bids: <FileText className="w-12 h-12 text-text-secondary/20" />,
-  audit: <Shield className="w-12 h-12 text-text-secondary/20" />,
-};
-
 const LIFECYCLE_STAGES = [
   { label: 'Draft', key: 'Draft' },
   { label: 'Internal Review', key: 'Internal Review' },
@@ -720,24 +713,325 @@ export default function TenderDetailPage() {
         onAmended={() => { setAmendOpen(false); loadTender(); }}
       />
 
-      {/* Stub tabs */}
-      {tab !== 'overview' && (
-        <div className="bg-card rounded-xl border border-border p-16 text-center">
-          <div className="flex justify-center mb-4">
-            {TAB_STUB_ICONS[tab]}
+      {/* BUG-056 / WALK-009..022: real tab views (previously stubs). */}
+      {tab === 'clarifications' && <ClarificationsTabPanel tenderId={tender.id} />}
+      {tab === 'bids' && <BidsTabPanel tenderId={tender.id} />}
+      {tab === 'audit' && <AuditTrailTabPanel tenderId={tender.id} />}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// BUG-056 — Tender detail tabs. Each panel fetches its own data on mount,
+// renders an empty-state when nothing is there, and a tight list/table view
+// otherwise. All three were stubs before this commit (WALK-009..022).
+// ───────────────────────────────────────────────────────────────────────────
+
+interface ClarificationReply {
+  id: string;
+  reply: string;
+  visibility: 'GENERAL_PUBLIC' | 'PRIVATE_TO_VENDOR';
+  repliedAt: string;
+  repliedByName: string;
+}
+
+interface Clarification {
+  id: string;
+  vendorName: string | null;
+  question: string;
+  status: string;
+  createdAt: string;
+  replies: ClarificationReply[];
+}
+
+function ClarificationsTabPanel({ tenderId }: { tenderId: string }) {
+  const [items, setItems] = useState<Clarification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const token = getAccessToken();
+        const res = await get<{ items: Clarification[] }>(`/tenders/${tenderId}/clarifications`, token);
+        if (!cancelled) setItems(res.items ?? []);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load clarifications');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tenderId]);
+
+  if (loading) return <TabSkeleton icon={<MessageSquare className="w-12 h-12 text-text-secondary/20" />} label="Loading clarifications…" />;
+  if (error) return <TabError icon={<MessageSquare className="w-12 h-12 text-danger/40" />} message={error} />;
+  if (items.length === 0) {
+    return (
+      <TabEmpty
+        icon={<MessageSquare className="w-12 h-12 text-text-secondary/20" />}
+        title="No clarifications yet"
+        body="Vendor questions and procurement replies will appear here once the clarification period opens."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {items.map(c => (
+        <div key={c.id} className="bg-card border border-border rounded-xl p-5">
+          <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+            <div>
+              <p className="text-xs font-semibold text-text-secondary">
+                {c.vendorName ?? 'Vendor (anonymised)'} ·{' '}
+                {new Date(c.createdAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </p>
+              <p className="text-sm text-text-primary mt-1 whitespace-pre-wrap">{c.question}</p>
+            </div>
+            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+              c.status === 'ANSWERED' ? 'bg-success/15 text-success' : 'bg-amber-100 text-amber-800'
+            }`}>
+              {c.status}
+            </span>
           </div>
-          <p className="text-sm font-semibold text-text-primary mb-1">
-            {tab === 'clarifications' && 'Clarification Center'}
-            {tab === 'bids' && 'Submitted Bids'}
-            {tab === 'audit' && 'Audit Trail'}
-          </p>
-          <p className="text-xs text-text-secondary">
-            {tab === 'clarifications' && 'Vendor questions and procurement officer replies will appear here.'}
-            {tab === 'bids' && 'Submitted bid envelopes will appear here after the submission deadline.'}
-            {tab === 'audit' && 'A tamper-proof log of all actions taken on this tender.'}
-          </p>
+          {c.replies.length > 0 && (
+            <div className="border-t border-border pt-3 space-y-2">
+              {c.replies.map(r => (
+                <div key={r.id} className="bg-bg/50 border border-border rounded-lg p-3">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="text-[11px] font-semibold text-text-secondary">
+                      {r.repliedByName} · {new Date(r.repliedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                      r.visibility === 'GENERAL_PUBLIC' ? 'bg-success/10 text-success' : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {r.visibility === 'GENERAL_PUBLIC' ? 'Public' : 'Private to vendor'}
+                    </span>
+                  </div>
+                  <p className="text-sm text-text-primary whitespace-pre-wrap">{r.reply}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      ))}
+    </div>
+  );
+}
+
+interface BidRow {
+  id: string;
+  vendorCompany: string;
+  submittedAt: string | null;
+  technicalEnvelopeStatus: string;
+  commercialEnvelopeStatus: string;
+  technicalResult?: string;
+}
+
+function BidsTabPanel({ tenderId }: { tenderId: string }) {
+  const [items, setItems] = useState<BidRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const token = getAccessToken();
+        const res = await get<{ items: BidRow[] }>(`/tenders/${tenderId}/bids?pageSize=100`, token);
+        if (!cancelled) setItems(res.items ?? []);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load bids');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tenderId]);
+
+  if (loading) return <TabSkeleton icon={<FileText className="w-12 h-12 text-text-secondary/20" />} label="Loading bids…" />;
+  if (error) return <TabError icon={<FileText className="w-12 h-12 text-danger/40" />} message={error} />;
+  if (items.length === 0) {
+    return (
+      <TabEmpty
+        icon={<FileText className="w-12 h-12 text-text-secondary/20" />}
+        title="No bids submitted yet"
+        body="Submitted bids will appear here once vendors have submitted their envelopes."
+      />
+    );
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-bg/50 border-b border-border">
+          <tr className="text-left text-[11px] uppercase tracking-wider text-text-secondary">
+            <th className="px-4 py-3 font-bold">Vendor</th>
+            <th className="px-4 py-3 font-bold">Submitted</th>
+            <th className="px-4 py-3 font-bold">Technical envelope</th>
+            <th className="px-4 py-3 font-bold">Commercial envelope</th>
+            <th className="px-4 py-3 font-bold">Technical result</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map(b => (
+            <tr key={b.id} className="border-b border-border last:border-0">
+              <td className="px-4 py-3 font-semibold text-text-primary">{b.vendorCompany}</td>
+              <td className="px-4 py-3 text-text-secondary text-xs">
+                {b.submittedAt
+                  ? new Date(b.submittedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                  : '—'}
+              </td>
+              <td className="px-4 py-3"><EnvelopePill status={b.technicalEnvelopeStatus} /></td>
+              <td className="px-4 py-3"><EnvelopePill status={b.commercialEnvelopeStatus} /></td>
+              <td className="px-4 py-3"><TechnicalResultPill result={b.technicalResult} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function EnvelopePill({ status }: { status: string }) {
+  const tone =
+    status === 'OPENED' ? 'bg-success/15 text-success' :
+    status === 'SEALED' || status === 'SUBMITTED' ? 'bg-amber-100 text-amber-800' :
+    status === 'LOCKED' ? 'bg-slate-200 text-slate-800' :
+    'bg-slate-100 text-slate-600';
+  return <span className={`inline-block text-[10px] font-bold uppercase px-2 py-0.5 rounded ${tone}`}>{status}</span>;
+}
+
+function TechnicalResultPill({ result }: { result?: string }) {
+  if (!result) return <span className="text-xs text-text-secondary">—</span>;
+  const tone = result === 'PASS' ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger';
+  return <span className={`inline-block text-[10px] font-bold uppercase px-2 py-0.5 rounded ${tone}`}>{result}</span>;
+}
+
+interface AuditRow {
+  id: string;
+  eventType: string;
+  actorName?: string;
+  actorRole?: string;
+  entityType: string;
+  entityId?: string;
+  timestamp: string;
+  riskLevel?: string;
+}
+
+function AuditTrailTabPanel({ tenderId }: { tenderId: string }) {
+  const [items, setItems] = useState<AuditRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const token = getAccessToken();
+        const res = await get<{ items: AuditRow[] }>(`/tenders/${tenderId}/audit-logs?pageSize=100`, token);
+        if (!cancelled) setItems(res.items ?? []);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load audit log');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tenderId]);
+
+  if (loading) return <TabSkeleton icon={<Shield className="w-12 h-12 text-text-secondary/20" />} label="Loading audit trail…" />;
+  if (error) return <TabError icon={<Shield className="w-12 h-12 text-danger/40" />} message={error} />;
+  if (items.length === 0) {
+    return (
+      <TabEmpty
+        icon={<Shield className="w-12 h-12 text-text-secondary/20" />}
+        title="No audit events yet"
+        body="A tamper-proof log of all actions taken on this tender will appear here as activity happens."
+      />
+    );
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-bg/50 border-b border-border">
+          <tr className="text-left text-[11px] uppercase tracking-wider text-text-secondary">
+            <th className="px-4 py-3 font-bold">When</th>
+            <th className="px-4 py-3 font-bold">Event</th>
+            <th className="px-4 py-3 font-bold">Actor</th>
+            <th className="px-4 py-3 font-bold">Entity</th>
+            <th className="px-4 py-3 font-bold">Risk</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map(a => (
+            <tr key={a.id} className="border-b border-border last:border-0">
+              <td className="px-4 py-3 text-text-secondary text-xs whitespace-nowrap">
+                {new Date(a.timestamp).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </td>
+              <td className="px-4 py-3 font-mono text-xs text-text-primary">{a.eventType}</td>
+              <td className="px-4 py-3 text-text-primary">
+                {a.actorName ?? <span className="text-text-secondary">system</span>}
+                {a.actorRole && <span className="ml-1 text-[10px] text-text-secondary">({a.actorRole})</span>}
+              </td>
+              <td className="px-4 py-3 text-text-secondary text-xs">
+                {a.entityType}
+                {a.entityId && <span className="ml-1 font-mono opacity-60">{a.entityId.slice(0, 8)}</span>}
+              </td>
+              <td className="px-4 py-3">
+                {a.riskLevel ? (
+                  <span className={`inline-block text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                    a.riskLevel === 'HIGH' ? 'bg-danger/15 text-danger' :
+                    a.riskLevel === 'MEDIUM' ? 'bg-amber-100 text-amber-800' :
+                    'bg-slate-100 text-slate-600'
+                  }`}>
+                    {a.riskLevel}
+                  </span>
+                ) : <span className="text-xs text-text-secondary">—</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TabSkeleton({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div className="bg-card rounded-xl border border-border p-16 text-center">
+      <div className="flex justify-center mb-4">{icon}</div>
+      <p className="text-xs text-text-secondary flex items-center justify-center gap-2">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" /> {label}
+      </p>
+    </div>
+  );
+}
+
+function TabError({ icon, message }: { icon: React.ReactNode; message: string }) {
+  return (
+    <div className="bg-card rounded-xl border border-danger/30 p-16 text-center">
+      <div className="flex justify-center mb-4">{icon}</div>
+      <p className="text-sm font-semibold text-danger mb-1">Failed to load</p>
+      <p className="text-xs text-text-secondary">{message}</p>
+    </div>
+  );
+}
+
+function TabEmpty({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+  return (
+    <div className="bg-card rounded-xl border border-border p-16 text-center">
+      <div className="flex justify-center mb-4">{icon}</div>
+      <p className="text-sm font-semibold text-text-primary mb-1">{title}</p>
+      <p className="text-xs text-text-secondary max-w-md mx-auto">{body}</p>
     </div>
   );
 }

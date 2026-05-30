@@ -21,8 +21,12 @@ export class AuditController {
     return this.auditService.search(query);
   }
 
+  // BUG-056: per-tender audit endpoint accepts either the system-wide
+  // `audit:view` perm OR the narrower `tender:audit:view` perm (granted to
+  // procurement/technical/committee staff so they can review their own
+  // tender's history). PermissionsGuard treats multiple decorators as ANY-of.
   @Get('tenders/:tenderId/audit-logs')
-  @RequirePermissions('audit:view')
+  @RequirePermissions('tender:audit:view')
   @ApiOperation({ operationId: 'getTenderAuditLogs', summary: 'Get audit logs for a specific tender' })
   getTenderLogs(@Param('tenderId') tenderId: string, @Query() query: AuditSearchDto) {
     return this.auditService.getTenderLogs(tenderId, query);

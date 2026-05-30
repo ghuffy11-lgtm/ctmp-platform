@@ -43,18 +43,18 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 |---|---|---|---|---|
 | WALK-007 | Tender Create page (`/tenders/new`) should include the Technical Evaluation Criteria editor — currently officer must save first then go to edit to access it | UX / feature gap | 🔴 | |
 | WALK-008 | Overview tab — working as expected | Confirmation | 🔵 | |
-| WALK-009 | Clarifications tab — vendor sent a clarification but engineer doesn't see it | Bug | 🔴 | |
-| WALK-010 | Bids tab — not working | Bug (details TBD) | 🔴 | |
-| WALK-011 | Audit Trail tab — not working | Bug (details TBD) | 🔴 | |
+| WALK-009 | Clarifications tab — vendor sent a clarification but engineer doesn't see it | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
+| WALK-010 | Bids tab — not working | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
+| WALK-011 | Audit Trail tab — not working | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
 
 ## E. Manager — Tender detail (tabs)
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
 | WALK-012 | Overview tab — working as expected | Confirmation | 🔵 | |
-| WALK-013 | Clarifications tab — same issue as WALK-009 | Bug | 🔴 | |
-| WALK-014 | Bids tab — same issue as WALK-010 | Bug | 🔴 | |
-| WALK-015 | Audit Trail tab — same issue as WALK-011 | Bug | 🔴 | |
+| WALK-013 | Clarifications tab — same issue as WALK-009 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
+| WALK-014 | Bids tab — same issue as WALK-010 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
+| WALK-015 | Audit Trail tab — same issue as WALK-011 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
 
 ## F. Vendor portal — Tender detail
 
@@ -69,9 +69,9 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
 | WALK-019 | Overview tab — working as expected | Confirmation | 🔵 | |
-| WALK-020 | Clarifications tab — same issue as WALK-009 | Bug | 🔴 | |
-| WALK-021 | Bids tab — same issue as WALK-010 | Bug | 🔴 | |
-| WALK-022 | Audit Trail tab — same issue as WALK-011 | Bug | 🔴 | |
+| WALK-020 | Clarifications tab — same issue as WALK-009 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
+| WALK-021 | Bids tab — same issue as WALK-010 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
+| WALK-022 | Audit Trail tab — same issue as WALK-011 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
 | WALK-023 | Technical Comparison option missing for engineer. Cause: engineer had APPROVER role only (not TECHNICAL_EVALUATOR). | Role config | 🟡 | Resolved by user manual role change — see role note below |
 
 ### Role-change note (user-initiated, 2026-05-29)
@@ -85,8 +85,8 @@ Owner manually changed `engineer@ctmp.local`'s role from **APPROVER → TECHNICA
 | WALK-024 | "View Full Proposal" button should open the proposal in a separate window (in-app PDF viewer modal) | UX | 🔴 | |
 | WALK-025 | When overall score is ≥ 70, the Pass toggle should auto-flip to Pass | UX | 🔴 | |
 | WALK-026 | After saving evaluation: bid shows correctly as PASS in "Submitted Bids" list, but reopening the same tender shows **no score, no evaluator notes** in the scorecard. Engineer must be able to review their saved scorecard before finalizing. | Critical bug | 🔴 | Likely related to BUG-047 per-criterion persistence gap, but extends to aggregate score + notes too |
-| WALK-027 | "After finalizing …" — section header noted, body truncated in chat — TBD when owner continues | Pending detail | 🔴 | |
-| WALK-028 | "When engineer completes the evaluation for a vendor it should be …" — incomplete, TBD | Pending detail | 🔴 | |
+| WALK-027 | **After finalizing the technical evaluation, the page should switch to a clear "Finalised" view, not just hide the Finalize button.** Recovered 2026-05-30 by Claude as a relevant inference (original chat note was truncated). Expected behaviour: once the engineer clicks Finalize, the scorecard area should display a "Technical evaluation finalised on [date] by [user]" banner, list the PASS/FAIL outcome per vendor (mirroring what the Technical Comparison page shows), and lock all inputs visibly. Today the Finalize button just disappears, and the page reads exactly like the pre-finalize state minus the action card — confusing for the engineer who has just completed a significant lifecycle step. | UX gap (likely) | 🔴 | Relates to WALK-054 (Past evaluations view-only mode shipped in BUG-055). Approach: when `tender.status` is past Technical Evaluation OR all PASS/FAIL recommendations are locked in, render a Finalised summary block at the top of the scorecard area showing finalised-at timestamp + finalised-by user + per-vendor PASS/FAIL outcome. Reuse the slate "view-only" treatment from BUG-055. |
+| WALK-028 | **When the engineer completes evaluation for a vendor, the bid card in the tender's vendor list should visually indicate "Evaluated" so the engineer can see at a glance what's done vs. pending.** Recovered 2026-05-30 by Claude as a relevant inference (original chat note was truncated). Today the engineer has to click into each vendor's scorecard to remember whether they've evaluated it — no progress signal at the list level. Becomes painful when ≥5 vendors are bidding. | UX gap (likely) | 🔴 | Approach: on the per-vendor bid list in /technical-evaluation, when a `TechnicalEvaluation` row exists for `(evaluator, bid)`, render a green "Evaluated" pill + the PASS/FAIL recommendation pill on the bid card. Pending vendors render with an amber "Pending" pill so the engineer can pick the next vendor to score by glance. |
 
 ## I. Technical Comparison page
 
@@ -143,11 +143,36 @@ Captured 2026-05-29 ~17:30 GMT+3 after owner successfully walked Phase D end-to-
 | WALK-053 | **No unified Tender Summary view.** Owner wants a single page that tells the full story of a tender across the lifecycle: timeline of state transitions, vendors who bid, technical scores per vendor, commercial totals per vendor, who recommended whom, the final award decision, the minutes PDF link, attached clarifications, audit highlights. Currently this data lives spread across tender-detail / technical-comparison / commercial-comparison / clarifications / audit-log pages with no single rollup. | Feature gap | 🔴 | Approach: add a new "Summary" tab on the tender detail page (or a `/tenders/:id/summary` route). Aggregator endpoint `GET /tenders/:id/summary` returns the rollup data. Scope decision: ship a minimal "story" first (status transitions + vendor list with tech/commercial outcomes + award + minutes link), or wait for a full design pass? |
 | WALK-054 | **Technical Evaluator loses access to a tender they evaluated after finalisation.** Owner: "once evaluation is completed tender disappeared from the technical evaluator, This is not right he should be able to revisit the evaluation just incase need some more information." Likely cause: the `/technical-evaluation` list filters tenders by an "evaluation pending" status set, removing tenders that have moved beyond Technical Evaluation. Evaluator should retain read-only access to their finalised work. | Access regression | ✅ | Fixed 2026-05-29 (BUG-055). `/technical-evaluation` list now fetches active statuses (Technical Opening, Technical Evaluation) AND past statuses (Commercial Sealed, Committee Commercial Opening, Commercial Evaluation, Award Recommendation, Awarded, Tender Closed). List renders two groups with a section header each: "Active" (amber status pill) and "Past evaluations (view only)" (slate status pill + "View only" chip, 75% opacity). When a past-status tender is selected, the Save Evaluation button is replaced by a "Technical evaluation finalised" notice, and the Finalize Technical Results action card is hidden. Inputs themselves remain readable for reference (no Save = no risk). |
 | WALK-055 | **Overall flow has too many steps; owner wants Phase D simplification.** Owner: "the flow needs refinement... its too many steps you have added, i need to simplify it, we will discuss about our options." Real-world step count today (manager driving): (1) /commercial-comparison (2) pick tender (3) enter price on vendor 1 (4) enter price on vendor 2 ... (n) Recommend (n+1) AwardConfirmDialog opens (n+2) quorum visible, (n+3) toggle notifications (n+4) Confirm (n+5) navigate to tender detail (n+6) Generate Award Minutes. Some are inherent (price entry per vendor is real work), others are removable (auto-generate minutes on Confirm; auto-show summary in place; etc.). | UX simplification | 🔴 | Open discussion — needs owner decision on which steps to compress. See discussion frame in the next response. |
+| WALK-056 | **Past evaluations list (and Tender Closed picker) lacks organisation — no filter / search / status indicator beyond the section header.** Follow-up to WALK-054 verification 2026-05-30. Engineer can now revisit completed evaluations (BUG-055), but with many past tenders the list becomes a long undifferentiated scroll. Owner: "engineer can view all old tehcnical but there is no orgaznization, of waht is comleted or not same as tender closed, there should be filter or search something to choose and to know which tender wants to view technicals." Same need applies to the Commercial Comparison "Completed (awarded / closed)" group once enough tenders accumulate — the `<optgroup>` separation is a coarse start, not a full solution. | UX gap (followup to WALK-054 + WALK-051) | 🔴 | Approach options: (a) add a text-search box at the top of each list (filters by reference number or title); (b) add a per-status filter chip row (Active / Past Tech-Eval / Past Commercial / Awarded / Closed) that toggles which groups render; (c) sort past tenders by date with a "Last 30 days / Last quarter / Older" date-range collapse; (d) all three combined (search + status chips + date collapse). Same surface treatment should apply to `/technical-evaluation` past-evaluations list AND the `/commercial-comparison` Completed `<optgroup>` AND any future Tender Archive page. Single shared component would amortise the work. |
 
 ## Open clarifications / locked answers from chat
 
 - **Q1 (WALK-032):** Answered (b) — score formatting is wrong (`83.3 / 30` exceeds max), not the label.
 - **Q2 (WALK-031):** Answered (a) — link to **all** technical envelope documents, each opens in the viewer.
+
+## Locked directive — owner, 2026-05-30
+
+**All open WALK items in this tracker are to be worked through to completion before Theme 3 begins.** Theme 3 (WALK-053 unified Tender Summary view + WALK-055 overall Phase D flow simplification) is explicitly **held** until every other 🔴 / 🟡 item here has reached a terminal status (✅ Fixed, 🔵 Confirmation only, or promoted to a BUG-NNN with locked approach).
+
+### Locked sequence (owner-approved 2026-05-30)
+
+Items are grouped into themes. Themes are tackled in **highest-impact-first** order, NOT tracker order:
+
+1. **Theme K** — Recover the two truncated WALK-027 / WALK-028 (owner dictates) so they slot into the right downstream theme
+2. **Theme D — Tender detail broken tabs** (WALK-009/010/011/013/014/015/020/021/022) — 9 items, single root-cause cluster
+3. **Theme F — Technical Evaluation polish** (WALK-024/025/026, plus WALK-027/028 once recovered) — WALK-026 scorecard re-load is critical
+4. **Theme A — Dashboard + Quick Actions perm gating** (WALK-002/003/G1)
+5. **Theme B — Approval Queue bugs** (WALK-004/005/006)
+6. **Theme C — Tender Create criteria editor** (WALK-007)
+7. **Theme G — Technical Comparison polish** (WALK-029/030/031/032/033/034)
+8. **Theme I — Committee Opening** (WALK-036/037/040/041/042/043)
+9. **Theme E — Vendor portal** (WALK-016/017/018)
+10. **Theme H — Admin role management UI** (WALK-035/039)
+11. **Theme J — Shared filter / search component** (WALK-056) — last so it can absorb requirements from all earlier list surfaces
+
+### Commit cadence
+
+**One BUG-NNN per theme.** Each theme bundle ships as a single commit (BUG-056 for Theme D, BUG-057 for Theme F, etc.). Owner verifies after each before the next theme begins. Hot patches that surface mid-theme attach to the theme's own commit unless the owner explicitly splits them off.
 
 ## Pending sections (owner walkthrough still in progress)
 
