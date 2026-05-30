@@ -53,16 +53,22 @@ export class TendersController {
     return this.tendersService.update(id, dto);
   }
 
+  // WALK-016/017 / BUG-067: vendor portal needs to view + download RFQ docs
+  // on tenders they can already see (per BUG-015 visibility rules). Switched
+  // from JwtAuthGuard + tender:view to OptionalVendorOrUserGuard; service
+  // does role-aware access control (internal users still need tender:view via
+  // the dept-scoped findOne; vendors get visibility-rule check).
+  @Public()
+  @UseGuards(OptionalVendorOrUserGuard)
   @Get(':id/documents/:documentId')
-  @RequirePermissions('tender:view')
-  @ApiOperation({ operationId: 'downloadTenderDocument', summary: 'Download tender document' })
+  @ApiOperation({ operationId: 'downloadTenderDocument', summary: 'Download tender document (admin or vendor on visible tender)' })
   async downloadDocument(
     @Param('id') id: string,
     @Param('documentId') documentId: string,
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: any,
     @Res() res: Response,
   ) {
-    const result = await this.tendersService.streamDocument(id, documentId, userId);
+    const result = await this.tendersService.streamDocument(id, documentId, user);
     res.setHeader('Content-Type', result.mimeType);
     res.setHeader('Content-Length', String(result.fileSize ?? 0));
     res.setHeader('Content-Disposition', `attachment; filename="${result.filename.replace(/"/g, '')}"`);

@@ -47,7 +47,7 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
-| WALK-001 | Engineer's tender list shows only their department | Confirmation of BUG-050 | 🔵 | Working as designed |
+| WALK-001 | Engineer's tender list shows only their department | Confirmation of BUG-050 | ✅ | Working as designed |
 | WALK-002 | Dashboard still shows "Quick Actions" panel for engineer — should be removed | UI gating gap | ✅ | Fixed 2026-05-30 (BUG-058) — see WALK-G1 |
 | WALK-003 | Engineer should only **view** the Dashboard (no actionable widgets) | UI gating gap | ✅ | Fixed 2026-05-30 (BUG-058) — see WALK-G1 |
 
@@ -70,8 +70,8 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
 | WALK-007 | Tender Create page (`/tenders/new`) should include the Technical Evaluation Criteria editor — currently officer must save first then go to edit to access it | UX / feature gap | ✅ | Fixed 2026-05-30 (BUG-060). Post-create now routes to `/tenders/:id/edit?from=create` instead of `/tenders/:id`. The edit page hosts `<TenderCriteriaEditor>` (BUG-044) and now shows a blue cue banner ("Tender created — next: set the Technical Evaluation Criteria") when the `?from=create` flag is present. Officer flow becomes: fill Create form → click Save → arrive on edit with banner highlighting criteria as the next step → set weights/criteria → Save → navigate to detail. The editor stays available indefinitely for revisions until Submit-for-Approval. Mounting the editor literally inside Create was rejected because the editor requires an existing tender id for its PUT — the redirect approach reuses BUG-044 with zero refactor. |
-| WALK-008 | Overview tab — working as expected | Confirmation | 🔵 | |
-| WALK-009 | Clarifications tab — vendor sent a clarification but engineer doesn't see it | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
+| WALK-008 | Overview tab — Est. Budget showed `$` instead of KWD | Bug | ✅ | Fixed 2026-05-31 (BUG-067). `tenders/[id]/page.tsx` formatter switched from `en-US`+`USD` to `en-GB`+`KWD`. |
+| WALK-009 | Clarifications tab — engineer needs inline reply in the tender (not a navigation away to /clarifications) | Bug | ✅ | Fixed 2026-05-31 (BUG-067). New `ClarificationReplyForm` subcomponent embedded per thread in `ClarificationsTabPanel`, gated on `clarification:reply` perm, with public/private visibility toggle. POSTs to existing `/clarifications/:id/reply`. |
 | WALK-010 | Bids tab — not working | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
 | WALK-011 | Audit Trail tab — not working | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
 
@@ -79,8 +79,8 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
-| WALK-012 | Overview tab — working as expected | Confirmation | 🔵 | |
-| WALK-013 | Clarifications tab — same issue as WALK-009 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
+| WALK-012 | Overview tab — Est. Budget showed `$` instead of KWD (same as WALK-008) | Bug | ✅ | Fixed 2026-05-31 (BUG-067) — see WALK-008 |
+| WALK-013 | Clarifications tab — same inline-reply gap as WALK-009 | Bug | ✅ | Fixed 2026-05-31 (BUG-067) — see WALK-009 |
 | WALK-014 | Bids tab — same issue as WALK-010 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
 | WALK-015 | Audit Trail tab — same issue as WALK-011 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
 
@@ -88,19 +88,19 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
-| WALK-016 | Download Tender document is not working | Bug | ✅ | Fixed 2026-05-30 (BUG-063). Vendor tender detail document rows had no onClick handler. Now wired to a `handleDownloadDoc` that fetches the streaming endpoint with Bearer Authorization, blobs it, and triggers an anchor-tag download. Same plumbing also wires the previously-stub "Download All Documents" button at the bottom of the aside (loops through `tender.documents`). |
-| WALK-017 | Need a "View" option that opens the document in the in-app PDF viewer | Bug / UX | ✅ | Fixed 2026-05-30 (BUG-063). Each PDF document row now also renders a **View** button (Eye icon) that fetches the same blob and opens it in a new tab via `window.open(blobUrl)`. Browser-native PDF viewer handles display (vendor portal does not yet have a dedicated modal viewer like web-admin's BUG-037, and matching that scope was out of scope for this theme). |
+| WALK-016 | Download Tender document is not working — vendor got 401 | Bug | ✅ | Fixed 2026-05-31 (BUG-067). Tender doc endpoint was admin-only (`tender:view` perm); vendor JWT 401'd. Endpoint now uses `@Public() + @UseGuards(OptionalVendorOrUserGuard)`; `streamDocument` runs `findOne(tenderId, user)` first for unified access (BUG-015 vendor visibility OR BUG-050/062 internal dept-scope). Audit log split — vendor caller → `actorVendorUserId`. Also fixed `/data/tender-documents` missing docker volume mount (uploaded files were wiped on every container recreate). Verified vendor download → HTTP 200. |
+| WALK-017 | Need a "View" option that opens the document — vendor got 401 | Bug / UX | ✅ | Fixed 2026-05-31 (BUG-067) — same root causes as WALK-016. View button uses the same endpoint via blob+`window.open`. |
 | WALK-018 | Clarifications should live **inside the tender detail page**, not as a separate top-level menu. Vendor should view tender info + click clarification for the same tender they're on. | Feature / restructure | ✅ | Fixed 2026-05-30 (BUG-063). New `ClarificationsSection` component embedded directly in the tender detail page (under the documents block). Lists existing clarifications (with public/private chip per reply) and offers an inline "Ask a question" textarea + Send button when the tender is in `Published` or `Clarification Period`. The standalone `/clarifications` nav menu remains for cross-tender browsing — owner can deprecate it later if desired. |
 
 ## G. Engineer — Tender detail (tabs)
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
-| WALK-019 | Overview tab — working as expected | Confirmation | 🔵 | |
-| WALK-020 | Clarifications tab — same issue as WALK-009 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
+| WALK-019 | Overview tab — Est. Budget showed `$` instead of KWD (same as WALK-008) | Bug | ✅ | Fixed 2026-05-31 (BUG-067) — see WALK-008 |
+| WALK-020 | Clarifications tab — same inline-reply gap as WALK-009 | Bug | ✅ | Fixed 2026-05-31 (BUG-067) — see WALK-009 |
 | WALK-021 | Bids tab — same issue as WALK-010 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
 | WALK-022 | Audit Trail tab — same issue as WALK-011 | Bug | ✅ | Fixed 2026-05-30 (BUG-056) — see notes below |
-| WALK-023 | Technical Comparison option missing for engineer. Cause: engineer had APPROVER role only (not TECHNICAL_EVALUATOR). | Role config | 🟡 | Resolved by user manual role change — see role note below |
+| WALK-023 | Technical Comparison option missing for engineer. Cause: engineer had APPROVER role only (not TECHNICAL_EVALUATOR). Owner requested both roles stacked. | Role config | ✅ | Fixed 2026-05-31 (BUG-067). Re-added APPROVER to engineer@ via SQL `INSERT INTO user_roles ... ON CONFLICT DO NOTHING` + token_version bump. Engineer now has TECHNICAL_EVALUATOR + APPROVER (matches what the seed script always intended; DB had drifted after the 2026-05-29 manual swap). |
 
 ### Role-change note (user-initiated, 2026-05-29)
 
@@ -143,7 +143,7 @@ Owner manually changed `engineer@ctmp.local`'s role from **APPROVER → TECHNICA
 
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
-| WALK-035 | Admin (SYSTEM_ADMIN) must be able to **create new roles by themselves**. | New feature | ✅ | Fixed 2026-05-30 (BUG-064). Backend already supported `POST /roles` with `{code, name, description}` (gated by `roles:manage`). Settings page now has a "+ Create Role" button in the header that toggles an inline form (Code mono uppercase + Display name + Description). On submit, POSTs to `/roles`, reloads the list, and auto-selects the new role so the admin can tick perm checkboxes on the right pane. |
+| WALK-035 | Admin (SYSTEM_ADMIN) must be able to **create new roles by themselves** AND edit grants on system roles. | New feature + bug | ✅ | Fixed 2026-05-31 (BUG-067). Both root causes were in the backend (BUG-064's frontend was built on top of stubs/blocks). (a) `RolesService.create` was a literal `throw new Error('Not implemented')`; implemented properly with input validation (uppercase code regex, unique check), audit log `ROLE_CREATED` at HIGH risk, `isSystem=false` for admin-created roles. (b) `RolesService.setPermissions` had `if (role.isSystem) throw new ForbiddenException(...)` blocking edits on every seeded role; removed — admin holding `roles:manage` can now edit any role's grants. `findAll` serializer also extended to include `code`. Verified: POST `/roles` with `{code:"WALKTHROUGH_TEST_ROLE",...}` → 200. PATCH TECHNICAL_EVALUATOR perms → 200. |
 | WALK-039 | Admin cannot edit role-permission grants through the Settings UI — all the role/permission checkboxes are **disabled** for admin. | Critical bug | ✅ | Fixed 2026-05-30 (BUG-064). Root cause: per-checkbox `disabled={selectedRole.isSystem}` AND Save button `disabled={..|| selectedRole.isSystem}` blocked editing on every seeded role (all 8 baseline roles carry `isSystem=true`). Removed both. Admin can now edit grants on system roles too — they hold the `roles:manage` perm, and the backend already accepts the change. |
 
 ## L. Finance — Commercial Comparison (sidebar + perm chain)
@@ -178,6 +178,16 @@ Captured 2026-05-29 ~17:30 GMT+3 after owner successfully walked Phase D end-to-
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
 | WALK-057 | **Tender detail page — Bids stat tile (next to Days Left) shows 00 instead of the real bid count.** Owner 2026-05-30: "bids numbers are not showing in tender beside the countdown before it was showing now its not." Investigation: `tenders.service.ts:serializeDetail` never populated `bidCount`; the field has been undefined on `findOne` since the BUG-013 serializer sweep (frontend `tender.bidCount ?? 0` rendered as `00`). Two bids existed on TDR-2026-0013 (verified via DB) — none of them surfaced on the detail page tile. | Bug | ✅ | Fixed 2026-05-30 (BUG-066). `findOne` now includes Prisma `_count: { select: { bids: true } }`. `serializeDetail` returns `bidCount: t._count?.bids ?? 0`. Fresh-create + update paths fall back to 0 (no bids attach during those flows; detail page reloads via `findOne` after). Verified end-to-end on TDR-2026-0013: `bidCount: 2` returned by the detail endpoint. |
+
+## Owner verification follow-ups (BUG-067 — 2026-05-31)
+
+Owner re-walked the staging deploy after the documentation pass and surfaced five regression items, all addressed in BUG-067 below. The original WALK rows for these items have been flipped back to ✅ with their resolution notes updated.
+
+- **WALK-008/012/019 — Est. Budget showed `$` instead of KWD.** Fixed by switching the formatter on the Overview tab from `en-US`+`USD` to `en-GB`+`KWD`. Single source of the `$` was `tenders/[id]/page.tsx` line 518; no other places used USD.
+- **WALK-009/013/020 — Engineer/manager/officer could see clarifications in the tab but couldn't reply without leaving the tender.** Fixed by adding a new `ClarificationReplyForm` subcomponent inside `ClarificationsTabPanel` (gated on `clarification:reply` perm), with public/private visibility toggle. POSTs to the existing `/clarifications/:id/reply` endpoint; on success the panel re-fetches.
+- **WALK-016/017 — Vendor portal download/view 401.** Three layered fixes: (1) tender doc endpoint switched from `@RequirePermissions('tender:view')` (admin-only) to `@Public() + @UseGuards(OptionalVendorOrUserGuard)`; (2) `streamDocument` now takes a user object and runs `findOne(tenderId, user)` first to apply unified access control (BUG-015 vendor visibility OR BUG-050/062 internal dept-scope); (3) audit log split — vendor caller goes to `actorVendorUserId` instead of `actorUserId` to avoid the `audit_logs_actor_user_id_fkey` FK violation. (4) Also discovered + fixed: `/data/tender-documents` had no docker volume mount, so uploaded tender docs were wiped on every container recreate — added `tender_storage` volume in `docker-compose.yml`. Verified vendor download returns HTTP 200 with correct file content.
+- **WALK-023 — Engineer needed both TECHNICAL_EVALUATOR + APPROVER.** Owner had manually swapped to TECHNICAL_EVALUATOR only on 2026-05-29; today re-added APPROVER via direct SQL `INSERT INTO user_roles ... ON CONFLICT DO NOTHING` + token_version bump. The seed script already inserts both roles for fresh runs; no script change needed (it was DB drift, not seed correctness).
+- **WALK-035 — POST /roles 500 + still can't edit system role grants.** Both root causes were in the backend service (frontend BUG-064 was correctly built on top of these stubs/blocks): (a) `RolesService.create` was a literal `throw new Error('Not implemented')` stub — implemented properly with input validation, audit log, `isSystem=false` for admin-created roles. (b) `RolesService.setPermissions` had `if (role.isSystem) throw new ForbiddenException('System roles are read-only')` at line 100 — removed; admin holding `roles:manage` can now edit grants on system roles too (HIGH-risk audit row preserves visibility). `findAll` serializer also extended to include `code` so the frontend can display it. Verified end-to-end: created `WALKTHROUGH_TEST_ROLE` via POST (200), PATCH'd TECHNICAL_EVALUATOR's permissions (200).
 
 ## Open clarifications / locked answers from chat
 

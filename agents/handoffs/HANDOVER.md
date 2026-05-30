@@ -6,6 +6,63 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-31 — BUG-067 shipped: owner verification follow-ups (5 regression items)
+
+**Date/time:** 2026-05-31 ~00:30 GMT+3
+**Agent/task:** Owner walked the BUG-052..066 staging deploy and surfaced 5 regression items in WALKTHROUGH_TRACKER_2026-05-29.md (sections D/E/F/G/J — Overview tabs, clarification tabs, vendor portal docs, engineer role, admin role mgmt). All 5 closed in a single bundle.
+
+### What landed
+
+**(a) Currency formatter — WALK-008/012/019.** `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` Est. Budget formatter switched from `en-US`+`USD` to `en-GB`+`KWD`. CTMP is a Kuwait deployment; the `$` was leftover scaffolding.
+
+**(b) Inline clarification reply — WALK-009/013/020.** New `ClarificationReplyForm` subcomponent added to `ClarificationsTabPanel` in `tenders/[id]/page.tsx`. Renders per thread when caller holds `clarification:reply`. Textarea + public/private toggle + Send button. POSTs to existing `/clarifications/:id/reply` endpoint. Refetches thread list on success.
+
+**(c) Vendor portal tender doc download — WALK-016/017.** Four-layer fix:
+1. `tenders.controller.ts`: `GET :id/documents/:documentId` switched from `@RequirePermissions('tender:view')` to `@Public() + @UseGuards(OptionalVendorOrUserGuard)`. Vendor JWT now passes through.
+2. `tenders.service.ts:streamDocument(tenderId, documentId, user)`: runs `findOne(tenderId, user)` first so the unified access control already in findOne (BUG-015 vendor visibility OR BUG-050/BUG-062 internal dept-scope) gates document access too. Single source of truth for "who can see what."
+3. Audit log split: vendor caller's `user.id` IS the vendor_user.id (FK to `vendor_users` not `users`). Previously hit `audit_logs_actor_user_id_fkey` violation → 500. Now `isVendor ? actorVendorUserId : actorUserId`.
+4. `infrastructure/docker/docker-compose.yml`: added `tender_storage:/data/tender-documents` volume mount + corresponding `tender_storage:` named volume. Previously the path lived inside the container FS only — every `--force-recreate api` wiped uploaded tender docs.
+
+**(d) Engineer role stack — WALK-023.** Re-added APPROVER to `engineer@ctmp.local` via direct SQL (`INSERT … ON CONFLICT DO NOTHING` + `token_version+1`). Engineer now has TECHNICAL_EVALUATOR + APPROVER. Seed script already inserts both for fresh runs; this was DB drift from the 2026-05-29 manual swap, not seed correctness.
+
+**(e) Roles backend — WALK-035.** Two fixes both in `apps/api/src/modules/roles/roles.service.ts` (the frontend BUG-064 was built on top of stubs):
+1. `create()` was literally `throw new Error('Not implemented')`. Now validates inputs (uppercase code regex, unique code check), inserts with `isSystem=false`, writes `ROLE_CREATED` audit row at HIGH risk, returns the created row including counts.
+2. `setPermissions()` had `if (role.isSystem) throw new ForbiddenException(...)` blocking edits on every seeded role (all 8 baselines carry `isSystem=true`). Removed — admin holds `roles:manage` perm and the audit row at HIGH risk preserves accountability.
+3. `findAll` serializer extended to include `code` so the frontend can display it.
+4. `roles.controller.ts:create` now forwards `actorUserId` to the service.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean on both apps.
+- ✅ `POST /api/v1/roles` as admin with body `{code:"WALKTHROUGH_TEST_ROLE", name:"Walkthrough Test Role", description:"BUG-067 verification"}` → 200 with `{id, code, name, isSystem:false, permissionCount:0}`.
+- ✅ `PATCH /roles/<TECHNICAL_EVALUATOR>/permissions` no-op write as admin → 200 (was 403 before due to isSystem block).
+- ✅ Vendor (`vendor1@vendor.test`) downloads tender doc on PUBLISHED tender TDR-2026-0011 → 200 with correct file bytes (was 401 → 403 → 404 → 500 → finally 200 after fixing each layer).
+
+### Files modified this segment
+
+- `apps/api/src/modules/roles/roles.service.ts` — implement create + drop isSystem lock
+- `apps/api/src/modules/roles/roles.controller.ts` — forward actorUserId
+- `apps/api/src/modules/tenders/tenders.controller.ts` — vendor-aware download endpoint
+- `apps/api/src/modules/tenders/tenders.service.ts` — streamDocument signature + access check + audit split
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — KWD currency + ClarificationReplyForm
+- `infrastructure/docker/docker-compose.yml` — tender_storage volume mount
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-067 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-008/009/012/013/016/017/019/020/023/035 flipped to ✅; new "Owner verification follow-ups (BUG-067)" section
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Direct SQL on staging (not committed)
+
+- `INSERT INTO user_roles ... ON CONFLICT DO NOTHING` for engineer@ + APPROVER role.
+- `UPDATE users SET token_version=token_version+1 WHERE email='engineer@ctmp.local'`.
+
+The seed script already produces this state on a fresh run; no script change required. Owner needs to log out + back in as engineer@ to pick up the new JWT carrying APPROVER perms.
+
+### Tracker state
+
+All open WALK items (047 originally, plus 057 regression, plus owner's 10 verification follow-ups) now at ✅ or 🔵 except Theme 3 (WALK-053 + WALK-055) held by owner directive. 17 local commits ahead of `origin/develop` after this commit lands. Push still held pending owner verification of BUG-067.
+
+---
+
 ## 2026-05-30 — BUG-066 shipped: tender detail Bids stat tile regression
 
 **Date/time:** 2026-05-30 ~09:55 GMT+3 (post-Theme-J spot fix)

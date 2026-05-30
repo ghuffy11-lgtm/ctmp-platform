@@ -23,6 +23,7 @@ export class RolesService {
     return {
       items: roles.map(r => ({
         id: r.id,
+        code: r.code,
         name: r.name,
         description: r.description ?? undefined,
         permissionCount: r._count.rolePermissions,
@@ -58,9 +59,47 @@ export class RolesService {
     };
   }
 
-  async create(data: any) {
-    // TODO: audit log
-    throw new Error('Not implemented');
+  // WALK-035 / BUG-067: admin-driven role creation. Inserts a non-system
+  // role and writes an audit row. New roles start with zero permissions —
+  // the caller follows up with setPermissions() to wire grants.
+  async create(data: { code?: string; name?: string; description?: string | null }, actorUserId?: string) {
+    const code = (data.code ?? '').trim().toUpperCase();
+    const name = (data.name ?? '').trim();
+    if (!code || !name) {
+      throw new BadRequestException('code and name are required');
+    }
+    if (!/^[A-Z0-9_]+$/.test(code)) {
+      throw new BadRequestException('code must be uppercase letters, digits, and underscores only');
+    }
+    const existing = await this.prisma.role.findUnique({ where: { code } });
+    if (existing) {
+      throw new BadRequestException(`Role with code ${code} already exists`);
+    }
+    const role = await this.prisma.role.create({
+      data: {
+        code,
+        name,
+        description: data.description?.trim() || null,
+        isSystem: false,
+      },
+    });
+    await this.audit.log({
+      eventType: 'ROLE_CREATED',
+      entityType: 'Role',
+      entityId: role.id,
+      actorUserId,
+      afterValue: { code: role.code, name: role.name },
+      riskLevel: AuditRiskLevel.HIGH,
+    });
+    return {
+      id: role.id,
+      code: role.code,
+      name: role.name,
+      description: role.description ?? undefined,
+      isSystem: role.isSystem,
+      permissionCount: 0,
+      userCount: 0,
+    };
   }
 
   async update(id: string, data: any) {
@@ -97,9 +136,9 @@ export class RolesService {
       include: { rolePermissions: { select: { permissionId: true } } },
     });
     if (!role) throw new NotFoundException('Role not found');
-    if (role.isSystem) {
-      throw new ForbiddenException('System roles are read-only');
-    }
+    // WALK-035 / BUG-067: admin (holding roles:manage) must be able to edit
+    // grants on system roles too. The audit row at HIGH risk preserves
+    // visibility. The previous ForbiddenException blocked all baseline roles.
 
     const requestedIds = new Set(permissionIds);
     if (requestedIds.size !== permissionIds.length) {

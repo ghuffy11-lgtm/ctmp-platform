@@ -30,8 +30,8 @@ export class RolesController {
   @Post()
   @RequirePermissions('roles:manage')
   @ApiOperation({ operationId: 'createRole', summary: 'Create role' })
-  create(@Body() body: any) {
-    return this.rolesService.create(body);
+  create(@Body() body: any, @CurrentUser('id') userId: string) {
+    return this.rolesService.create(body, userId);
   }
 
   @Patch(':id')

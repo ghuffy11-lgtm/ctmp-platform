@@ -515,9 +515,11 @@ export default function TenderDetailPage() {
                       <div className="flex justify-between items-center">
                         <span className="text-xs text-text-secondary">Est. Budget</span>
                         <span className="text-xs font-semibold text-text-primary">
-                          {tender.estimatedBudget.toLocaleString('en-US', {
+                          {/* WALK-008/012/019 / BUG-067: was hard-coded $/USD;
+                              CTMP is a Kuwait-based on-prem deployment. Use KWD. */}
+                          {tender.estimatedBudget.toLocaleString('en-GB', {
                             style: 'currency',
-                            currency: 'USD',
+                            currency: 'KWD',
                             maximumFractionDigits: 0,
                           })}
                         </span>
@@ -748,23 +750,33 @@ function ClarificationsTabPanel({ tenderId }: { tenderId: string }) {
   const [items, setItems] = useState<Clarification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // WALK-009/013/020 / BUG-067: caller can reply inline when they hold
+  // `clarification:reply` (TECHNICAL_EVALUATOR + PROCUREMENT_ADMIN +
+  // PROCUREMENT_OFFICER all carry it).
+  const [canReply, setCanReply] = useState(false);
+  useEffect(() => {
+    const t = getAccessToken();
+    if (!t) return;
+    setCanReply(hasPermission(t, 'clarification:reply'));
+  }, []);
+
+  const fetchItems = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      const res = await get<{ items: Clarification[] }>(`/tenders/${tenderId}/clarifications`, token);
+      setItems(res.items ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load clarifications');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const token = getAccessToken();
-        const res = await get<{ items: Clarification[] }>(`/tenders/${tenderId}/clarifications`, token);
-        if (!cancelled) setItems(res.items ?? []);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load clarifications');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+    fetchItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenderId]);
 
   if (loading) return <TabSkeleton icon={<MessageSquare className="w-12 h-12 text-text-secondary/20" />} label="Loading clarifications…" />;
@@ -816,9 +828,69 @@ function ClarificationsTabPanel({ tenderId }: { tenderId: string }) {
               ))}
             </div>
           )}
+          {/* WALK-009/013/020 / BUG-067: inline reply form so the engineer
+              never has to leave the tender to answer a question. */}
+          {canReply && <ClarificationReplyForm clarificationId={c.id} onReplied={fetchItems} />}
         </div>
       ))}
     </div>
+  );
+}
+
+function ClarificationReplyForm({ clarificationId, onReplied }: { clarificationId: string; onReplied: () => void }) {
+  const [reply, setReply] = useState('');
+  const [isPublic, setIsPublic] = useState(true);
+  const [posting, setPosting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = reply.trim();
+    if (!trimmed) return;
+    setPosting(true);
+    setErr(null);
+    try {
+      const token = getAccessToken();
+      await post(`/clarifications/${clarificationId}/reply`, { reply: trimmed, isPublic }, token);
+      setReply('');
+      setIsPublic(true);
+      onReplied();
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : 'Reply failed');
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="border-t border-border pt-3 mt-3 space-y-2">
+      <textarea
+        value={reply}
+        onChange={e => setReply(e.target.value)}
+        placeholder="Write a reply…"
+        rows={2}
+        className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-bg focus:outline-none focus:ring-1 focus:ring-accent resize-none"
+      />
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isPublic}
+            onChange={e => setIsPublic(e.target.checked)}
+            className="w-3.5 h-3.5 rounded text-accent border-border focus:ring-1 focus:ring-accent"
+          />
+          Public (visible to all vendors). Uncheck for a reply private to the asking vendor only.
+        </label>
+        <button
+          type="submit"
+          disabled={posting || !reply.trim()}
+          className="px-3 py-1.5 bg-accent text-white rounded-md text-xs font-bold hover:opacity-90 disabled:opacity-50"
+        >
+          {posting ? 'Posting…' : 'Post reply'}
+        </button>
+      </div>
+      {err && <p className="text-xs text-danger">{err}</p>}
+    </form>
   );
 }
 

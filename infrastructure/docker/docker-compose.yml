@@ -111,6 +111,11 @@ services:
     volumes:
       - report_storage:/data/reports
       - bid_storage:/data/bid-documents
+      # BUG-067 / WALK-016/017: tender RFQ documents (admin uploads, vendor
+      # downloads) need their own volume so files survive container recreates.
+      # Without this mount the files lived inside the container FS and were
+      # wiped on every `docker compose up --force-recreate api`.
+      - tender_storage:/data/tender-documents
     depends_on:
       postgres:
         condition: service_healthy
@@ -158,4 +163,5 @@ volumes:
   redis_data:
   report_storage:
   bid_storage:
+  tender_storage:
   minio_data:

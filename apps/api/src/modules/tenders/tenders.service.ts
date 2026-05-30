@@ -535,18 +535,32 @@ export class TendersService {
     return { ok: true };
   }
 
-  async streamDocument(tenderId: string, documentId: string, userId: string) {
+  // WALK-016/017 / BUG-067: vendor portal needs to view + download RFQ docs
+  // on tenders they can already see. Internal users still need their dept
+  // scope to admit them. The visibility check reuses findOne, which is the
+  // single source of truth for who can read what.
+  async streamDocument(tenderId: string, documentId: string, user: any) {
+    // Throws NotFound for vendors who cannot see the tender (BUG-015), and
+    // for internal users out of dept scope (BUG-050 / BUG-062). Side benefit:
+    // we never leak document existence to unauthorised callers.
+    await this.findOne(tenderId, user);
+
     const doc = await this.prisma.tenderDocument.findFirst({
       where: { id: documentId, tenderId },
     });
     if (!doc) throw new NotFoundException('Document not found');
     const { stream, size, mimeType } = await this.tenderStorage.stream(doc.storageKey);
+    // For vendor callers `user.id` is the vendor_user.id (FK to vendor_users,
+    // NOT users). Splitting prevents the audit_logs FK violation that surfaced
+    // during BUG-067 verification.
+    const isVendor = !!user?.vendorId;
     await this.audit.log({
       eventType: 'TENDER_DOCUMENT_DOWNLOADED',
       entityType: 'TenderDocument',
       entityId: doc.id,
       tenderId,
-      actorUserId: userId,
+      actorUserId: isVendor ? undefined : user?.id,
+      actorVendorUserId: isVendor ? user?.id : undefined,
       riskLevel: AuditRiskLevel.LOW,
     });
     return {
