@@ -20,14 +20,14 @@ Captured during the owner's procurement walkthrough. Each row is an observation;
 | ID | Observation | Type | Status | Resolution / notes |
 |---|---|---|---|---|
 | WALK-001 | Engineer's tender list shows only their department | Confirmation of BUG-050 | 🔵 | Working as designed |
-| WALK-002 | Dashboard still shows "Quick Actions" panel for engineer — should be removed | UI gating gap | 🔴 | |
-| WALK-003 | Engineer should only **view** the Dashboard (no actionable widgets) | UI gating gap | 🔴 | |
+| WALK-002 | Dashboard still shows "Quick Actions" panel for engineer — should be removed | UI gating gap | ✅ | Fixed 2026-05-30 (BUG-058) — see WALK-G1 |
+| WALK-003 | Engineer should only **view** the Dashboard (no actionable widgets) | UI gating gap | ✅ | Fixed 2026-05-30 (BUG-058) — see WALK-G1 |
 
 ## B. General UI principle (applies everywhere)
 
 | ID | Principle | Status | Resolution / notes |
 |---|---|---|---|
-| WALK-G1 | "Quick Actions" cards on every dashboard must be **permission-gated per card**. If a user has zero matching perms, the whole Quick Actions section is hidden. Applies to engineer, finance, committee, auditor, all users. | 🔴 | |
+| WALK-G1 | "Quick Actions" cards on every dashboard must be **permission-gated per card**. If a user has zero matching perms, the whole Quick Actions section is hidden. Applies to engineer, finance, committee, auditor, all users. | ✅ | Fixed 2026-05-30 (BUG-058). `/dashboard` Quick Actions now gates each card by perm (Create New Tender → `tender:create`; Review Approvals → `tender:approve` OR `award:approve`; Vendor Database → `vendor:view`) using the mounted-token hydration pattern (BUG-046). Whole panel renders only when at least one card qualifies. Verified across 4 roles: admin (3/3 cards), manager (3/3), officer (2/3 — no Approvals), engineer (panel hidden — 0 perms). Same principle propagates to any future dashboard variants as they ship. |
 
 ## C. Engineer — Approval Queue
 

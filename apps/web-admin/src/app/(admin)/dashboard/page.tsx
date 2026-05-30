@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { get } from '@/lib/api';
-import { getAccessToken } from '@/lib/auth';
+import { getAccessToken, hasPermission } from '@/lib/auth';
 import {
   FileText,
   CheckCircle2,
@@ -90,6 +90,26 @@ export default function DashboardPage() {
   });
   const [recentTenders, setRecentTenders] = useState<TenderSummary[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // BUG-058 / WALK-002/003/G1: gate every Quick Action card by its own perm
+  // (mounted-token pattern from BUG-046 to avoid hydration mismatch). When all
+  // three are absent we hide the whole panel — engineer/finance/auditor
+  // shouldn't see action buttons they can't fire.
+  const [perms, setPerms] = useState({
+    createTender: false,
+    reviewApprovals: false,
+    viewVendors: false,
+  });
+  useEffect(() => {
+    const t = getAccessToken();
+    if (!t) return;
+    setPerms({
+      createTender: hasPermission(t, 'tender:create'),
+      reviewApprovals: hasPermission(t, 'tender:approve') || hasPermission(t, 'award:approve'),
+      viewVendors: hasPermission(t, 'vendor:view'),
+    });
+  }, []);
+  const showQuickActions = perms.createTender || perms.reviewApprovals || perms.viewVendors;
 
   useEffect(() => {
     async function load() {
@@ -240,31 +260,40 @@ export default function DashboardPage() {
 
         {/* Right column */}
         <div className="space-y-6">
-          {/* Quick actions */}
-          <div className="bg-slate-900 p-6 rounded-2xl text-white shadow-xl">
-            <h3 className="font-bold mb-4 text-sm">Quick Actions</h3>
-            <div className="space-y-3">
-              <Link
-                href="/tenders/new"
-                className="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
-              >
-                <Plus className="w-4 h-4" /> Create New Tender
-              </Link>
-              <Link
-                href="/approvals"
-                className="w-full bg-white/10 hover:bg-white/20 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
-              >
-                <ClipboardList className="w-4 h-4" />
-                Review Approvals {counts.pendingApprovals > 0 ? `(${counts.pendingApprovals})` : ''}
-              </Link>
-              <Link
-                href="/vendors"
-                className="w-full bg-white/10 hover:bg-white/20 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
-              >
-                <Users className="w-4 h-4" /> Vendor Database
-              </Link>
+          {/* Quick actions — BUG-058 / WALK-002/003/G1: per-card perm gating;
+              whole panel hidden when caller has none of the matching perms. */}
+          {showQuickActions && (
+            <div className="bg-slate-900 p-6 rounded-2xl text-white shadow-xl">
+              <h3 className="font-bold mb-4 text-sm">Quick Actions</h3>
+              <div className="space-y-3">
+                {perms.createTender && (
+                  <Link
+                    href="/tenders/new"
+                    className="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" /> Create New Tender
+                  </Link>
+                )}
+                {perms.reviewApprovals && (
+                  <Link
+                    href="/approvals"
+                    className="w-full bg-white/10 hover:bg-white/20 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
+                  >
+                    <ClipboardList className="w-4 h-4" />
+                    Review Approvals {counts.pendingApprovals > 0 ? `(${counts.pendingApprovals})` : ''}
+                  </Link>
+                )}
+                {perms.viewVendors && (
+                  <Link
+                    href="/vendors"
+                    className="w-full bg-white/10 hover:bg-white/20 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
+                  >
+                    <Users className="w-4 h-4" /> Vendor Database
+                  </Link>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* System health */}
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">

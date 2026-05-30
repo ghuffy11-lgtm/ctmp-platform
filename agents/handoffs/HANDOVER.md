@@ -6,6 +6,44 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-05-30 — BUG-058 shipped: Theme A (Dashboard Quick Actions perm gating)
+
+**Date/time:** 2026-05-30 ~03:30 GMT+3 (continuation after BUG-057)
+**Agent/task:** Theme A per locked sequence. 3 WALK items: WALK-002 (engineer dashboard still shows Quick Actions), WALK-003 (engineer dashboard should be view-only), WALK-G1 (general principle: every dashboard's Quick Actions must be perm-gated per card; whole section hides when none qualify).
+
+### What landed
+
+**Frontend** — `apps/web-admin/src/app/(admin)/dashboard/page.tsx`:
+- Added `hasPermission` import + per-card `perms` state populated via the mounted-token hydration pattern (BUG-046 safety).
+- Each of the three action buttons now wrapped in its perm gate:
+  - Create New Tender → `tender:create`
+  - Review Approvals → `tender:approve` OR `award:approve` (anyPermission)
+  - Vendor Database → `vendor:view`
+- Whole `<div>Quick Actions</div>` panel hidden when `showQuickActions = perms.createTender || perms.reviewApprovals || perms.viewVendors` is false.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean.
+- ✅ `docker compose --project-name ctmp build --no-cache web-admin` → built clean.
+- ✅ Endpoint cross-check (perm membership per role):
+  - admin@: `tender:create=YES, tender:approve=YES, award:approve=YES, vendor:view=YES` → 3 cards
+  - manager@: `tender:create=YES, tender:approve=YES, award:approve=NO, vendor:view=YES` → 3 cards
+  - officer@: `tender:create=YES, tender:approve=NO, award:approve=NO, vendor:view=YES` → 2 cards (no Approvals)
+  - engineer@: all NO → **panel hidden**
+
+### Files modified this segment
+
+- `apps/web-admin/src/app/(admin)/dashboard/page.tsx` — perm-gating block + per-card conditionals
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-058 Fixed entry
+- `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` — WALK-002/003/G1 ✅
+- `agents/handoffs/HANDOVER.md` — this entry
+
+### Next up (per locked sequence)
+
+Theme B — Approval Queue bugs (WALK-004/005/006).
+
+---
+
 ## 2026-05-30 — BUG-057 shipped: Theme F bundle (Technical Evaluation polish — hydration + auto-Pass + finalised summary + Evaluated pill)
 
 **Date/time:** 2026-05-30 ~03:25 GMT+3 (continuation after BUG-056)
