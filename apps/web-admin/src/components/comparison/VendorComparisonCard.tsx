@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ChevronDown,
@@ -11,13 +11,16 @@ import {
   Clock,
   Building2,
   FileText,
+  Loader2,
   Pencil,
   Shield,
   TrendingDown,
+  X,
 } from 'lucide-react';
 import { CommercialDocumentsList } from '@/components/CommercialDocumentsList';
-import { post } from '@/lib/api';
+import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { VendorTechnicalCard, type ComparisonVendor, type ComparisonCriterion } from '@/components/comparison/VendorTechnicalCard';
 
 export interface CardCommercialDoc {
   id: string;
@@ -134,6 +137,9 @@ export function VendorComparisonCard({
 }: Props) {
   const [expanded, setExpanded] = useState(!!initialExpanded);
   const isFail = vendor.technicalResult === 'FAIL';
+  // BUG-069: open this vendor's technical detail in an in-page modal instead
+  // of navigating to /technical-comparison. Stays on Commercial Comparison.
+  const [techOpen, setTechOpen] = useState(false);
   // BUG-068 / Phase F BOQ: when the bid has per-line entries, render a real
   // line breakdown. Otherwise the existing CommercialTotalBlock (BUG-053)
   // continues to handle manual price entry / display for legacy tenders.
@@ -208,12 +214,16 @@ export function VendorComparisonCard({
                   Result: {vendor.technicalResult}
                 </p>
               </div>
-              <Link
-                href={`/technical-comparison?tenderId=${tenderId}`}
+              {/* BUG-069: open this vendor's tech detail in a modal — no
+                  navigation. Owner explicitly wants to stay on Commercial
+                  Comparison; the previous Link navigated to /technical-comparison. */}
+              <button
+                type="button"
+                onClick={() => setTechOpen(true)}
                 className="text-xs font-semibold text-accent hover:underline"
               >
                 View Technical Comparison →
-              </Link>
+              </button>
             </div>
           </section>
 
@@ -301,6 +311,16 @@ export function VendorComparisonCard({
             )}
           </section>
         </div>
+      )}
+
+      {/* BUG-069: tech-detail modal — only this vendor, no navigation. */}
+      {techOpen && (
+        <TechDetailModal
+          tenderId={tenderId}
+          vendorId={vendor.vendorId}
+          vendorName={vendor.vendorName}
+          onClose={() => setTechOpen(false)}
+        />
       )}
     </div>
   );
@@ -507,5 +527,104 @@ function BoqBreakdownBlock({
         Submitted by the vendor at bid time. Read-only here; values are locked once the bid is SUBMITTED.
       </p>
     </section>
+  );
+}
+
+// BUG-069: in-page modal showing this vendor's technical detail. Reuses the
+// existing /tenders/:id/comparison/technical endpoint and the existing
+// VendorTechnicalCard component — drop-in, no new shared scaffold needed.
+// ESC closes; backdrop click closes. Renders one VendorTechnicalCard only
+// (matching the clicked vendor) with initialExpanded=true so the criterion
+// scores + evaluator notes are visible immediately.
+function TechDetailModal({
+  tenderId,
+  vendorId,
+  vendorName,
+  onClose,
+}: {
+  tenderId: string;
+  vendorId: string;
+  vendorName: string;
+  onClose: () => void;
+}) {
+  interface TechResponse {
+    criteria: ComparisonCriterion[];
+    totalMaxScore: number;
+    vendors: ComparisonVendor[];
+  }
+  const [data, setData] = useState<TechResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getAccessToken();
+        const res = await get<TechResponse>(`/tenders/${tenderId}/comparison/technical`, token);
+        if (!cancelled) setData(res);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load technical comparison');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tenderId]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const target = data?.vendors.find(v => v.vendorId === vendorId) ?? null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Technical detail for ${vendorName}`}
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        className="bg-card border border-border rounded-xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden"
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-bg">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-text-secondary font-semibold">Technical detail</p>
+            <h3 className="text-base font-bold text-text-primary">{vendorName}</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded hover:bg-card text-text-secondary"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5">
+          {error ? (
+            <p className="text-sm text-danger">{error}</p>
+          ) : !data ? (
+            <p className="text-sm text-text-secondary flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+            </p>
+          ) : !target ? (
+            <p className="text-sm text-text-secondary italic">No technical evaluation data for this vendor yet.</p>
+          ) : (
+            <VendorTechnicalCard
+              vendor={target}
+              criteria={data.criteria}
+              totalMaxScore={data.totalMaxScore}
+              initialExpanded
+            />
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

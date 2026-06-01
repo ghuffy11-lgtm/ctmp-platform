@@ -6,6 +6,39 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-06-01 — BUG-069 shipped: tech-detail modal on Commercial Comparison
+
+**Date/time:** 2026-06-01 ~10:20 GMT+3
+**Agent/task:** Owner walked the BOQ feature on staging and asked for one small targeted change instead of the Theme 3 Tender Summary tab work that was on standby. Quote: *"for me the current commercial page is fine, and only one thing i would like to change is to View Technical Comparison to have technical comparison show in the window only … current Commercial comparison page and i dont want any other changes."*
+
+### What landed
+
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx`:
+  - The per-vendor card's "View Technical Comparison →" was a `<Link href=/technical-comparison?tenderId=...>` that navigated away. Replaced with a `<button onClick={() => setTechOpen(true)}>`.
+  - New `TechDetailModal` subcomponent at the bottom of the file. Opens as a fixed-position overlay with backdrop + ESC + outside-click close. Fetches `/tenders/:id/comparison/technical`, finds the matching vendor by `vendorId`, renders the existing `<VendorTechnicalCard>` with `initialExpanded={true}` showing criterion scores + evaluator notes for that one vendor only.
+  - Per owner's locked answer: NOT the full matrix, NOT all vendors — just the one card the user clicked from.
+  - `useEffect` with cleanup for ESC handler. `aria-modal` + `aria-label` for accessibility.
+
+Zero backend changes. No new endpoint (reuses `/comparison/technical`). No new component file (modal subcomponent inline in the same file as the calling card, same pattern as BOQ blocks). No new perm. No migration. No token bump.
+
+### Theme 3 status
+
+Owner explicitly rejected the broader Theme 3 (unified Summary tab) and asked for this single change instead. Standby plan at `C:\Users\Administrator\.claude\plans\for-theme3-i-want-synchronous-dream.md` remains parked in case owner changes their mind later, but it is no longer "next up" — closed by owner choice.
+
+### Verification trail
+
+- ✅ `pnpm exec tsc --noEmit` clean (first pass caught dangling `Link` reference to `/vendors?vendorId=…` in the Vendor Profile block; restored the import).
+- ✅ `docker compose --project-name ctmp build --no-cache web-admin` + `up -d --force-recreate web-admin` → container healthy.
+- ✅ Reuses existing endpoint `/tenders/:id/comparison/technical` (no API rebuild needed).
+
+### Files modified this segment
+
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — Link → button + TechDetailModal subcomponent
+- `docs/qa/BUG_TRACKER_2026-05-25.md` — BUG-069 Fixed entry
+- `agents/handoffs/HANDOVER.md` — this entry
+
+---
+
 ## 2026-05-31 — BUG-068 shipped: Phase F BOQ unlock + WALK-055 auto-minutes
 
 **Date/time:** 2026-05-31 ~02:15 GMT+3
