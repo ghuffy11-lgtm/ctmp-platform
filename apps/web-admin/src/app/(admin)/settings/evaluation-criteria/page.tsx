@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { get, post, put, del } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { useConfirm } from '@/components/dialog/DialogProvider';
 
 interface LibraryEntry {
   id: string;
@@ -60,6 +61,7 @@ function toDraft(e: LibraryEntry): DraftEntry {
 }
 
 export default function EvaluationCriteriaLibraryPage() {
+  const confirm = useConfirm();
   const [entries, setEntries] = useState<LibraryEntry[] | null>(null);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [draft, setDraft] = useState<DraftEntry | null>(null);
@@ -117,7 +119,13 @@ export default function EvaluationCriteriaLibraryPage() {
   }
 
   async function handleDeactivate(id: string, name: string) {
-    if (!confirm(`Deactivate library entry "${name}"? It will stop appearing in the per-tender picker.`)) return;
+    const ok = await confirm({
+      title: 'Deactivate library entry',
+      body: `Deactivate library entry "${name}"? It will stop appearing in the per-tender picker.`,
+      destructive: true,
+      confirmLabel: 'Deactivate',
+    });
+    if (!ok) return;
     try {
       const token = getAccessToken();
       await del(`/evaluation-criteria/library/${id}`, token);

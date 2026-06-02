@@ -127,16 +127,22 @@ services:
       timeout: 5s
       retries: 5
 
+  # BUG-089 (2026-06-02): admin + vendor each take their OWN API URL so the
+  # admin browser never calls the vendor host (and vice versa). Previously a
+  # single PUBLIC_API_URL was shared, and on staging it was set to the vendor
+  # host — every admin /api/v1/* call went to vn.hadiclinic.com.kw:4201,
+  # producing cross-origin 401s after idle timeout. Each app now has a
+  # dedicated env var with the legacy PUBLIC_API_URL kept as the fallback.
   web-admin:
     build:
       context: ../..
       dockerfile: infrastructure/docker/web-admin.Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
+        NEXT_PUBLIC_API_URL: ${ADMIN_PUBLIC_API_URL:-${PUBLIC_API_URL:-http://localhost:3000}}
     container_name: ctmp-web-admin
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
+      NEXT_PUBLIC_API_URL: ${ADMIN_PUBLIC_API_URL:-${PUBLIC_API_URL:-http://localhost:3000}}
     ports:
       - '${WEB_ADMIN_PORT:-4200}:4200'
     depends_on:
@@ -147,12 +153,12 @@ services:
       context: ../..
       dockerfile: infrastructure/docker/web-vendor.Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
+        NEXT_PUBLIC_API_URL: ${VENDOR_PUBLIC_API_URL:-${PUBLIC_API_URL:-http://localhost:3000}}
         NEXT_PUBLIC_HCAPTCHA_SITE_KEY: ${HCAPTCHA_SITE_KEY:-10000000-ffff-ffff-ffff-000000000001}
     container_name: ctmp-web-vendor
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
+      NEXT_PUBLIC_API_URL: ${VENDOR_PUBLIC_API_URL:-${PUBLIC_API_URL:-http://localhost:3000}}
     ports:
       - '${WEB_VENDOR_PORT:-4300}:4300'
     depends_on:

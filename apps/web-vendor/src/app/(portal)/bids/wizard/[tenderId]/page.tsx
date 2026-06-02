@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, use } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { get, post, put, patch, ApiError } from '@/lib/api';
@@ -367,6 +367,7 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
           boqTemplate={boqTemplate}
           boqLines={boqLines}
           setBoqLines={setBoqLines}
+          tenderReferenceNumber={tender?.referenceNumber}
           saving={boqSaving}
           onSaveDraft={async () => { try { await handleSaveBoq(); } catch { /* error already in state */ } }}
           onPrev={() => setStep(1)}
@@ -558,11 +559,95 @@ function Step1Envelope({
 // BUG-068 / Phase F BOQ. Vendor fills unit price per template line, or marks
 // NOT_BIDDING to opt out of that line. Live grand-total at the bottom. Save
 // Draft persists progress; Continue persists then advances.
+// BUG-084 (2026-06-02): parse vendor-side BoQ CSV. Format is the same six-column
+// shape the admin BoQ editor uses (BUG-072) extended with two vendor columns:
+//   item_no,description,qty,unit,status,unit_price
+// Description / qty / unit are informational on import — the in-DB template is
+// authoritative for qty (used in line-total math). Vendor cannot fudge the
+// procurement-defined structure via an offline CSV edit.
+//
+// Returns either { lines } (parsed rows keyed by item_no) or { errors } with
+// human-readable row-numbered messages.
+function parseVendorBoqCsv(text: string, templateByItemNo: Map<string, BoqTemplateRow>):
+  { lines?: Map<string, { status: BoqLineStatus; unitPrice: string }>; errors?: string[] }
+{
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length === 0) return { errors: ['File is empty.'] };
+  const header = lines[0].toLowerCase().split(',').map(h => h.trim());
+  const requiredCols = ['item_no', 'status', 'unit_price'];
+  const missing = requiredCols.filter(c => !header.includes(c));
+  if (missing.length > 0) {
+    return { errors: [`Missing required column(s): ${missing.join(', ')}. Header must include at least: ${requiredCols.join(',')}.`] };
+  }
+  const idxItem = header.indexOf('item_no');
+  const idxStatus = header.indexOf('status');
+  const idxPrice = header.indexOf('unit_price');
+
+  const out = new Map<string, { status: BoqLineStatus; unitPrice: string }>();
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(',').map(c => c.trim());
+    const lineNum = i + 1;
+    const itemNo = cells[idxItem] ?? '';
+    if (!itemNo) { errors.push(`Line ${lineNum}: missing item_no.`); continue; }
+    if (!templateByItemNo.has(itemNo)) {
+      errors.push(`Line ${lineNum}: item_no "${itemNo}" does not match any BoQ row in this tender.`);
+      continue;
+    }
+    if (seen.has(itemNo)) { errors.push(`Line ${lineNum}: duplicate item_no "${itemNo}".`); continue; }
+    seen.add(itemNo);
+
+    // Status: case-insensitive. Accept canonical + UI labels. Blank → BIDDING.
+    const rawStatus = (cells[idxStatus] ?? '').toLowerCase().replace(/[_\s]/g, '');
+    let status: BoqLineStatus;
+    if (rawStatus === '' || rawStatus === 'bidding') {
+      status = 'BIDDING';
+    } else if (rawStatus === 'notbidding') {
+      status = 'NOT_BIDDING';
+    } else {
+      errors.push(`Line ${lineNum}: status "${cells[idxStatus]}" must be Bidding or Not bidding.`);
+      continue;
+    }
+
+    const rawPrice = (cells[idxPrice] ?? '').trim();
+    if (status === 'BIDDING') {
+      if (rawPrice === '') {
+        errors.push(`Line ${lineNum}: unit_price required when status is Bidding.`);
+        continue;
+      }
+      const n = Number(rawPrice);
+      if (!Number.isFinite(n) || n < 0) {
+        errors.push(`Line ${lineNum}: unit_price must be a non-negative number (got "${rawPrice}").`);
+        continue;
+      }
+      out.set(itemNo, { status, unitPrice: String(n) });
+    } else {
+      out.set(itemNo, { status, unitPrice: '' });
+    }
+  }
+  if (errors.length > 0) return { errors };
+  return { lines: out };
+}
+
+// BUG-084: escape a single CSV field. Wrap in quotes if it contains comma /
+// quote / newline. Doubles internal quotes per RFC4180. Procurement-defined
+// descriptions can contain commas so this matters even though our parser is
+// comma-split-only on import.
+function csvEscape(value: string | number): string {
+  const s = String(value ?? '');
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
 function Step2BoqPricing({
   hasRealBoq,
   boqTemplate,
   boqLines,
   setBoqLines,
+  tenderReferenceNumber,
   saving,
   onSaveDraft,
   onPrev,
@@ -572,11 +657,18 @@ function Step2BoqPricing({
   boqTemplate: BoqTemplateRow[];
   boqLines: BoqLineDraft[];
   setBoqLines: (next: BoqLineDraft[]) => void;
+  tenderReferenceNumber?: string;
   saving: boolean;
   onSaveDraft: () => Promise<void>;
   onPrev: () => void;
   onNext: () => Promise<void>;
 }) {
+  // BUG-084: hooks must be declared unconditionally — keep them above the
+  // legacy-tender early return below so React's hook order doesn't shift
+  // between renders when hasRealBoq flips.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importErrors, setImportErrors] = useState<string[] | null>(null);
+
   if (!hasRealBoq) {
     return (
       <div className="bg-card border border-border rounded-xl p-6 space-y-4">
@@ -596,6 +688,70 @@ function Step2BoqPricing({
     setBoqLines(boqLines.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   }
 
+  // BUG-084 (2026-06-02): vendor BoQ CSV round-trip.
+  function handleDownloadCsv() {
+    const header = ['item_no', 'description', 'qty', 'unit', 'status', 'unit_price'];
+    const rows = boqTemplate.map((row, i) => {
+      const line = boqLines[i];
+      const status = line?.status ?? 'BIDDING';
+      const price = line?.status === 'BIDDING' ? (line.unitPrice ?? '') : '';
+      return [row.itemNo, row.description, String(row.qty), row.unit, status, price];
+    });
+    const csv = [header, ...rows].map(r => r.map(csvEscape).join(',')).join('\r\n') + '\r\n';
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeRef = (tenderReferenceNumber ?? 'bid').replace(/[^A-Za-z0-9._-]/g, '_');
+    a.href = url;
+    a.download = `boq-${safeRef}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
+  function handleImportClick() {
+    setImportErrors(null);
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const templateByItemNo = new Map(boqTemplate.map(r => [r.itemNo, r]));
+      const { lines: parsed, errors } = parseVendorBoqCsv(text, templateByItemNo);
+      if (errors && errors.length > 0) {
+        setImportErrors(errors);
+        return;
+      }
+      if (!parsed || parsed.size === 0) {
+        setImportErrors(['No data rows found in the file.']);
+        return;
+      }
+      // Merge: for every template row, prefer the parsed entry; otherwise keep
+      // the current form state. Owner directive: rows missing from CSV stay
+      // untouched so a vendor can upload a partial CSV.
+      const merged = boqTemplate.map((row, i) => {
+        const incoming = parsed.get(row.itemNo);
+        if (incoming) {
+          return {
+            tenderBoqItemId: row.id,
+            status: incoming.status,
+            unitPrice: incoming.unitPrice,
+          };
+        }
+        return boqLines[i] ?? { tenderBoqItemId: row.id, status: 'BIDDING' as BoqLineStatus, unitPrice: '' };
+      });
+      setBoqLines(merged);
+      setImportErrors(null);
+    } catch (err) {
+      setImportErrors([err instanceof Error ? err.message : 'Failed to read file.']);
+    }
+  }
+
   // Live grand total — sums only BIDDING lines with parseable prices.
   const grandTotal = boqLines.reduce((sum, l, i) => {
     if (l.status !== 'BIDDING') return sum;
@@ -613,12 +769,53 @@ function Step2BoqPricing({
 
   return (
     <div className="bg-card border border-border rounded-xl p-6 space-y-4">
-      <div>
-        <h2 className="text-lg font-bold text-text-primary">Commercial Pricing — Bill of Quantities</h2>
-        <p className="text-sm text-text-secondary mt-1">
-          Enter your <strong>unit price</strong> for each line in <strong>KWD</strong>, or switch a line to <strong>Not bidding</strong> if you do not want to bid on it. The system multiplies unit price × quantity for each line and rolls up to your bid total.
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-bold text-text-primary">Commercial Pricing — Bill of Quantities</h2>
+          <p className="text-sm text-text-secondary mt-1">
+            Enter your <strong>unit price</strong> for each line in <strong>KWD</strong>, or switch a line to <strong>Not bidding</strong> if you do not want to bid on it. The system multiplies unit price × quantity for each line and rolls up to your bid total.
+          </p>
+          <p className="text-xs text-text-secondary mt-2">
+            Prefer Excel? <strong>Download CSV</strong> to get the BoQ, fill prices offline, then <strong>Import CSV</strong> to bring it back. You can still edit rows in this form after import.
+          </p>
+        </div>
+        {/* BUG-084: CSV round-trip toolbar. */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <button
+            type="button"
+            onClick={handleDownloadCsv}
+            className="px-3 py-2 text-xs font-semibold border border-border rounded-lg text-text-secondary hover:bg-bg"
+            title="Download the BoQ with your current prices"
+          >
+            ⬇ Download CSV
+          </button>
+          <button
+            type="button"
+            onClick={handleImportClick}
+            className="px-3 py-2 text-xs font-semibold border border-border rounded-lg text-text-secondary hover:bg-bg"
+            title="Import a filled CSV — matches rows by item_no"
+          >
+            ⬆ Import CSV
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleFileChosen}
+            className="hidden"
+          />
+        </div>
       </div>
+
+      {importErrors && importErrors.length > 0 && (
+        <div className="px-4 py-3 bg-danger/5 border border-danger/30 rounded-lg text-xs text-danger">
+          <p className="font-bold mb-1">CSV import failed:</p>
+          <ul className="list-disc pl-5 space-y-0.5">
+            {importErrors.slice(0, 8).map((m, i) => <li key={i}>{m}</li>)}
+            {importErrors.length > 8 && <li>… and {importErrors.length - 8} more.</li>}
+          </ul>
+        </div>
+      )}
 
       <div className="overflow-x-auto border border-border rounded-lg">
         <table className="w-full text-sm">

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { get, post, del } from '@/lib/api';
 import { getAccessToken, hasPermission } from '@/lib/auth';
+import { useConfirm } from '@/components/dialog/DialogProvider';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { ManageInvitedVendors } from '@/components/ManageInvitedVendors';
 import { AmendAwardDialog } from '@/components/comparison/AmendAwardDialog';
@@ -27,7 +28,11 @@ import {
   Paperclip,
   MessageSquare,
   Shield,
+  ClipboardList,
+  Package,
 } from 'lucide-react';
+import { TenderCriteriaEditor } from '@/components/TenderCriteriaEditor';
+import { TenderBoqEditor } from '@/components/TenderBoqEditor';
 
 interface TenderDocument {
   id: string;
@@ -57,10 +62,17 @@ interface TenderDetail {
   documents: TenderDocument[];
 }
 
-type TabId = 'overview' | 'clarifications' | 'bids' | 'audit';
+type TabId = 'overview' | 'criteria' | 'boq' | 'clarifications' | 'bids' | 'audit';
 
+// BUG-085 (2026-06-02): Criteria + BoQ surfaced as first-class tabs alongside
+// Overview / Clarifications / Bids / Audit. Owner walked the previous flow and
+// found that managers had to click Edit just to view criteria + BoQ — an edit
+// affordance shown for read-only purposes. Tabs are read-only; edit still
+// happens on /tenders/:id/edit (unchanged).
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <Info className="w-4 h-4" /> },
+  { id: 'criteria', label: 'Criteria', icon: <ClipboardList className="w-4 h-4" /> },
+  { id: 'boq', label: 'BoQ', icon: <Package className="w-4 h-4" /> },
   { id: 'clarifications', label: 'Clarifications', icon: <MessageSquare className="w-4 h-4" /> },
   { id: 'bids', label: 'Bids', icon: <FileText className="w-4 h-4" /> },
   { id: 'audit', label: 'Audit Trail', icon: <Shield className="w-4 h-4" /> },
@@ -104,6 +116,7 @@ const CANCELLABLE_STATUSES = ['Draft', 'Internal Review', 'Approved', 'Published
 export default function TenderDetailPage() {
   const params = useParams();
   const tenderId = params.id as string;
+  const confirm = useConfirm();
   const [tab, setTab] = useState<TabId>('overview');
   const [tender, setTender] = useState<TenderDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -235,7 +248,13 @@ export default function TenderDetailPage() {
   }
 
   async function handleDocDelete(docId: string, filename: string) {
-    if (!confirm(`Delete "${filename}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Delete document',
+      body: `Delete "${filename}"? This cannot be undone.`,
+      destructive: true,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       const token = getAccessToken();
       await del(`/tenders/${tenderId}/documents/${docId}`, token);
@@ -391,10 +410,14 @@ export default function TenderDetailPage() {
               )}
               {perms.award && (
                 <button
-                  onClick={() => {
-                    if (confirm('Issue formal award? This closes the tender and notifies the winning vendor.')) {
-                      handleAction('award');
-                    }
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: 'Issue award',
+                      body: 'Issue formal award? This closes the tender and notifies the winning vendor.',
+                      destructive: true,
+                      confirmLabel: 'Issue award',
+                    });
+                    if (ok) handleAction('award');
                   }}
                   disabled={actionLoading !== null}
                   className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
@@ -406,10 +429,14 @@ export default function TenderDetailPage() {
               {/* WALK-052: final lifecycle close. PROCUREMENT_ADMIN-only. */}
               {perms.close && (
                 <button
-                  onClick={() => {
-                    if (confirm('Close this tender? The award decision is preserved; the tender moves from Awarded → Tender Closed.')) {
-                      handleAction('close-tender');
-                    }
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: 'Close tender',
+                      body: 'Close this tender? The award decision is preserved; the tender moves from Awarded → Tender Closed.',
+                      destructive: true,
+                      confirmLabel: 'Close tender',
+                    });
+                    if (ok) handleAction('close-tender');
                   }}
                   disabled={actionLoading !== null}
                   className="px-4 py-2 border border-border text-text-secondary text-sm font-semibold rounded-lg hover:bg-bg transition-colors disabled:opacity-60 flex items-center gap-1.5"
@@ -432,10 +459,14 @@ export default function TenderDetailPage() {
           )}
           {CANCELLABLE_STATUSES.includes(tender.status) && perms.cancel && (
             <button
-              onClick={() => {
-                if (confirm('Cancel this tender? This action cannot be undone.')) {
-                  handleAction('cancel');
-                }
+              onClick={async () => {
+                const ok = await confirm({
+                  title: 'Cancel tender',
+                  body: 'Cancel this tender? This action cannot be undone.',
+                  destructive: true,
+                  confirmLabel: 'Cancel tender',
+                });
+                if (ok) handleAction('cancel');
               }}
               disabled={actionLoading !== null}
               className="px-4 py-2 border border-danger/30 text-danger text-sm font-semibold rounded-lg hover:bg-danger/5 transition-colors disabled:opacity-60"
@@ -716,6 +747,38 @@ export default function TenderDetailPage() {
       />
 
       {/* BUG-056 / WALK-009..022: real tab views (previously stubs). */}
+      {tab === 'criteria' && (
+        <div className="space-y-3">
+          {perms.edit && EDITABLE_STATUSES.includes(tender.status) && (
+            <div className="flex justify-end">
+              <Link
+                href={`/tenders/${tender.id}/edit#criteria`}
+                className="px-3 py-1.5 text-xs font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg flex items-center gap-1.5"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Edit on edit page →
+              </Link>
+            </div>
+          )}
+          <TenderCriteriaEditor tenderId={tender.id} editable={false} />
+        </div>
+      )}
+      {tab === 'boq' && (
+        <div className="space-y-3">
+          {perms.edit && EDITABLE_STATUSES.includes(tender.status) && (
+            <div className="flex justify-end">
+              <Link
+                href={`/tenders/${tender.id}/edit#boq`}
+                className="px-3 py-1.5 text-xs font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg flex items-center gap-1.5"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Edit on edit page →
+              </Link>
+            </div>
+          )}
+          <TenderBoqEditor tenderId={tender.id} editable={false} />
+        </div>
+      )}
       {tab === 'clarifications' && <ClarificationsTabPanel tenderId={tender.id} />}
       {tab === 'bids' && <BidsTabPanel tenderId={tender.id} />}
       {tab === 'audit' && <AuditTrailTabPanel tenderId={tender.id} />}

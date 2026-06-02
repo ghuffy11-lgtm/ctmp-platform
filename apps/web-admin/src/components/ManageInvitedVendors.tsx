@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Plus, X, AlertCircle, Loader2 } from 'lucide-react';
 import { get, post, del } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { useConfirm } from '@/components/dialog/DialogProvider';
 
 interface InvitedVendor {
   vendorId: string;
@@ -33,6 +34,7 @@ const ADD_STATUSES = new Set(['Draft', 'Internal Review', 'Approved', 'Published
 const REMOVE_STATUSES = new Set(['Draft', 'Internal Review', 'Approved']);
 
 export function ManageInvitedVendors({ tenderId, tenderStatus }: Props) {
+  const confirm = useConfirm();
   const [invited, setInvited] = useState<InvitedVendor[] | null>(null);
   const [vendors, setVendors] = useState<VendorPickerItem[]>([]);
   const [picker, setPicker] = useState('');
@@ -89,7 +91,13 @@ export function ManageInvitedVendors({ tenderId, tenderStatus }: Props) {
   }
 
   async function handleRemove(vendorId: string, vendorName: string) {
-    if (!confirm(`Remove invitation for "${vendorName}"?`)) return;
+    const ok = await confirm({
+      title: 'Remove invitation',
+      body: `Remove invitation for "${vendorName}"?`,
+      destructive: true,
+      confirmLabel: 'Remove',
+    });
+    if (!ok) return;
     setError(null);
     try {
       const token = getAccessToken();

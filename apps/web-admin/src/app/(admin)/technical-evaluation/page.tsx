@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { usePdfViewer } from '@/components/viewer/PdfViewerProvider';
+import { useConfirm } from '@/components/dialog/DialogProvider';
 import { AlertTriangle, ClipboardList, Package, ChevronRight, Eye, Save, PenLine, Lock } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -151,6 +152,7 @@ function ListSkeleton() {
 
 export default function TechnicalEvaluationPage() {
   const { openPdfViewer } = usePdfViewer();
+  const confirm = useConfirm();
   const [tenders, setTenders] = useState<TenderSummary[]>([]);
   const [tendersLoading, setTendersLoading] = useState(true);
   const [selectedTenderId, setSelectedTenderId] = useState<string | null>(null);
@@ -177,10 +179,12 @@ export default function TechnicalEvaluationPage() {
       setTendersLoading(true);
       try {
         const token = getAccessToken();
-        // WALK-054: include past-evaluation statuses so the evaluator can
-        // revisit completed work read-only. Backend still gates writes.
+        // BUG-075 (2026-06-01): keep only tenders currently in evaluation. Owner
+        // directive: "once evaluation is completed then remove it from Technical
+        // Evaluation, because tender will appear in Technical Comparison which is
+        // what we need." Supersedes the WALK-054 revisit-read-only behaviour.
         const results = await Promise.all(
-          [...EVALUATION_STATUSES, ...PAST_EVALUATION_STATUSES].map(status =>
+          EVALUATION_STATUSES.map(status =>
             get<PaginatedTenders>(
               `/tenders?status=${encodeURIComponent(status)}&pageSize=50`,
               token,
@@ -189,9 +193,7 @@ export default function TechnicalEvaluationPage() {
         );
         const merged = results.flatMap(r => r.data);
         setTenders(merged);
-        // Default-select an active tender if one exists; otherwise first overall.
-        const firstActive = merged.find(t => !PAST_SET.has(t.status));
-        if (merged.length > 0) setSelectedTenderId((firstActive ?? merged[0]).id);
+        if (merged.length > 0) setSelectedTenderId(merged[0].id);
       } finally {
         setTendersLoading(false);
       }
@@ -252,15 +254,21 @@ export default function TechnicalEvaluationPage() {
   // back to a blank scorecard. Hydration only fires when the bid OR the
   // tender criteria OR the evaluation list changes.
   const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
+  // BUG-074: also surface the JWT username so the scorecard can show
+  // "Evaluating as: <name>" above the form. JWT payload puts adUsername (or
+  // email fallback) in `username` — good-enough identity for the active form.
+  const [currentUsername, setCurrentUsername] = useState<string | undefined>(undefined);
   useEffect(() => {
     const token = getAccessToken();
     if (!token) return;
     try {
       const [, payload] = token.split('.');
-      const decoded = JSON.parse(atob(payload)) as { sub?: string };
+      const decoded = JSON.parse(atob(payload)) as { sub?: string; username?: string };
       setCurrentUserId(decoded?.sub);
+      setCurrentUsername(decoded?.username);
     } catch {
       setCurrentUserId(undefined);
+      setCurrentUsername(undefined);
     }
   }, []);
 
@@ -427,7 +435,13 @@ export default function TechnicalEvaluationPage() {
 
   async function handleFinalize() {
     if (!selectedTenderId) return;
-    if (!confirm('Finalize technical results? Only PASSED vendors proceed to commercial.')) return;
+    const ok = await confirm({
+      title: 'Finalize technical results',
+      body: 'Finalize technical results? Only PASSED vendors proceed to commercial.',
+      destructive: true,
+      confirmLabel: 'Finalize',
+    });
+    if (!ok) return;
     setFinalizing(true);
     try {
       const token = getAccessToken();
@@ -675,6 +689,18 @@ export default function TechnicalEvaluationPage() {
                 <FinalisedSummaryBanner bids={bids} evaluations={evaluations} maxTotal={maxTotal} />
               )}
 
+              {/* BUG-074: identify the active evaluator above the scorecard so
+                   committee/audit can see who's filling in scores at a glance. */}
+              {!PAST_SET.has(selectedTender.status) && currentUsername && (
+                <div className="mb-4 bg-accent/5 border border-accent/30 rounded-xl px-5 py-3 flex items-center gap-3">
+                  <PenLine className="w-4 h-4 text-accent" />
+                  <p className="text-sm text-text-primary">
+                    <span className="text-text-secondary">Evaluating as:</span>{' '}
+                    <span className="font-bold">{currentUsername}</span>
+                  </p>
+                </div>
+              )}
+
               <div className="flex justify-between items-start mb-5">
                 <div>
                   <h1 className="text-xl font-bold text-text-primary tracking-tight">
@@ -852,25 +878,43 @@ export default function TechnicalEvaluationPage() {
               </div>
 
               {/* Finalize — hidden when the tender has already moved past
-                  technical evaluation (WALK-054 view-only mode). */}
-              {selectedTender && !PAST_SET.has(selectedTender.status) && (
-                <div className="bg-card rounded-xl border border-border p-5 flex items-center justify-between shadow-sm">
-                  <div>
-                    <p className="text-sm font-bold text-text-primary">Finalize Technical Results</p>
-                    <p className="text-xs text-text-secondary mt-0.5">
-                      Lock all scorecards for this tender. Only PASSED vendors proceed to commercial comparison.
-                    </p>
+                  technical evaluation (WALK-054 view-only mode).
+                  BUG-073 (2026-06-01): button is disabled until every bid has
+                  at least one evaluation row. Tooltip names the unevaluated
+                  vendors so the evaluator knows where to go next. Owner finalized
+                  a tender with one vendor un-evaluated → locked the tender from
+                  edit; this gate prevents the same trap. */}
+              {selectedTender && !PAST_SET.has(selectedTender.status) && (() => {
+                const evaluatedBidIds = new Set(evaluations.map(e => e.bidId));
+                const unevaluatedBids = bids.filter(b => !evaluatedBidIds.has(b.id));
+                const blockedReason = bids.length === 0
+                  ? 'No bids submitted yet.'
+                  : unevaluatedBids.length > 0
+                    ? `Cannot finalize — un-evaluated: ${unevaluatedBids.map(b => b.vendorCompany).join(', ')}.`
+                    : null;
+                return (
+                  <div className="bg-card rounded-xl border border-border p-5 flex items-center justify-between shadow-sm">
+                    <div>
+                      <p className="text-sm font-bold text-text-primary">Finalize Technical Results</p>
+                      <p className="text-xs text-text-secondary mt-0.5">
+                        Lock all scorecards for this tender. Only PASSED vendors proceed to commercial comparison.
+                      </p>
+                      {blockedReason && (
+                        <p className="text-xs text-danger mt-1 font-semibold">{blockedReason}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={handleFinalize}
+                      disabled={finalizing || blockedReason !== null}
+                      title={blockedReason ?? 'Finalize technical results'}
+                      className="px-5 py-2.5 bg-text-primary text-white rounded-lg text-sm font-bold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      <Lock className="w-[18px] h-[18px]" />
+                      {finalizing ? 'Finalizing…' : 'Finalize'}
+                    </button>
                   </div>
-                  <button
-                    onClick={handleFinalize}
-                    disabled={finalizing || evaluations.length === 0}
-                    className="px-5 py-2.5 bg-text-primary text-white rounded-lg text-sm font-bold hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-                  >
-                    <Lock className="w-[18px] h-[18px]" />
-                    {finalizing ? 'Finalizing…' : 'Finalize'}
-                  </button>
-                </div>
-              )}
+                );
+              })()}
             </div>
           )}
         </div>

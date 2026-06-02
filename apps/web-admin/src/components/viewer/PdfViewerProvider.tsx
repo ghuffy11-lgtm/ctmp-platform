@@ -1,20 +1,22 @@
 'use client';
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
-import { PdfViewerModal } from './PdfViewerModal';
+// BUG-071 (2026-06-01): PDFs now open in a new browser tab instead of an in-page
+// modal. Owner directive — the modal could be accidentally dismissed by ESC or
+// backdrop click, losing the document mid-review. New tab persists until the user
+// closes it. Call-site API (`openPdfViewer({ src, title, onClose })`) preserved
+// so every existing caller works unchanged.
+//
+// Auth note: src is always a blob: URL built by the caller after fetching the
+// PDF with the Bearer token. Blob URLs are same-origin so the new tab can render
+// them directly with the browser's built-in PDF viewer.
+
+import { createContext, useCallback, useContext, useRef } from 'react';
 
 export interface OpenViewerOptions {
   src: string;
   title?: string;
   downloadUrl?: string;
-  /** Called when the viewer closes — use to revoke blob URLs etc. */
+  /** Called when the viewer is no longer needed — caller revokes blob URLs here. */
   onClose?: () => void;
 }
 
@@ -33,42 +35,38 @@ export function usePdfViewer(): PdfViewerContextValue {
   return ctx;
 }
 
+// Delay before revoking the blob URL — the new tab needs the URL to load the PDF
+// into the browser's PDF viewer. 60s is comfortably more than any normal load.
+const REVOKE_DELAY_MS = 60_000;
+
 export function PdfViewerProvider({ children }: { children: React.ReactNode }) {
-  const [opts, setOpts] = useState<OpenViewerOptions | null>(null);
-  const onCloseRef = useRef<(() => void) | undefined>(undefined);
+  const pendingRevokes = useRef<number[]>([]);
 
   const closePdfViewer = useCallback(() => {
-    onCloseRef.current?.();
-    onCloseRef.current = undefined;
-    setOpts(null);
+    // No-op for new-tab pattern; kept for API compatibility with old callers.
   }, []);
 
-  const openPdfViewer = useCallback((next: OpenViewerOptions) => {
-    onCloseRef.current?.();
-    onCloseRef.current = next.onClose;
-    setOpts(next);
-  }, []);
-
-  useEffect(() => {
-    if (!opts) return;
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') closePdfViewer();
+  const openPdfViewer = useCallback((opts: OpenViewerOptions) => {
+    if (typeof window === 'undefined') return;
+    const w = window.open(opts.src, '_blank');
+    if (!w) {
+      // Pop-up blocked — fall back to same-tab navigation so the user still sees
+      // the document (browser back button returns them).
+      window.location.href = opts.src;
+      return;
     }
-    document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, [opts, closePdfViewer]);
-
-  useEffect(() => {
-    if (!opts) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
-  }, [opts]);
+    if (opts.title) {
+      try { w.document.title = opts.title; } catch { /* cross-origin in some cases */ }
+    }
+    if (opts.onClose) {
+      const handle = window.setTimeout(opts.onClose, REVOKE_DELAY_MS);
+      pendingRevokes.current.push(handle);
+    }
+  }, []);
 
   return (
     <PdfViewerContext.Provider value={{ openPdfViewer, closePdfViewer }}>
       {children}
-      {opts && <PdfViewerModal opts={opts} onClose={closePdfViewer} />}
     </PdfViewerContext.Provider>
   );
 }

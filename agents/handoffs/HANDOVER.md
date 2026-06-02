@@ -6,6 +6,250 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-06-02 — BUG-087/088/089 shipped: EXECUTIVE role + dashboard data fix + 401 root-cause fix + favicon
+
+**Date/time:** 2026-06-02 ~09:15 GMT+3
+**Agent/task:** Owner walked the Executive Dashboard (BUG-086) and surfaced: (1) restrict /executive to EXECUTIVE role only, (2) executive@ctmp.local needs perms, (3) Top Vendors empty, Estimated/Awarded off, Cycle 0d, (4) `/favicon.ico` 404, (5) cross-origin 401 — admin browser calling vendor URL.
+
+### What landed
+
+**BUG-087 — EXECUTIVE role + perm gate** (high impact)
+
+- Migration `database/migrations/021_bug087_executive_role.sql`:
+  - New permission `executive:dashboard` (category: executive).
+  - New system role `EXECUTIVE` (separate from existing legacy `EXECUTIVE_VIEWER`).
+  - EXECUTIVE grants: `executive:dashboard` + `system:view_all_departments` (cross-dept cumulative view) + `tender:view` + `comparison:commercial:view` + `comparison:commercial:confirm` (so executive can do the final Confirm Award click).
+  - SYSTEM_ADMIN also granted `executive:dashboard`.
+- `executive@ctmp.local` assigned EXECUTIVE role (additive — kept EXECUTIVE_VIEWER); token_version bumped.
+- Backend: `analytics.controller.ts` gate changed `reports:view` → `executive:dashboard`.
+- Frontend: `Sidebar.tsx` /executive entry gate changed to `executive:dashboard`. PROCUREMENT_ADMIN / Manager / Auditor lose sidebar access.
+
+**BUG-088 — dashboard data correctness** (partial)
+
+- Root cause: staging award flow never populates `tenders.awarded_amount`. Only `awarded_at` + `awarded_vendor_id` get set.
+- Service patch: `awardedRows` filter loosened from `awardedAt != null && awardedAmount != null` to just `awardedAt != null`. Null amounts contribute 0 to sums.
+- Result: Top Vendors now shows 3 vendors (E2E Test Vendor LLC, Acme Builders LLC, Vendor 1). Amounts will be 0 KWD until backfill happens.
+- Deeper fix deferred: `award.service.ts:confirmAward` should copy the bid's commercial total (from `commercial_evaluations.totalPrice` or sum of `bid_boq_items`) into `tenders.awarded_amount`. Captured as Phase-2 work on this BUG.
+
+**BUG-089 — favicon + cross-origin 401** (medium)
+
+- Favicon: `apps/web-admin/public/favicon.ico` (1150-byte 16x16 ICO, accent blue) + `apps/web-admin/src/app/icon.tsx` Next.js icon convention.
+- 401 root cause: single `PUBLIC_API_URL` baked into BOTH admin + vendor builds, on staging set to vendor host. Admin browser → vendor host worked via the reverse proxy on :4201, but every admin call cross-origin'd and 401'd after JWT expiry.
+- Fix:
+  - `docker-compose.yml` split into `ADMIN_PUBLIC_API_URL` for admin and `VENDOR_PUBLIC_API_URL` for vendor (each falls back to `PUBLIC_API_URL` for back-compat).
+  - Staging `.env` updated with `ADMIN_PUBLIC_API_URL=https://ctmp-admin.hadiclinic.com.kw:4202`.
+  - Admin rebuilt + recreated. Verified the new URL is baked into `.next/static/chunks/*.js`.
+
+### Verification trail
+
+- ✅ Migration applied on staging (1 perm + 1 role + 6 role-permission grants).
+- ✅ executive@ctmp.local effective perms verified by SQL: 9 perms total (5 from EXECUTIVE + 4 legacy from EXECUTIVE_VIEWER).
+- ✅ Analytics endpoint with admin token: returns `topVendors: 3`, `awardedTenderCount: 3`.
+- ✅ `docker exec ctmp-web-admin printenv NEXT_PUBLIC_API_URL` → `https://ctmp-admin.hadiclinic.com.kw:4202`.
+- ✅ Build markers `ctmp-admin.hadiclinic` found in client chunks `140-fe4eea87b7c16557.js` and `910-93204e23f44aef85.js`.
+- 🟡 Favicon final build in progress (about to recreate).
+- ⏳ Owner walkthrough: log in as `executive@ctmp.local` → sidebar shows Executive entry, dashboard loads, /executive permission gate works. Log in as other roles → Executive entry hidden. Sit idle → reload → no cross-origin 401. Open dev tools → no `/favicon.ico` 404.
+
+### What's left (deferred to next bundle)
+
+- **BUG-088 Phase 2**: backfill `tenders.awarded_amount` from bid commercial totals on award confirm + null-safe UI labels ("N/A" not "0 KWD" for null estimated).
+- **BUG-090 (NEW backlog)**: Drill-down click handlers on Executive KPI cards (Pending Approvals → /approvals, Active Pipeline → tender list filtered, etc.) and on legacy /dashboard cards too.
+- **BUG-091 (NEW backlog)**: System Settings — logo upload + application name. Backend storage (probably MinIO) + frontend Settings tab + sidebar/login page consumption.
+- **BUG-092 (NEW backlog)**: Document/UX for "How do I assign sidebar menus to users" — likely a short guide that the user-role management UI under Settings already exists but needs a clearer pointer.
+
+---
+
+## 2026-06-02 — BUG-086 Phase 1 shipped: Executive Dashboard MVP
+
+**Date/time:** 2026-06-02 ~01:10 GMT+3
+**Agent/task:** Owner asked for a management-level executive dashboard: *"how much cost for tenders, complete dashboard for executives complete financial information of approved tenders, month, years, previous years… think out of the box."*
+
+### What landed
+
+**Backend — `apps/api/src/modules/analytics/`** (new module):
+
+- `analytics.module.ts` — registered in `app.module.ts`.
+- `analytics.controller.ts` — `GET /analytics/executive-summary?year=YYYY` gated by `reports:view` (existing perm — already on PROCUREMENT_ADMIN / SYSTEM_ADMIN / MANAGER).
+- `analytics.service.ts` — single `executiveSummary(year)` method does all aggregations on-demand. Pulls tenders for the year + prior year + all-active pipeline + active vendor count, then computes KPIs / monthly trend / dept / category / vendor / pipeline / cycle-time in JS. Pure read-only — no schema changes, no migrations, no cache.
+
+**Frontend — `apps/web-admin/src/app/(admin)/executive/page.tsx`** (new page):
+
+- One API call → renders 8 sections in order:
+  1. **KPI strip** (8 cards) — Tenders Created · Estimated Value · Awarded Value · Realised Savings · Savings Rate · Active Pipeline · Avg Days to Award · Awarded Tenders. Each card shows YoY delta vs prior year with colour-coded up/down arrows.
+  2. **Monthly trend** — 12-bar pair chart (estimated vs awarded), pure Tailwind widths so no chart-library dep.
+  3. **By Department** breakdown — sorted by spend, dual progress bars (est + awarded).
+  4. **By Category** breakdown — same shape.
+  5. **Top 10 Vendors** by award value with awards count + total KWD + share-of-total %.
+  6. **Vendor concentration risk** indicator — Top-3 / Top-5 share, colour-coded green/amber/red (≥75% red, ≥50% amber).
+  7. **Active pipeline** by status (estimated value per stage).
+  8. **Cycle-time footer** — avg Created→Awarded and Submission→Awarded days.
+- Year selector (current → 4 years back) + Print button.
+- Currency: KWD (staging single-currency). All amounts shown with K/M suffix on cards, full numbers in tables.
+
+**Sidebar — `Sidebar.tsx`:**
+
+- New "Executive" entry with `TrendingUp` icon between Dashboard and Tenders, gated by `reports:view`.
+
+### Verification trail
+
+- ✅ `npx tsc --noEmit` clean on api + web-admin
+- ✅ Files tarred to staging
+- 🟡 Container build in progress
+- ⏳ Owner walkthrough pending. Pages to walk: (a) `/executive` → 8 KPI cards + monthly chart + dept + category breakdowns + top vendors + concentration + pipeline + cycle time. (b) Switch year selector to 2025 → values recompute. (c) Print → browser PDF dialog.
+
+### Phase 2 roadmap (not built yet, in source comments)
+
+- Drill-down: click KPI / dept / vendor row → filtered tender list.
+- Time-range picker beyond year (quarter, fiscal year, custom range).
+- Forecast widget: project next-quarter spend from Draft/Internal Review pipeline.
+- Stage velocity heatmap (days per state transition).
+- Scheduled email digest to executives.
+- Richer export (PDF/PPTX for board meetings).
+- Predictive metrics (vendor reliability score, late-delivery risk).
+
+---
+
+## 2026-06-02 — BUG-085 shipped: Criteria/BoQ as detail tabs + edit page Docs/Submit
+
+**Date/time:** 2026-06-02 ~00:50 GMT+3
+**Agent/task:** Owner walked the tender create + view flow and surfaced two friction points: (a) officer creates a tender → has to discover Edit → finds Criteria + BoQ buried in there; documents only on detail; Submit only on detail. (b) Manager view shows Overview only — Criteria + BoQ require clicking Edit (read-by-clicking-Edit anti-pattern).
+
+### What landed
+
+**Part A — `/tenders/[id]/page.tsx` (view page):**
+
+- `TabId` extended to `'overview' | 'criteria' | 'boq' | 'clarifications' | 'bids' | 'audit'`. Owner-specified tab order. ClipboardList icon for Criteria, Package for BoQ.
+- New `{tab === 'criteria' && ...}` and `{tab === 'boq' && ...}` render branches mount the existing editors with `editable={false}`. Same `/tenders/:id/criteria` + `/tenders/:id/boq` endpoints — no backend change.
+- When caller has `tender:edit` perm + status ∈ Draft/Internal/Approved, top-right of each tab shows "Edit on edit page →" link to `/edit#criteria` or `/edit#boq`. View-only users (managers, evaluators) see no edit affordance.
+
+**Part B — `/tenders/[id]/edit/page.tsx` (officer setup page):**
+
+- New `TenderDocumentsBlock` inline component (in same file): handles upload (FormData POST), download (blob anchor), and delete (with `useConfirm` modal). Same backend endpoints the detail-page Overview tab already uses.
+- Section anchor IDs: `#documents`, `#criteria`, `#boq` — match the deep-links from Part A's Edit buttons.
+- `?from=create` banner moved from below the form to **above** the form. Banner now lists the four sections (Basic Info → Documents → Criteria → BoQ) and the final Submit step with anchor links.
+- Page H1 reads "Tender Setup" when `?from=create`, "Edit Tender" otherwise.
+- **Submit for Approval** CTA at the bottom of the page when status=Draft + `tender:edit`. Reuses `POST /tenders/:id/submit-for-approval`. Confirmation modal warns "you will no longer be able to change Department after this." On success, redirect to detail page.
+
+### Verification trail
+
+- ✅ `npx tsc --noEmit` clean on web-admin
+- ✅ File tarred to staging
+- 🟡 Container build in progress
+- ⏳ Owner walkthrough: (a) Create new tender → land on /edit?from=create with banner at top, all four sections visible + Submit at bottom. (b) Open existing tender → tab strip has Criteria + BoQ in the owner-specified order; read-only; Edit link visible for officer.
+
+### What's next
+
+Owner verification across the new tender setup + view flow. No other backlog items in flight today.
+
+---
+
+## 2026-06-02 — BUG-084 shipped: vendor BoQ CSV round-trip
+
+**Date/time:** 2026-06-02 ~00:10 GMT+3
+**Agent/task:** Owner asked for the BUG-072 admin CSV pattern to be mirrored on the vendor side of the bid wizard. Quote: *"csv file is the BoQ which is uploaded by the Procurement officer, vendor download full BoQ as CSV update price in the same CSV and uploads back."*
+
+### What landed
+
+`apps/web-vendor/src/app/(portal)/bids/wizard/[tenderId]/page.tsx` (single-file change):
+
+- `Step2BoqPricing` gains a toolbar with **Download CSV** + **Import CSV** + hidden `<input type="file">`. CSV format: `item_no,description,qty,unit,status,unit_price`. Download builds from current form state so download → edit-in-Excel → import → tweak-in-app → download again round-trip works in either direction.
+- New `parseVendorBoqCsv` helper validates header, matches rows by `item_no` against the in-DB template, accepts case-insensitive `BIDDING`/`Bidding`/`NOT_BIDDING`/`Not bidding`/blank (defaults BIDDING), requires non-negative numeric `unit_price` when status is BIDDING. Returns either `{ lines }` keyed by item_no or `{ errors }` (row-numbered).
+- New `csvEscape` helper wraps fields containing comma / quote / newline (RFC-4180-lite). Procurement-defined descriptions can contain commas.
+- Import behaviour: matched rows overwrite form state; rows missing from CSV stay at their current state (partial CSV upload OK); rows with item_no not in template error out the whole import.
+- Procurement columns (description / qty / unit) on import are **informational only** — in-DB template's qty stays authoritative so vendors can't fudge line-total math via an offline CSV edit.
+- Error display: red banner above the form lists row-numbered issues (first 8 + count).
+- Per-row form rendering and PUT to `/bids/:bidId/boq-items` unchanged.
+
+### Verification trail
+
+- ✅ `npx tsc --noEmit` clean on web-vendor
+- ✅ File tarred to staging at `/mnt/repo/ctmp-platform/`
+- 🟡 Container build in progress
+- ⏳ Owner walkthrough pending: (a) Download CSV → opens in Excel with six columns; (b) Fill in some prices + Not bidding, re-save; (c) Import CSV → form rows populate; (d) Tweak one in-app + Save draft.
+
+### What's next
+
+Owner verification across the BoQ CSV round-trip. If owner reports any issues, follow-up bundle.
+
+---
+
+## 2026-06-01 — Bundles 2–5 shipped: Tech-eval hygiene + Committee opening + BOQ CSV + Vendor portal
+
+**Date/time:** 2026-06-01 ~11:35 GMT+3
+**Agent/task:** Round-2 walkthrough — closing out items 1, 3–14 (item 2 was Bundle 1).
+
+### Bundle 2 — Technical Evaluation hygiene
+
+- **BUG-070** — `VendorComparisonCard.TechDetailModal` body switched from single-vendor `<VendorTechnicalCard>` (BUG-069's shape) to the full `<TechnicalMatrix>` with the clicked vendor in `selectedVendorId`. Modal width bumped to `max-w-6xl`. Same endpoint; we now also pull `tender.technicalPassThreshold`.
+- **BUG-073** — `technical-evaluation.service.ts:finalize` now refuses with `409 UNEVALUATED_VENDORS` (response includes the unevaluated list) when any active bid (SUBMITTED/LATE_ACCEPTED) has zero evaluations. Frontend disables Finalize and prints a red helper line naming the vendors. Closes the trap that locked owner's tender after a partial evaluation.
+- **BUG-074** — Tech Eval scorecard top now shows an accent-bordered banner "Evaluating as: \<jwt.username\>". JWT didn't carry display name; surfaced username/email for now (richer surfacing requires a `/users/me` endpoint — follow-up).
+- **BUG-075** — Tech Eval list fetch no longer pulls `PAST_EVALUATION_STATUSES`. Past tenders drop off; owner can still revisit them on `/technical-comparison`. Supersedes WALK-054.
+- **BUG-081** — `CommercialDocumentsList` gains a **View** button beside Download (uses `openPdfViewer` → new tab via Bundle 1).
+
+### Bundle 3 — Committee Commercial Opening
+
+- **BUG-076** — New `/committee-opening/agenda/print/[sessionId]?tenderId=...` page renders a real printable agenda: meeting metadata, tender info, committee-members table (with PRESENT + signature columns), agenda items, opening remarks, signature lines. Auto-fires `window.print()` on mount. `@media print` hides admin chrome. Button now opens that route in a new tab. WALK-037 superseded.
+- **BUG-077** — Backend was silently dropping the remarks. `openCommercialEnvelopes` controller now accepts `{ remarks?: string }`; service writes `session.minutesText = remarks` in the COMPLETED-update step. Frontend already hydrated from `session.remarks`, so reload now shows what the operator typed.
+- **BUG-079** — Backend `openEnvelopes` now throws `409 BEFORE_MEETING_DATE` when `now < session.scheduledAt`. Frontend has a 60s-interval `nowTick`; `canOpenEnvelopes` includes `!beforeMeeting` and the button shows a red helper + tooltip when blocked. Closes the trap of opening early.
+- **BUG-080** — `COMMITTEE_STATUSES` reduced to `['Commercial Sealed']`. Already-opened + handed-off tenders no longer clutter the list. Supersedes WALK-043.
+
+### Bundle 4 — BOQ ergonomics
+
+- **BUG-072** — `TenderBoqEditor` gains a toolbar with **Template** (links to `/templates/boq-template.csv`) + **Import CSV**. New `parseBoqCsv` helper validates the header, qty > 0, unique `item_no`; errors render row-numbered in a red banner. Successful import replaces the current rows; user still clicks Save BOQ to commit.
+
+### Bundle 5 — Vendor portal
+
+- **BUG-082** — Vendor's `/bids/[bidId]` now fetches `/tenders/:id/boq` + `/bids/:bidId/boq-items` and renders a read-only BoQ table: Item / Description / Qty / Unit / Status chip (Bidding / Not bidding) / Unit Price / Line Total + grand total. Hidden for legacy tenders or DRAFTs that haven't priced yet.
+- **BUG-083** — Vendor `/tenders/[id]` now fetches `/vendor-auth/me/bids` and renders **VIEW SUBMITTED BID** (linking to `/bids/[id]`) when an existing non-DRAFT bid exists on this tender, **CONTINUE BID** for DRAFT, otherwise the original **START BID**.
+
+### Verification trail
+
+- ✅ `npx tsc --noEmit` clean on api + web-admin + web-vendor
+- ✅ Bundle 2 already built + recreated on staging (api + web-admin)
+- 🟡 Bundles 3+4+5 build is currently running on staging (api + web-admin + web-vendor)
+- ⏳ Owner walkthrough pending across all surfaces
+
+### What's next
+
+Owner walks staging across all 14 fixes. If anything regresses, follow-up bundle. Otherwise the 14-item batch is closed.
+
+---
+
+## 2026-06-01 — Bundle 1 shipped: PDF new tab + in-app Confirm modal (BUG-071, BUG-078)
+
+**Date/time:** 2026-06-01 ~11:10 GMT+3
+**Agent/task:** Owner's Round-2 walkthrough surfaced 14 findings (BUG-070..083). Plan parked at `C:\Users\Administrator\.claude\plans\for-theme3-i-want-synchronous-dream.md` groups them into 5 bundles. This is Bundle 1 — global view primitives that several later bundles reuse.
+
+### What landed
+
+- **BUG-071 — PDFs open in a new browser tab.** Owner directive: the in-page modal was easy to dismiss accidentally (ESC, backdrop click) and the doc was lost. `apps/web-admin/src/components/viewer/PdfViewerProvider.tsx` rewritten so `openPdfViewer({src, title, onClose})` programmatically calls `window.open(src, '_blank')` instead of mounting `<PdfViewerModal>`. Call-site API preserved → all 3 admin call sites (`technical-evaluation`, `approvals`, `VendorTechnicalCard`) work unchanged. Blob-URL revoke deferred 60s via `setTimeout` so the new tab has time to load. Popup-blocked fallback navigates same-tab.
+  - **Locked-rule amendment:** master plan's "Modal full-screen PDF viewer. Not inline-embedded, not split-pane, not new-tab" rule is now amended by owner directive. Audit-log-before-stream rule unchanged (still enforced server-side on the GET).
+  - `PdfViewerModal.tsx` left as dead code for one cycle; safe to delete in a follow-up.
+
+- **BUG-078 — In-app Confirm modal everywhere.** Owner directive: browser-native confirm() looked like a notification, felt detached from the app. New `apps/web-admin/src/components/dialog/DialogProvider.tsx` exposes `useConfirm()` + `useNotify()` hooks. Mounted in `(admin)/layout.tsx` above `PdfViewerProvider`. Confirm dialog supports `destructive` flag (red button, ESC/backdrop disabled).
+  - Replaced all 12 destructive `window.confirm(...)` call sites:
+    - `committee-opening/page.tsx` — Open commercial envelopes (the owner-mentioned one)
+    - `technical-evaluation/page.tsx` — Finalize technical results
+    - `vendors/page.tsx` — Approve vendor
+    - `settings/evaluation-criteria/page.tsx` — Deactivate library entry
+    - `settings/page.tsx` — Disable department, Disable user
+    - `tenders/[id]/page.tsx` — Delete doc, Issue award, Close tender, Cancel tender
+    - `components/ManageInvitedVendors.tsx` — Remove invitation
+  - `alert(...)` error-display call-sites left for now — they're error displays, not decision points; will replace with `useNotify()` in a follow-up.
+
+### Verification trail
+
+- ✅ `npx tsc --noEmit` clean on `apps/web-admin`
+- ✅ Files tarred to staging at `/mnt/repo/ctmp-platform/`
+- 🟡 Container build in progress — first attempt failed with transient DNS lookup error on `auth.docker.io`; retrying.
+- ⏳ Owner walkthrough pending: (a) click any PDF → opens new tab; (b) Open commercial envelopes → in-app modal, not browser-native.
+
+### What's next
+
+Bundle 2 — Tech Eval hygiene (BUG-070 matrix in modal + BUG-073 finalize gate + BUG-074 evaluator name + BUG-075 list filter + BUG-081 view PDF on Qualified Vendors).
+
+---
+
 ## 2026-06-01 — BUG-069 shipped: tech-detail modal on Commercial Comparison
 
 **Date/time:** 2026-06-01 ~10:20 GMT+3

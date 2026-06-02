@@ -1,6 +1,7 @@
 'use client';
 
 import { CommercialDocumentsList } from '@/components/CommercialDocumentsList';
+import { useConfirm } from '@/components/dialog/DialogProvider';
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
@@ -75,10 +76,11 @@ interface CommercialOpeningRecord {
   openedAt?: string;
 }
 
-// WALK-043: tender stays on this page after envelopes are opened (status
-// flips to COMMERCIAL_EVALUATION) so the user does not feel stuck. The page
-// shows a "handed off to Commercial Comparison" cue for those rows.
-const COMMITTEE_STATUSES = ['Commercial Sealed', 'Committee Commercial Opening', 'Commercial Evaluation / Comparison'];
+// BUG-080 (2026-06-01, supersedes WALK-043): owner asked that only pending
+// tenders appear in the Committee Commercial Opening list. The previous
+// WALK-043 behaviour kept already-opened tenders visible with a "handed off"
+// cue, but owner reported it as clutter — they only want what's still actionable.
+const COMMITTEE_STATUSES = ['Commercial Sealed'];
 const OPENED_STATUS = 'Commercial Evaluation / Comparison';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -98,6 +100,7 @@ function initials(name: string): string {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CommitteeOpeningPage() {
+  const confirm = useConfirm();
   const [tenders, setTenders] = useState<TenderSummary[]>([]);
   const [tendersLoading, setTendersLoading] = useState(true);
   const [selectedTenderId, setSelectedTenderId] = useState<string | null>(null);
@@ -190,7 +193,21 @@ export default function CommitteeOpeningPage() {
   const selectedTender = tenders.find(t => t.id === selectedTenderId) ?? null;
   const presentCount = members.filter(m => m.attended === true).length;
   const quorumMet = members.length > 0 && presentCount >= Math.ceil(members.length / 2);
-  const canOpenEnvelopes = !!session && session.status !== 'COMPLETED' && quorumMet && remarks.trim().length > 0;
+  // BUG-079 (2026-06-01): block opening before scheduled meeting time. Backend
+  // also refuses with 409 BEFORE_MEETING_DATE, but the UI should make the gate
+  // visible instead of bouncing the operator off an error.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const h = setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => clearInterval(h);
+  }, []);
+  const scheduledAt = session?.scheduledAt ? new Date(session.scheduledAt) : null;
+  const beforeMeeting = scheduledAt != null && nowTick < scheduledAt.getTime();
+  const canOpenEnvelopes = !!session
+    && session.status !== 'COMPLETED'
+    && quorumMet
+    && remarks.trim().length > 0
+    && !beforeMeeting;
 
   // ─── Handlers ───────────────────────────────────────────────────────────────
   function toggleAttendance(userId: string, attended: boolean) {
@@ -260,10 +277,14 @@ export default function CommitteeOpeningPage() {
 
   async function handleOpenEnvelopes() {
     if (!session) return;
-    if (!confirm(
-      'Open commercial envelopes for all technically qualified vendors? '
-      + 'This is irreversible and writes to the audit log. Visibility of commercial details still requires explicit permission.',
-    )) return;
+    const ok = await confirm({
+      title: 'Open commercial envelopes',
+      body: 'Open commercial envelopes for all technically qualified vendors? '
+        + 'This is irreversible and writes to the audit log. Visibility of commercial details still requires explicit permission.',
+      destructive: true,
+      confirmLabel: 'Open envelopes',
+    });
+    if (!ok) return;
     setOpeningEnvelopes(true);
     setError(null);
     try {
@@ -446,13 +467,15 @@ export default function CommitteeOpeningPage() {
                 )}
               </div>
               <div className="flex gap-2">
-                {/* WALK-037: wire Print Agenda. Browser's print dialog uses
-                    the @media print rules in globals.css to hide nav/sidebar. */}
+                {/* BUG-076 (2026-06-01, supersedes WALK-037): opens a dedicated
+                     printable agenda document in a new tab. WALK-037 previously
+                     called window.print() which printed the live operator UI;
+                     owner pointed out that's useless. */}
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => session && selectedTender && window.open(`/committee-opening/agenda/print/${session.id}?tenderId=${selectedTender.id}`, '_blank')}
                   className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-bg flex items-center gap-2"
-                  title="Open the browser print dialog for the current session view"
+                  title="Open the agenda document for printing"
                 >
                   <Printer className="w-4 h-4" />
                   Print Agenda
@@ -776,6 +799,7 @@ export default function CommitteeOpeningPage() {
                       <button
                         onClick={handleOpenEnvelopes}
                         disabled={!canOpenEnvelopes || openingEnvelopes}
+                        title={beforeMeeting && scheduledAt ? `Scheduled for ${scheduledAt.toLocaleString()}` : undefined}
                         className={`px-8 py-3.5 rounded-lg font-bold text-base inline-flex items-center gap-3 transition-all ${
                           canOpenEnvelopes && !openingEnvelopes
                             ? 'bg-accent text-white shadow-md hover:opacity-90'
@@ -785,6 +809,11 @@ export default function CommitteeOpeningPage() {
                         <Unlock className="w-5 h-5" />
                         {openingEnvelopes ? 'Opening…' : 'Open Commercial Envelopes'}
                       </button>
+                      {beforeMeeting && scheduledAt && (
+                        <p className="text-xs font-semibold text-danger">
+                          Blocked until the scheduled meeting time: {scheduledAt.toLocaleString()}
+                        </p>
+                      )}
                       <p className="text-xs text-text-secondary">
                         Only path to open commercial envelopes. Requires quorum and remarks.
                         Visibility of commercial details still gated by <code>commercial:view</code>.

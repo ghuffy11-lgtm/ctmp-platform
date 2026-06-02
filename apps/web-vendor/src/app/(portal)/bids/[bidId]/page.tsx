@@ -6,6 +6,12 @@ import { get } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 
+// BUG-082 (2026-06-01): read-only BoQ view for vendors' submitted bids.
+interface BoqTemplateRow { id: string; itemNo: string; description: string; qty: number; unit: string }
+interface BidBoqLine { tenderBoqItemId: string; status: 'BIDDING' | 'NOT_BIDDING'; unitPrice: number | null }
+const BOQ_PLACEHOLDER_ITEM_NO = '0';
+const BOQ_PLACEHOLDER_DESCRIPTION = 'Legacy tender — no BOQ defined';
+
 interface MyBidSummary {
   id: string;
   tenderId: string;
@@ -35,6 +41,8 @@ export default function VendorBidDetailPage({ params }: { params: Promise<{ bidI
 
   const [bid, setBid] = useState<MyBidSummary | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [boqTemplate, setBoqTemplate] = useState<BoqTemplateRow[]>([]);
+  const [boqLines, setBoqLines] = useState<BidBoqLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,6 +62,17 @@ export default function VendorBidDetailPage({ params }: { params: Promise<{ bidI
           const r = await get<Receipt>(`/bids/${bidId}/receipt`, token).catch(() => null);
           if (r) setReceipt(r);
         }
+        // BUG-082: pull BoQ + the vendor's saved line entries. Both are best-effort —
+        // legacy tenders without a real BoQ just won't render this block.
+        const [tpl, ownLines] = await Promise.all([
+          get<{ items: BoqTemplateRow[] }>(`/tenders/${found.tenderId}/boq`, token).catch(() => ({ items: [] })),
+          get<{ items: BidBoqLine[] }>(`/bids/${bidId}/boq-items`, token).catch(() => ({ items: [] })),
+        ]);
+        const realRows = (tpl.items ?? []).filter(
+          r => !(r.itemNo === BOQ_PLACEHOLDER_ITEM_NO && r.description === BOQ_PLACEHOLDER_DESCRIPTION),
+        );
+        setBoqTemplate(realRows);
+        setBoqLines(ownLines.items ?? []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load bid');
       } finally {
@@ -144,6 +163,77 @@ export default function VendorBidDetailPage({ params }: { params: Promise<{ bidI
           </div>
         </div>
       )}
+
+      {/* BUG-082 (2026-06-01): vendor's BoQ view-only — shows what they priced
+            against each line of the tender BoQ. Hidden for legacy tenders without
+            a real BoQ template or DRAFT bids that haven't priced yet. */}
+      {boqTemplate.length > 0 && boqLines.length > 0 && (() => {
+        const linesByItem = new Map(boqLines.map(l => [l.tenderBoqItemId, l]));
+        let grandTotal = 0;
+        const rendered = boqTemplate.map(t => {
+          const line = linesByItem.get(t.id);
+          const bidding = line?.status === 'BIDDING' && line.unitPrice != null;
+          const lineTotal = bidding ? Number(line!.unitPrice) * Number(t.qty) : 0;
+          if (bidding) grandTotal += lineTotal;
+          return { t, line, bidding, lineTotal };
+        });
+        return (
+          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <h2 className="text-sm font-bold text-text-primary">Bill of Quantities (your bid — view only)</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-[10px] uppercase tracking-wider text-text-secondary">
+                    <th className="px-2 py-2 text-left w-20">Item</th>
+                    <th className="px-2 py-2 text-left">Description</th>
+                    <th className="px-2 py-2 text-right w-20">Qty</th>
+                    <th className="px-2 py-2 text-left w-16">Unit</th>
+                    <th className="px-2 py-2 text-center w-28">Status</th>
+                    <th className="px-2 py-2 text-right w-28">Unit Price</th>
+                    <th className="px-2 py-2 text-right w-28">Line Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {rendered.map(({ t, line, bidding, lineTotal }) => (
+                    <tr key={t.id}>
+                      <td className="px-2 py-2 font-mono text-xs">{t.itemNo}</td>
+                      <td className="px-2 py-2">{t.description}</td>
+                      <td className="px-2 py-2 font-mono text-right">{t.qty}</td>
+                      <td className="px-2 py-2">{t.unit}</td>
+                      <td className="px-2 py-2 text-center">
+                        <span className={
+                          'inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ' +
+                          (bidding
+                            ? 'bg-success/10 text-success'
+                            : line?.status === 'NOT_BIDDING'
+                              ? 'bg-text-secondary/10 text-text-secondary'
+                              : 'bg-danger/10 text-danger')
+                        }>
+                          {line?.status === 'BIDDING' ? 'Bidding' : line?.status === 'NOT_BIDDING' ? 'Not bidding' : '—'}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-right font-mono">
+                        {bidding ? Number(line!.unitPrice).toFixed(3) : '—'}
+                      </td>
+                      <td className="px-2 py-2 text-right font-mono">
+                        {bidding ? lineTotal.toFixed(3) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-border">
+                    <td colSpan={6} className="px-2 py-2 text-right text-xs font-bold uppercase text-text-secondary">Grand total</td>
+                    <td className="px-2 py-2 text-right font-mono font-bold text-base text-text-primary">
+                      {grandTotal.toFixed(3)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
       {receipt && (
         <div className="bg-card border border-border rounded-xl p-5 space-y-3">

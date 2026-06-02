@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { get, patch } from '@/lib/api';
-import { getAccessToken } from '@/lib/auth';
+import { get, patch, post, del } from '@/lib/api';
+import { getAccessToken, hasPermission } from '@/lib/auth';
+import { useConfirm } from '@/components/dialog/DialogProvider';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { TenderCriteriaEditor } from '@/components/TenderCriteriaEditor';
 import { TenderBoqEditor } from '@/components/TenderBoqEditor';
@@ -16,6 +17,12 @@ import {
   Info,
   ArrowLeft,
   Save,
+  Send,
+  Upload,
+  Download,
+  FolderOpen,
+  FileText,
+  Trash2,
 } from 'lucide-react';
 
 const CATEGORIES = [
@@ -79,6 +86,15 @@ function toFormData(tender: TenderData): FormData {
 
 // BUG-010: budget editable only in Draft + Internal Review.
 const BUDGET_EDITABLE_STATUSES = new Set(['Draft', 'Internal Review']);
+// BUG-085 (2026-06-02): same gate the detail-page Documents block uses.
+const EDITABLE_STATUSES = ['Draft', 'Internal Review', 'Approved'];
+const TENDER_DOC_ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function FieldLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
@@ -102,6 +118,14 @@ export default function EditTenderPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormData | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
+  // BUG-085: permission for the Submit-for-Approval CTA at the bottom of /edit.
+  const [canSubmit, setCanSubmit] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    const t = getAccessToken();
+    if (t) setCanSubmit(hasPermission(t, 'tender:edit'));
+  }, []);
+  const confirm = useConfirm();
 
   useEffect(() => {
     async function load() {
@@ -125,6 +149,29 @@ export default function EditTenderPage() {
 
   function update<K extends keyof FormData>(field: K, value: FormData[K]) {
     setForm(f => f ? { ...f, [field]: value } : f);
+  }
+
+  // BUG-085: Submit-for-Approval mirrors the detail page button so officers
+  // can complete tender setup + advance the workflow from /edit without
+  // bouncing back.
+  async function handleSubmitForApproval() {
+    if (!tender) return;
+    const ok = await confirm({
+      title: 'Submit for approval',
+      body: 'Submit this tender for internal review? You will no longer be able to change the Department after this.',
+      confirmLabel: 'Submit',
+    });
+    if (!ok) return;
+    setSubmitting(true);
+    try {
+      const token = getAccessToken();
+      await post(`/tenders/${tenderId}/submit-for-approval`, {}, token);
+      router.push(`/tenders/${tenderId}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to submit for approval');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function handleSave() {
@@ -198,10 +245,26 @@ export default function EditTenderPage() {
         <span className="text-text-primary font-semibold">Edit</span>
       </nav>
 
-      <div className="flex items-center gap-3 mb-8">
-        <h1 className="text-2xl font-bold text-text-primary tracking-tight">Edit Tender</h1>
+      <div className="flex items-center gap-3 mb-6">
+        <h1 className="text-2xl font-bold text-text-primary tracking-tight">{fromCreate ? 'Tender Setup' : 'Edit Tender'}</h1>
         <StatusBadge status={tender.status} />
       </div>
+
+      {/* BUG-085 (2026-06-02): banner moved to the TOP so the officer sees the
+           setup path immediately. Owner found the previous flow confusing —
+           Save → end up here → not realising the page also holds Criteria + BoQ
+           + Documents. Banner names the four sections + final action. */}
+      {fromCreate && (
+        <div className="mb-6 bg-accent/5 border border-accent/30 rounded-xl px-5 py-4 flex items-start gap-3">
+          <CheckCircle2 className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-text-primary">Tender created — finish setup below</p>
+            <p className="text-xs text-text-secondary mt-0.5">
+              Scroll through Basic Information → <Link href="#documents" className="text-accent hover:underline">Documents</Link> → <Link href="#criteria" className="text-accent hover:underline">Criteria</Link> → <Link href="#boq" className="text-accent hover:underline">BoQ</Link>, then click <strong>Submit for Approval</strong> at the bottom. Weights for Criteria must total 100; BoQ defines what vendors price per line.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Form Card */}
       <div className="bg-card rounded-xl border border-border shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
@@ -384,37 +447,232 @@ export default function EditTenderPage() {
         </div>
       </div>
 
-      {/* BUG-060 / WALK-007: post-create cue. Officer landed here straight
-          from /tenders/new so they can configure criteria + BOQ as next steps. */}
-      {fromCreate && (
-        <div className="mt-6 bg-accent/5 border border-accent/30 rounded-xl px-5 py-4 flex items-start gap-3">
-          <CheckCircle2 className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-text-primary">Tender created — next: set the Technical Evaluation Criteria AND the Bill of Quantities</p>
-            <p className="text-xs text-text-secondary mt-0.5">
-              Criteria drive technical scoring (weights must total 100). BOQ defines what vendors price per line — they enter unit prices at bid time and the system aggregates automatically. Both can be revised any time before approval.
-            </p>
-          </div>
-        </div>
-      )}
+      {/* BUG-085: Tender Documents block lifted from the detail page so the
+          officer can attach RFQ docs as part of the one-page setup flow. */}
+      <div id="documents" className="mt-6 scroll-mt-6">
+        <TenderDocumentsBlock
+          tenderId={tenderId}
+          editable={EDITABLE_STATUSES.includes(tender.status)}
+        />
+      </div>
 
       {/* Phase F (BUG-044): Per-tender criteria editor — visible whenever the
           tender exists; backend rejects saves at non-editable statuses anyway. */}
-      <div className="mt-6">
+      <div id="criteria" className="mt-6 scroll-mt-6">
         <TenderCriteriaEditor
           tenderId={tenderId}
-          editable={['Draft', 'Internal Review', 'Approved'].includes(tender.status)}
+          editable={EDITABLE_STATUSES.includes(tender.status)}
         />
       </div>
 
       {/* BUG-068 / Phase F BOQ: Per-tender BOQ editor — same status gate as
           the criteria editor. Vendors will fill unit prices against these lines. */}
-      <div className="mt-6">
+      <div id="boq" className="mt-6 scroll-mt-6">
         <TenderBoqEditor
           tenderId={tenderId}
-          editable={['Draft', 'Internal Review', 'Approved'].includes(tender.status)}
+          editable={EDITABLE_STATUSES.includes(tender.status)}
         />
       </div>
+
+      {/* BUG-085: Submit-for-Approval CTA at the bottom — mirrors the detail
+          page action so the officer can complete setup and advance the workflow
+          without navigating back. Only when status=Draft + caller has tender:edit. */}
+      {tender.status === 'Draft' && canSubmit && (
+        <div className="mt-8 bg-card border border-accent/40 rounded-xl px-6 py-5 flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-sm font-bold text-text-primary">Ready to submit?</p>
+            <p className="text-xs text-text-secondary mt-0.5">
+              Make sure Criteria weights total 100 and the BoQ lines are configured. After submit, the tender moves to Internal Review.
+            </p>
+          </div>
+          <button
+            onClick={handleSubmitForApproval}
+            disabled={submitting}
+            className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            <Send className="w-4 h-4" />
+            {submitting ? 'Submitting…' : 'Submit for Approval'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// BUG-085 (2026-06-02): Tender Documents block — same upload + delete pattern
+// as the detail-page Overview tab. Inline component to keep the edit-page
+// change scoped to this one file. Lift to packages/ui if a third surface needs
+// it.
+function TenderDocumentsBlock({ tenderId, editable }: { tenderId: string; editable: boolean }) {
+  const confirm = useConfirm();
+  const [docs, setDocs] = useState<Array<{ id: string; filename: string; fileSize: number; mimeType: string; uploadedAt: string }> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function refresh() {
+    try {
+      const token = getAccessToken();
+      const t = await get<{ documents: Array<{ id: string; filename: string; fileSize: number; mimeType: string; uploadedAt: string }> }>(
+        `/tenders/${tenderId}`,
+        token,
+      );
+      setDocs(t.documents ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load documents');
+    }
+  }
+
+  useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [tenderId]);
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${apiBase}/api/v1/tenders/${tenderId}/documents`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleDelete(docId: string, filename: string) {
+    const ok = await confirm({
+      title: 'Delete document',
+      body: `Delete "${filename}"? This cannot be undone.`,
+      destructive: true,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
+    try {
+      const token = getAccessToken();
+      await del(`/tenders/${tenderId}/documents/${docId}`, token);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed');
+    }
+  }
+
+  async function handleDownload(docId: string, filename: string) {
+    try {
+      const token = getAccessToken();
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const res = await fetch(`${apiBase}/api/v1/tenders/${tenderId}/documents/${docId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed');
+    }
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-bg/40">
+        <div>
+          <h3 className="text-base font-semibold text-text-primary">Tender Documents</h3>
+          <p className="text-xs text-text-secondary mt-0.5">RFQ, scope of work, drawings, addenda — anything vendors need to bid.</p>
+        </div>
+        {editable && (
+          <>
+            <input
+              ref={inputRef}
+              type="file"
+              accept={TENDER_DOC_ACCEPT}
+              onChange={handleUpload}
+              className="hidden"
+            />
+            <button
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+              className="flex items-center gap-1.5 text-sm text-accent hover:underline font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Upload className="w-4 h-4" />
+              {uploading ? 'Uploading…' : 'Upload'}
+            </button>
+          </>
+        )}
+      </div>
+      {error && <div className="px-6 py-2 bg-danger/5 border-b border-danger/20 text-xs text-danger">{error}</div>}
+      {docs === null ? (
+        <div className="py-8 text-center text-sm text-text-secondary">Loading…</div>
+      ) : docs.length === 0 ? (
+        <div className="py-10 text-center">
+          <FolderOpen className="w-10 h-10 text-text-secondary/30 mx-auto mb-2" />
+          <p className="text-sm text-text-secondary">No documents attached yet.</p>
+          {editable && <p className="text-xs text-text-secondary mt-1">Click <strong>Upload</strong> above to attach the RFQ / scope / drawings.</p>}
+        </div>
+      ) : (
+        <table className="w-full text-left">
+          <thead>
+            <tr className="bg-bg border-b border-border">
+              <th className="px-6 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">File</th>
+              <th className="px-6 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">Size</th>
+              <th className="px-6 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">Uploaded</th>
+              <th className="px-6 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {docs.map(doc => (
+              <tr key={doc.id} className="hover:bg-bg/60 transition-colors">
+                <td className="px-6 py-3.5">
+                  <div className="flex items-center gap-3">
+                    <FileText className="w-5 h-5 text-text-secondary" />
+                    <span className="text-sm text-text-primary">{doc.filename}</span>
+                  </div>
+                </td>
+                <td className="px-6 py-3.5 text-sm text-text-secondary">{formatFileSize(doc.fileSize)}</td>
+                <td className="px-6 py-3.5 text-sm text-text-secondary">
+                  {new Date(doc.uploadedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </td>
+                <td className="px-6 py-3.5 text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <button
+                      onClick={() => handleDownload(doc.id, doc.filename)}
+                      className="p-1.5 hover:bg-bg rounded-lg text-text-secondary hover:text-accent transition-colors"
+                      title="Download"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                    {editable && (
+                      <button
+                        onClick={() => handleDelete(doc.id, doc.filename)}
+                        className="p-1.5 hover:bg-danger/5 rounded-lg text-text-secondary hover:text-danger transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

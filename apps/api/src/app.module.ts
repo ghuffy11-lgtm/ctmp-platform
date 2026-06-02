@@ -37,6 +37,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { ReportsModule } from './modules/reports/reports.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
 import { SystemSettingsModule } from './modules/system-settings/system-settings.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { SystemSettingsModule } from './modules/system-settings/system-settings.
     ReportsModule,
     SystemSettingsModule,
     DepartmentsModule,
+    AnalyticsModule,
     RequestContextModule,
   ],
   controllers: [AppController],

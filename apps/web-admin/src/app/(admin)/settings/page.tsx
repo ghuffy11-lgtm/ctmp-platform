@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { get, post, patch, del } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { useConfirm } from '@/components/dialog/DialogProvider';
 import { ShieldCheck, Mail, MessageSquare, Bell, Building2, Users, Plus, Pencil, Trash2 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -689,6 +690,7 @@ function key2Updated(s: PlatformSetting, edits: Record<string, string>): Platfor
 // ─── Departments tab ──────────────────────────────────────────────────────────
 
 function DepartmentsTab() {
+  const confirm = useConfirm();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInactive, setShowInactive] = useState(false);
@@ -751,7 +753,13 @@ function DepartmentsTab() {
   }
 
   async function handleDisable(d: Department) {
-    if (!confirm(`Disable department "${d.name}"? Users assigned to it keep their assignment, but the department is hidden from new selections.`)) return;
+    const ok = await confirm({
+      title: 'Disable department',
+      body: `Disable department "${d.name}"? Users assigned to it keep their assignment, but the department is hidden from new selections.`,
+      destructive: true,
+      confirmLabel: 'Disable',
+    });
+    if (!ok) return;
     try {
       const token = getAccessToken();
       await del(`/departments/${d.id}`, token);
@@ -917,6 +925,7 @@ function DepartmentsTab() {
 // ─── Users tab ────────────────────────────────────────────────────────────────
 
 function UsersTab() {
+  const confirm = useConfirm();
   const [users, setUsers] = useState<InternalUser[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -1028,7 +1037,13 @@ function UsersTab() {
   }
 
   async function handleDisable(u: InternalUser) {
-    if (!confirm(`Disable user "${u.displayName}"? They will lose access immediately.`)) return;
+    const ok = await confirm({
+      title: 'Disable user',
+      body: `Disable user "${u.displayName}"? They will lose access immediately.`,
+      destructive: true,
+      confirmLabel: 'Disable',
+    });
+    if (!ok) return;
     try {
       const token = getAccessToken();
       await del(`/users/${u.id}`, token);

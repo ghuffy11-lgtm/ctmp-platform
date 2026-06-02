@@ -47,8 +47,12 @@ export class CommitteeController {
   @Post('committee-sessions/:sessionId/open-commercial-envelopes')
   @RequirePermissions('committee:open_commercial')
   @ApiOperation({ operationId: 'openCommercialEnvelopes', summary: 'Open commercial envelopes — committee only, changes envelope state' })
-  openEnvelopes(@Param('sessionId') sessionId: string, @CurrentUser('id') userId: string) {
-    return this.committeeService.openEnvelopes(sessionId, userId);
+  openEnvelopes(
+    @Param('sessionId') sessionId: string,
+    @Body() body: { remarks?: string } = {},
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.committeeService.openEnvelopes(sessionId, userId, body?.remarks);
   }
 
   @Get('committee-sessions/:sessionId/opening-records')

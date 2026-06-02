@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { AuditRiskLevel, CommitteeSessionStatus, EnvelopeStatus, EnvelopeType, TechnicalResult, TenderStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -143,7 +143,7 @@ export class CommitteeService {
     return this.findOne(sessionId);
   }
 
-  async openEnvelopes(sessionId: string, userId: string) {
+  async openEnvelopes(sessionId: string, userId: string, remarks?: string) {
     const session = await this.prisma.committeeSession.findUnique({
       where: { id: sessionId },
       include: {
@@ -159,6 +159,17 @@ export class CommitteeService {
     }
     if (session.status === CommitteeSessionStatus.COMPLETED) {
       throw new BadRequestException('Session already completed');
+    }
+
+    // BUG-079 (2026-06-01): meeting-date hard gate. Owner opened commercial on
+    // 2026-06-01 for a session scheduled 2026-06-02 — the system silently
+    // allowed it. Now: refuse with 409 + scheduledAt when before the meeting.
+    if (session.scheduledAt && new Date() < session.scheduledAt) {
+      throw new ConflictException({
+        code: 'BEFORE_MEETING_DATE',
+        message: `Commercial opening blocked until the scheduled meeting time (${session.scheduledAt.toISOString()}).`,
+        scheduledAt: session.scheduledAt.toISOString(),
+      });
     }
 
     // Quorum: majority of committee members marked present.
@@ -208,7 +219,15 @@ export class CommitteeService {
 
       await tx.committeeSession.update({
         where: { id: sessionId },
-        data: { status: CommitteeSessionStatus.COMPLETED, openedBy: userId, openedAt: now },
+        data: {
+          status: CommitteeSessionStatus.COMPLETED,
+          openedBy: userId,
+          openedAt: now,
+          // BUG-077 (2026-06-01): persist the opening remarks the operator typed.
+          // Previously the endpoint accepted no body so the remarks state in the
+          // UI was dropped on submit — operator reload showed empty.
+          ...(remarks !== undefined ? { minutesText: remarks } : {}),
+        },
       });
 
       await tx.tender.update({

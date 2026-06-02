@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { useConfirm } from '@/components/dialog/DialogProvider';
 import { RefreshCw, Store, Clock, BadgeCheck, Ban, Search, CheckCircle2, PauseCircle } from 'lucide-react';
 import type { LucideProps } from 'lucide-react';
 
@@ -48,6 +49,7 @@ function formatDate(iso?: string) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function VendorsPage() {
+  const confirm = useConfirm();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -92,7 +94,12 @@ export default function VendorsPage() {
 
   async function handleApprove() {
     if (!selected) return;
-    if (!confirm(`Approve ${selected.company}? Vendor will be able to log in and bid.`)) return;
+    const ok = await confirm({
+      title: 'Approve vendor',
+      body: `Approve ${selected.company}? Vendor will be able to log in and bid.`,
+      confirmLabel: 'Approve',
+    });
+    if (!ok) return;
     setActionInFlight(true);
     setError(null);
     try {

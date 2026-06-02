@@ -21,6 +21,7 @@ import { CommercialDocumentsList } from '@/components/CommercialDocumentsList';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { VendorTechnicalCard, type ComparisonVendor, type ComparisonCriterion } from '@/components/comparison/VendorTechnicalCard';
+import { TechnicalMatrix, type MatrixCriterion, type MatrixVendor } from '@/components/comparison/TechnicalMatrix';
 
 export interface CardCommercialDoc {
   id: string;
@@ -530,12 +531,12 @@ function BoqBreakdownBlock({
   );
 }
 
-// BUG-069: in-page modal showing this vendor's technical detail. Reuses the
-// existing /tenders/:id/comparison/technical endpoint and the existing
-// VendorTechnicalCard component — drop-in, no new shared scaffold needed.
-// ESC closes; backdrop click closes. Renders one VendorTechnicalCard only
-// (matching the clicked vendor) with initialExpanded=true so the criterion
-// scores + evaluator notes are visible immediately.
+// BUG-070 (2026-06-01, supersedes BUG-069 body): the modal now renders the full
+// Technical Comparison matrix with the clicked vendor highlighted. Owner walked
+// the BUG-069 single-vendor view and asked for the same matrix as the standalone
+// `/technical-comparison` page, in-modal. Modal shell unchanged (ESC + backdrop
+// close); body swapped from <VendorTechnicalCard> to <TechnicalMatrix>; width
+// bumped to max-w-6xl to fit the matrix.
 function TechDetailModal({
   tenderId,
   vendorId,
@@ -548,6 +549,7 @@ function TechDetailModal({
   onClose: () => void;
 }) {
   interface TechResponse {
+    tender: { technicalPassThreshold: number | null };
     criteria: ComparisonCriterion[];
     totalMaxScore: number;
     vendors: ComparisonVendor[];
@@ -577,24 +579,42 @@ function TechDetailModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const target = data?.vendors.find(v => v.vendorId === vendorId) ?? null;
+  const matrixCriteria: MatrixCriterion[] = (data?.criteria ?? []).map(c => ({
+    id: c.id,
+    name: c.name,
+    maxScore: c.maxScore,
+    weight: c.weight,
+    mandatory: c.mandatory,
+  }));
+  const matrixVendors: MatrixVendor[] = (data?.vendors ?? []).map(v => ({
+    bidId: v.bidId,
+    vendorId: v.vendorId,
+    vendorName: v.vendorName,
+    consensusResult: v.consensusResult,
+    consensusScore: v.consensusScore,
+    consensusByCriterion: v.consensusByCriterion.map(c => ({
+      criterionId: c.criterionId,
+      consensusScore: c.consensusScore,
+      evaluatorCount: c.evaluatorCount,
+    })),
+  }));
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`Technical detail for ${vendorName}`}
+      aria-label={`Technical comparison (highlighted: ${vendorName})`}
       onClick={onClose}
       className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
     >
       <div
         onClick={e => e.stopPropagation()}
-        className="bg-card border border-border rounded-xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden"
+        className="bg-card border border-border rounded-xl shadow-2xl max-w-6xl w-full max-h-[90vh] flex flex-col overflow-hidden"
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-bg">
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-text-secondary font-semibold">Technical detail</p>
-            <h3 className="text-base font-bold text-text-primary">{vendorName}</h3>
+            <p className="text-[10px] uppercase tracking-wider text-text-secondary font-semibold">Technical comparison</p>
+            <h3 className="text-base font-bold text-text-primary">Highlighted: {vendorName}</h3>
           </div>
           <button
             type="button"
@@ -613,14 +633,16 @@ function TechDetailModal({
             <p className="text-sm text-text-secondary flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" /> Loading…
             </p>
-          ) : !target ? (
-            <p className="text-sm text-text-secondary italic">No technical evaluation data for this vendor yet.</p>
+          ) : matrixVendors.length === 0 ? (
+            <p className="text-sm text-text-secondary italic">No technical evaluation data yet.</p>
           ) : (
-            <VendorTechnicalCard
-              vendor={target}
-              criteria={data.criteria}
+            <TechnicalMatrix
+              criteria={matrixCriteria}
+              vendors={matrixVendors}
               totalMaxScore={data.totalMaxScore}
-              initialExpanded
+              passThreshold={data.tender?.technicalPassThreshold ?? null}
+              selectedVendorId={vendorId}
+              onSelectVendor={() => { /* no-op in modal context */ }}
             />
           )}
         </div>

@@ -37,19 +37,30 @@ interface TenderDetail {
 
 const BID_ELIGIBLE_STATUSES = new Set(['Published', 'Clarification Period']);
 
+interface MyBidLite { id: string; tenderId: string; status: string }
+
 export default function VendorTenderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [tender, setTender] = useState<TenderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // BUG-083 (2026-06-01): track the caller's existing bid on this tender so we
+  // can disable "Start Bid" and link to /bids/[id] instead when they've already
+  // submitted. Owner reported the wizard re-launchable post-submit.
+  const [myBid, setMyBid] = useState<MyBidLite | null>(null);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
         const token = getAccessToken();
-        const res = await get<TenderDetail>(`/tenders/${id}`, token);
+        const [res, mine] = await Promise.all([
+          get<TenderDetail>(`/tenders/${id}`, token),
+          get<{ items: MyBidLite[] }>('/vendor-auth/me/bids?pageSize=200', token).catch(() => ({ items: [] })),
+        ]);
         setTender(res);
+        const existing = (mine.items ?? []).find(b => b.tenderId === id) ?? null;
+        setMyBid(existing);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load tender');
       } finally {
@@ -234,7 +245,23 @@ export default function VendorTenderDetailPage({ params }: { params: Promise<{ i
               <DeadlineCard label="Clarification Deadline" iso={tender.clarificationDeadline} />
             )}
 
-            {canBid ? (
+            {/* BUG-083: if vendor already has a bid here, show "View Submitted Bid"
+                  (post-submit immutable) or "Continue Bid" (still in DRAFT). */}
+            {myBid && myBid.status !== 'DRAFT' ? (
+              <Link
+                href={`/bids/${myBid.id}`}
+                className="btn-ghost block text-center rounded-3xl py-5 text-base font-semibold tracking-wide"
+              >
+                VIEW SUBMITTED BID
+              </Link>
+            ) : myBid && myBid.status === 'DRAFT' ? (
+              <Link
+                href={`/bids/wizard/${tender.id}`}
+                className="btn-electric block text-center rounded-3xl py-5 text-base font-semibold tracking-wide"
+              >
+                CONTINUE BID
+              </Link>
+            ) : canBid ? (
               <Link
                 href={`/bids/wizard/${tender.id}`}
                 className="btn-electric block text-center rounded-3xl py-5 text-base font-semibold tracking-wide"

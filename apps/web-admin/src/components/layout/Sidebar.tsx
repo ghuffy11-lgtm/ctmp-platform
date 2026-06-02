@@ -18,6 +18,7 @@ import {
   History,
   ShieldCheck,
   Settings,
+  TrendingUp,
 } from 'lucide-react';
 
 const POLL_MS = 60_000;
@@ -34,6 +35,10 @@ const navItems: Array<{
   anyPermission?: string[];
 }> = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  // BUG-086 Phase 1 + BUG-087: executive view — KPIs, financial trends, vendor
+  // concentration. Gated by a dedicated `executive:dashboard` perm so only the
+  // EXECUTIVE role (and SYSTEM_ADMIN) sees it.
+  { href: '/executive', label: 'Executive', icon: TrendingUp, permission: 'executive:dashboard' },
   { href: '/tenders', label: 'Tenders', icon: Gavel, permission: 'tender:view' },
   { href: '/approvals', label: 'Approvals', icon: CheckCircle2, anyPermission: ['tender:approve', 'award:approve'] },
   { href: '/clarifications', label: 'Clarifications', icon: MessageSquare, anyPermission: ['clarification:view_internal', 'clarification:reply'] },

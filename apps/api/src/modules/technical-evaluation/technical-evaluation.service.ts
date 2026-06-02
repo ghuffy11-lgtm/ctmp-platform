@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditRiskLevel, EnvelopeStatus, EnvelopeType, TechnicalResult, TenderStatus } from '@prisma/client';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { AuditRiskLevel, BidStatus, EnvelopeStatus, EnvelopeType, TechnicalResult, TenderStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EvaluateBidDto } from './dto/evaluate-bid.dto';
@@ -213,8 +213,31 @@ export class TechnicalEvaluationService {
     // Aggregate evaluator results per bid → bid-level PASS/FAIL on majority.
     const bids = await this.prisma.bid.findMany({
       where: { tenderId },
-      include: { technicalEvaluations: { select: { result: true } } },
+      include: {
+        technicalEvaluations: { select: { result: true } },
+        vendor: { select: { id: true, companyName: true } },
+      },
     });
+
+    // BUG-073 (2026-06-01): block finalize when any active bid lacks an
+    // evaluation. Owner finalized a tender with one vendor un-evaluated; the
+    // pre-existing path silently marked them FAIL and locked the tender. Now
+    // we refuse with 409 and name the unevaluated vendors so the evaluator
+    // knows exactly what's left.
+    const activeBidStatuses: BidStatus[] = [
+      BidStatus.SUBMITTED,
+      BidStatus.LATE_ACCEPTED,
+    ];
+    const unevaluated = bids
+      .filter(b => activeBidStatuses.includes(b.status) && b.technicalEvaluations.length === 0)
+      .map(b => ({ vendorId: b.vendor.id, vendorName: b.vendor.companyName, bidId: b.id }));
+    if (unevaluated.length > 0) {
+      throw new ConflictException({
+        code: 'UNEVALUATED_VENDORS',
+        message: `Cannot finalize — un-evaluated: ${unevaluated.map(u => u.vendorName).join(', ')}.`,
+        unevaluatedVendors: unevaluated,
+      });
+    }
 
     const updates: Array<{ bidId: string; result: TechnicalResult }> = [];
     for (const bid of bids) {

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { AlertCircle, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { AlertCircle, Download, Loader2, Plus, Save, Trash2, Upload } from 'lucide-react';
 import { get, put } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 
@@ -29,11 +29,54 @@ const PLACEHOLDER_DESCRIPTION = 'Legacy tender — no BOQ defined';
  * The backend gates writes by tender status (Draft / Internal Review /
  * Approved only); editable prop mirrors that here for the UI.
  */
+// BUG-072 (2026-06-01): minimal RFC-4180-lite CSV parser. No quoted-cell-with-
+// newline support — fine for BOQ where descriptions don't span lines. Returns
+// either parsed rows or a list of error messages (per row).
+function parseBoqCsv(text: string): { rows?: Omit<BoqRow, 'id'>[]; errors?: string[] } {
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length === 0) return { errors: ['File is empty.'] };
+  const header = lines[0].toLowerCase().split(',').map(h => h.trim());
+  const requiredCols = ['item_no', 'description', 'qty', 'unit'];
+  const missing = requiredCols.filter(c => !header.includes(c));
+  if (missing.length > 0) {
+    return { errors: [`Missing required column(s): ${missing.join(', ')}. Header must be: ${requiredCols.join(',')}.`] };
+  }
+  const idx = {
+    itemNo: header.indexOf('item_no'),
+    description: header.indexOf('description'),
+    qty: header.indexOf('qty'),
+    unit: header.indexOf('unit'),
+  };
+  const rows: Omit<BoqRow, 'id'>[] = [];
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(',').map(c => c.trim());
+    const lineNum = i + 1;
+    const itemNo = cells[idx.itemNo] ?? '';
+    const description = cells[idx.description] ?? '';
+    const qtyRaw = cells[idx.qty] ?? '';
+    const unit = cells[idx.unit] ?? '';
+    if (!itemNo) { errors.push(`Line ${lineNum}: missing item_no.`); continue; }
+    if (seen.has(itemNo)) { errors.push(`Line ${lineNum}: duplicate item_no "${itemNo}".`); continue; }
+    seen.add(itemNo);
+    if (!description) { errors.push(`Line ${lineNum}: missing description.`); continue; }
+    const qty = Number(qtyRaw);
+    if (!Number.isFinite(qty) || qty <= 0) { errors.push(`Line ${lineNum}: qty must be a positive number (got "${qtyRaw}").`); continue; }
+    if (!unit) { errors.push(`Line ${lineNum}: missing unit.`); continue; }
+    rows.push({ itemNo, description, qty: String(qty), unit });
+  }
+  if (errors.length > 0) return { errors };
+  return { rows };
+}
+
 export function TenderBoqEditor({ tenderId, editable }: Props) {
   const [rows, setRows] = useState<BoqRow[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importErrors, setImportErrors] = useState<string[] | null>(null);
   const [successAt, setSuccessAt] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function load() {
     try {
@@ -82,6 +125,40 @@ export function TenderBoqEditor({ tenderId, editable }: Props) {
   function removeRow(idx: number) {
     if (!rows) return;
     setRows(rows.filter((_, i) => i !== idx));
+  }
+
+  // BUG-072 (2026-06-01): CSV import for BOQ template. Owner asked for an
+  // import affordance + template download so they don't have to add every row
+  // manually. Parsed rows land in the editor and stay editable; user clicks
+  // Save BOQ to commit.
+  async function handleImportClick() {
+    setImportErrors(null);
+    setError(null);
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const { rows: parsed, errors } = parseBoqCsv(text);
+      if (errors && errors.length > 0) {
+        setImportErrors(errors);
+        return;
+      }
+      if (!parsed || parsed.length === 0) {
+        setImportErrors(['No data rows found in the file.']);
+        return;
+      }
+      // Merge: replace current rows wholesale. Users can still edit/remove
+      // imported rows individually before Save.
+      setRows(parsed);
+      setImportErrors(null);
+    } catch (err) {
+      setImportErrors([err instanceof Error ? err.message : 'Failed to read file.']);
+    }
   }
 
   async function handleSave() {
@@ -143,13 +220,39 @@ export function TenderBoqEditor({ tenderId, editable }: Props) {
           </p>
         </div>
         {editable && (
-          <button
-            onClick={addRow}
-            className="px-3 py-2 text-sm font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg flex items-center gap-1.5"
-          >
-            <Plus className="w-4 h-4" />
-            Add line
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <a
+              href="/templates/boq-template.csv"
+              download
+              className="px-3 py-2 text-sm font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg flex items-center gap-1.5"
+              title="Download blank CSV template"
+            >
+              <Download className="w-4 h-4" />
+              Template
+            </a>
+            <button
+              onClick={handleImportClick}
+              className="px-3 py-2 text-sm font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg flex items-center gap-1.5"
+              title="Import a filled CSV — replaces the current rows"
+            >
+              <Upload className="w-4 h-4" />
+              Import CSV
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleFileChosen}
+              className="hidden"
+            />
+            <button
+              onClick={addRow}
+              className="px-3 py-2 text-sm font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              Add line
+            </button>
+          </div>
         )}
       </div>
 
@@ -157,6 +260,15 @@ export function TenderBoqEditor({ tenderId, editable }: Props) {
         <div className="px-5 py-2.5 bg-danger/5 border-b border-danger/20 text-xs text-danger flex items-center gap-1.5">
           <AlertCircle className="w-3.5 h-3.5" />
           {error}
+        </div>
+      )}
+      {importErrors && importErrors.length > 0 && (
+        <div className="px-5 py-3 bg-danger/5 border-b border-danger/20 text-xs text-danger">
+          <p className="font-bold mb-1">CSV import failed:</p>
+          <ul className="list-disc pl-5 space-y-0.5">
+            {importErrors.slice(0, 8).map((m, i) => <li key={i}>{m}</li>)}
+            {importErrors.length > 8 && <li>… and {importErrors.length - 8} more.</li>}
+          </ul>
         </div>
       )}
       {successAt && Date.now() - successAt < 5000 && (

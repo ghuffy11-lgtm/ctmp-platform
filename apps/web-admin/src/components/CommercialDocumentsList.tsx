@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Download, Lock } from 'lucide-react';
+import { Download, Eye, Lock } from 'lucide-react';
 import { get } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
+import { usePdfViewer } from '@/components/viewer/PdfViewerProvider';
 
 interface CommercialDocument {
   id: string;
@@ -31,6 +32,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
  * 403 the per-file fetch when the caller lacks `commercial:download`.
  */
 export function CommercialDocumentsList({ bidId, envelopeStatus, compact }: Props) {
+  const { openPdfViewer } = usePdfViewer();
   const [docs, setDocs] = useState<CommercialDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,18 +101,55 @@ export function CommercialDocumentsList({ bidId, envelopeStatus, compact }: Prop
     }
   }
 
+  // BUG-081 (2026-06-01): owner asked for a View affordance alongside Download
+  // on the Qualified Vendors commercial docs section. Uses the shared
+  // openPdfViewer helper which (per BUG-071) opens the PDF in a new tab.
+  async function handleView(docId: string, filename: string) {
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE}/api/v1/bids/${bidId}/documents/${docId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.status === 403) {
+        alert('Your role lacks commercial:view permission.');
+        return;
+      }
+      if (!res.ok) throw new Error(`Open failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      openPdfViewer({ src: url, title: filename, onClose: () => URL.revokeObjectURL(url) });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to open document');
+    }
+  }
+
   return (
     <div className={compact ? 'space-y-1' : 'space-y-2'}>
       {docs.map(d => (
-        <button
-          key={d.id}
-          onClick={() => handleDownload(d.id, d.filename)}
-          className="flex items-center gap-1.5 text-xs text-accent hover:underline truncate max-w-full"
-          title={`${d.filename} · ${(d.fileSize / 1024).toFixed(1)} KB`}
-        >
-          <Download className="w-3.5 h-3.5 flex-shrink-0" />
-          <span className="truncate">{d.filename}</span>
-        </button>
+        <div key={d.id} className="flex items-center gap-3">
+          <span
+            className="text-xs text-text-secondary truncate max-w-[220px]"
+            title={`${d.filename} · ${(d.fileSize / 1024).toFixed(1)} KB`}
+          >
+            {d.filename}
+          </span>
+          <button
+            onClick={() => handleView(d.id, d.filename)}
+            className="flex items-center gap-1 text-xs text-accent hover:underline"
+            title="Open in new tab"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            View
+          </button>
+          <button
+            onClick={() => handleDownload(d.id, d.filename)}
+            className="flex items-center gap-1 text-xs text-accent hover:underline"
+            title="Download"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download
+          </button>
+        </div>
       ))}
     </div>
   );
