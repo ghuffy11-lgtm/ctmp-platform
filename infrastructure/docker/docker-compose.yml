@@ -106,9 +106,24 @@ services:
       AUDIT_VERIFY_ON_START: ${AUDIT_VERIFY_ON_START:-true}
       AUDIT_VERIFY_LIMIT: ${AUDIT_VERIFY_LIMIT:-1000}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200,http://localhost:4300}
+      # BUG-144 (2026-06-19): absolute portal URLs baked into every email
+      # template. Override these in `.env` when going live with a new
+      # hostname; the api hardcoded defaults are the staging URLs.
+      ADMIN_PORTAL_URL: ${ADMIN_PORTAL_URL:-https://ctmp-admin.hadiclinic.com.kw:4202}
+      VENDOR_PORTAL_URL: ${VENDOR_PORTAL_URL:-https://vn.hadiclinic.com.kw:4201}
     ports:
       - '${API_PORT:-3000}:3000'
     volumes:
+      # BUG-117 (2026-06-09): catch-all volume for any storage namespace not
+      # explicitly sub-mounted below. Without this, branding logos,
+      # award-justification PDFs, and negotiation-submission PDFs lived in
+      # the api container's writable layer and were WIPED on every
+      # `docker compose up --force-recreate api`. The owner reported that
+      # uploaded logos disappeared after each rebuild. Adding the catch-all
+      # parent mount preserves every future namespace automatically; the
+      # explicit sub-mounts below take precedence on their paths so existing
+      # data in report_storage / bid_storage / tender_storage is unaffected.
+      - app_storage:/data
       - report_storage:/data/reports
       - bid_storage:/data/bid-documents
       # BUG-067 / WALK-016/017: tender RFQ documents (admin uploads, vendor
@@ -170,4 +185,6 @@ volumes:
   report_storage:
   bid_storage:
   tender_storage:
+  # BUG-117 (2026-06-09): catch-all storage volume; see api service mount.
+  app_storage:
   minio_data:

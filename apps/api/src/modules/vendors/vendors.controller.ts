@@ -1,7 +1,9 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { OptionalVendorOrUserGuard } from '../../common/guards/optional-vendor-or-user.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { VendorsService } from './vendors.service';
@@ -70,5 +72,48 @@ export class VendorsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.vendorsService.suspend(id, reason, userId);
+  }
+
+  // BUG-137 (2026-06-19): registration documents — list, view, download.
+  // Admin (vendor:view) sees any vendor's docs; the vendor's own user sees
+  // only their own. OptionalVendorOrUserGuard handles both JWT shapes.
+  @Get(':id/documents')
+  @RequirePermissions('vendor:view')
+  @ApiOperation({ operationId: 'listVendorDocuments', summary: "List a vendor's registration documents" })
+  listDocuments(@Param('id') id: string) {
+    return this.vendorsService.listDocuments(id);
+  }
+
+  @UseGuards(OptionalVendorOrUserGuard)
+  @Get(':id/documents/:documentId/view')
+  @ApiOperation({ operationId: 'viewVendorDocument', summary: 'Stream a vendor registration document PDF inline' })
+  async viewDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    const result = await this.vendorsService.getDocument(id, documentId, user, 'view');
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', String(result.fileSize ?? 0));
+    res.setHeader('Content-Disposition', `inline; filename="${result.filename.replace(/"/g, '')}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    result.stream.pipe(res);
+  }
+
+  @UseGuards(OptionalVendorOrUserGuard)
+  @Get(':id/documents/:documentId')
+  @ApiOperation({ operationId: 'downloadVendorDocument', summary: 'Download a vendor registration document PDF as an attachment' })
+  async downloadDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    const result = await this.vendorsService.getDocument(id, documentId, user, 'download');
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', String(result.fileSize ?? 0));
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename.replace(/"/g, '')}"`);
+    result.stream.pipe(res);
   }
 }

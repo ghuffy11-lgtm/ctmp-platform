@@ -65,4 +65,28 @@ export class RolesController {
   ) {
     return this.rolesService.setPermissions(id, permissionIds, userId);
   }
+
+  // BUG-093 (2026-06-02): per-role sidebar hide list.
+  @Patch(':id/hidden-sidebar')
+  @RequirePermissions('roles:manage')
+  @ApiOperation({ operationId: 'setRoleHiddenSidebar', summary: 'Replace the list of sidebar entries hidden for users in this role' })
+  setHiddenSidebar(
+    @Param('id') id: string,
+    @Body('items') items: string[],
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.rolesService.setHiddenSidebar(id, items ?? [], userId);
+  }
+
+  // BUG-107 Piece 4 (2026-06-05): per-role sidebar label overrides.
+  @Patch(':id/sidebar-labels')
+  @RequirePermissions('roles:manage')
+  @ApiOperation({ operationId: 'setRoleSidebarLabels', summary: 'Replace the per-href label overrides for sidebar entries (BUG-107 Piece 4)' })
+  setSidebarLabels(
+    @Param('id') id: string,
+    @Body('overrides') overrides: Record<string, string>,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.rolesService.setSidebarLabelOverrides(id, overrides ?? {}, userId);
+  }
 }

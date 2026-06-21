@@ -15,6 +15,8 @@ interface Tender {
   status: string;
   submissionDeadline: string | null;
   description?: string;
+  // BUG-137 (2026-06-19): gates the Supporting Documents wizard step.
+  requiresSupportingDocuments?: boolean;
 }
 
 interface Envelope {
@@ -80,7 +82,17 @@ interface BoqLineDraft {
 const PLACEHOLDER_ITEM_NO = '0';
 const PLACEHOLDER_DESCRIPTION = 'Legacy tender — no BOQ defined';
 
-const STEPS = ['Tender', 'Technical Envelope', 'Commercial Pricing', 'Commercial PDF (optional)', 'Review & Submit'] as const;
+// BUG-137 (2026-06-19): commercial PDF is now ALWAYS required; the Supporting
+// Documents step is appended only when the tender's flag is true.
+const BASE_STEPS = ['Tender', 'Technical Envelope', 'Commercial Pricing', 'Commercial PDF', 'Review & Submit'] as const;
+
+interface SupportingDoc {
+  id: string;
+  filename: string;
+  fileSize: number;
+  checksumSha256: string;
+  uploadedAt: string;
+}
 
 export default function BidWizardPage({ params }: { params: Promise<{ tenderId: string }> }) {
   const { tenderId } = use(params);
@@ -103,6 +115,22 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
     () => boqTemplate.some(r => !(r.itemNo === PLACEHOLDER_ITEM_NO && r.description === PLACEHOLDER_DESCRIPTION)),
     [boqTemplate],
   );
+
+  // BUG-137 (2026-06-19): supporting documents on the bid. Only shown when
+  // tender.requiresSupportingDocuments is true.
+  const [supportingDocs, setSupportingDocs] = useState<SupportingDoc[]>([]);
+  const [supportingUploading, setSupportingUploading] = useState(false);
+  const requiresSupporting = !!tender?.requiresSupportingDocuments;
+  const STEPS = useMemo<readonly string[]>(() => {
+    if (!requiresSupporting) return BASE_STEPS;
+    // Insert "Supporting Documents" between "Commercial PDF" and "Review".
+    const insertAt = BASE_STEPS.indexOf('Commercial PDF') + 1;
+    return [
+      ...BASE_STEPS.slice(0, insertAt),
+      'Supporting Documents',
+      ...BASE_STEPS.slice(insertAt),
+    ];
+  }, [requiresSupporting]);
 
   // ─── Initial load: tender + draft-or-resume bid + envelope contents ─────────
   useEffect(() => {
@@ -129,9 +157,15 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
               documentChecksums: (r.snapshot?.documents ?? []) as SubmitReceipt['documentChecksums'],
             };
             setReceipt(synthetic);
-            setStep(4);
+            // BUG-137: Review is the last step. Index depends on whether
+            // the tender flag added the Supporting Documents step. Compute
+            // from the freshly loaded tender — `STEPS` from the closure
+            // was captured before setTender() flushed.
+            const reviewIdx = tenderRes.requiresSupportingDocuments ? 5 : 4;
+            setStep(reviewIdx);
           } catch {
-            setStep(4);
+            const reviewIdx = tenderRes.requiresSupportingDocuments ? 5 : 4;
+            setStep(reviewIdx);
           }
         }
 
@@ -154,6 +188,17 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
         ]);
         setTechnicalDocs(tech.documents);
         setCommercialDocs(comm.documents);
+
+        // BUG-137 (2026-06-19): load existing supporting docs for this bid.
+        try {
+          const sd = await get<{ items: SupportingDoc[] }>(
+            `/bids/${bidRes.id}/supporting-documents`,
+            token,
+          );
+          setSupportingDocs(sd.items ?? []);
+        } catch {
+          setSupportingDocs([]);
+        }
 
         const realRows = (boqTpl.items ?? []).filter(
           r => !(r.itemNo === PLACEHOLDER_ITEM_NO && r.description === PLACEHOLDER_DESCRIPTION),
@@ -245,11 +290,16 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
       setError('Technical envelope must contain at least one document');
       return;
     }
-    // Commercial PDF is OPTIONAL when the tender has a real BOQ template; the
-    // BOQ is the legal price record. For legacy tenders (no BOQ) it remains
-    // mandatory per the backend submit gate.
-    if (!hasRealBoq && commercialDocs.length === 0) {
+    // BUG-112 (2026-06-07) Piece 5: commercial PDF is now mandatory regardless
+    // of BOQ presence. Owner directive — every bid must carry a signed
+    // commercial document, not just a BoQ row.
+    if (commercialDocs.length === 0) {
       setError('Commercial envelope must contain at least one document');
+      return;
+    }
+    // BUG-137 (2026-06-19): tender-level supporting-doc requirement gate.
+    if (tender?.requiresSupportingDocuments && supportingDocs.length === 0) {
+      setError('This tender requires at least one supporting document. Upload one before submitting.');
       return;
     }
     if (!confirm('Submit bid? Submitted bids are immutable.')) return;
@@ -263,7 +313,10 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
       }
       const result = await post<SubmitReceipt>(`/bids/${bid.id}/submit`, {}, token);
       setReceipt(result);
-      setStep(4);
+      // BUG-137 (2026-06-19): Review step's index varies with the dynamic
+      // STEPS array; compute it instead of hard-coding 4.
+      const reviewIdx = STEPS.indexOf('Review & Submit');
+      if (reviewIdx >= 0) setStep(reviewIdx);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Submit failed');
     } finally {
@@ -339,79 +392,107 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
         <div className="bg-danger/10 border border-danger/30 rounded-lg p-3 text-sm text-danger">{error}</div>
       )}
 
-      {/* Step content */}
-      {step === 0 && (
-        <Step0Tender
-          tender={tender}
-          bid={bid}
-          onNext={() => setStep(1)}
-        />
-      )}
-      {step === 1 && (
-        <Step1Envelope
-          title="Technical Envelope"
-          description="Upload technical proposal documents. These become readable only after the tender's technical opening phase."
-          bidId={bid.id}
-          envelopeType="TECHNICAL"
-          docs={technicalDocs}
-          onUploaded={doc => setTechnicalDocs(prev => [...prev, doc])}
-          onDelete={id => handleDeleteDoc('TECHNICAL', id)}
-          onPrev={() => setStep(0)}
-          onNext={() => setStep(2)}
-          required
-        />
-      )}
-      {step === 2 && (
-        <Step2BoqPricing
-          hasRealBoq={hasRealBoq}
-          boqTemplate={boqTemplate}
-          boqLines={boqLines}
-          setBoqLines={setBoqLines}
-          tenderReferenceNumber={tender?.referenceNumber}
-          saving={boqSaving}
-          onSaveDraft={async () => { try { await handleSaveBoq(); } catch { /* error already in state */ } }}
-          onPrev={() => setStep(1)}
-          onNext={async () => {
-            if (hasRealBoq) {
-              try { await handleSaveBoq(); } catch { return; }
-            }
-            setStep(3);
-          }}
-        />
-      )}
-      {step === 3 && (
-        <Step1Envelope
-          title={hasRealBoq ? 'Commercial PDF (optional reference)' : 'Commercial Envelope'}
-          description={
-            hasRealBoq
-              ? 'Optional supporting document. Per-line prices in the previous step are the legal record. Upload only if you want to attach a supplementary brochure or quotation letter.'
-              : 'Upload pricing documents. These remain sealed until the committee opens commercial envelopes.'
-          }
-          bidId={bid.id}
-          envelopeType="COMMERCIAL"
-          docs={commercialDocs}
-          onUploaded={doc => setCommercialDocs(prev => [...prev, doc])}
-          onDelete={id => handleDeleteDoc('COMMERCIAL', id)}
-          onPrev={() => setStep(2)}
-          onNext={() => setStep(4)}
-          required={!hasRealBoq}
-        />
-      )}
-      {step === 4 && (
-        <Step4Review
-          tender={tender}
-          bid={bid}
-          technicalDocs={technicalDocs}
-          commercialDocs={commercialDocs}
-          hasRealBoq={hasRealBoq}
-          boqTemplate={boqTemplate}
-          boqLines={boqLines}
-          receipt={receipt}
-          submitting={submitting}
-          onPrev={() => !receipt && setStep(3)}
-          onSubmit={handleSubmit}
-        />
-      )}
+      {/* Step content — BUG-137 (2026-06-19): switch on step NAME instead of
+          numeric index because the Supporting Documents step is conditional. */}
+      {(() => {
+        const stepName = STEPS[step];
+        const goTo = (name: string) => {
+          const i = STEPS.indexOf(name);
+          if (i >= 0) setStep(i);
+        };
+        const prevStepName = STEPS[step - 1];
+        const nextStepName = STEPS[step + 1];
+        if (stepName === 'Tender') {
+          return <Step0Tender tender={tender} bid={bid} onNext={() => goTo(nextStepName)} />;
+        }
+        if (stepName === 'Technical Envelope') {
+          return (
+            <Step1Envelope
+              title="Technical Envelope"
+              description="Upload technical proposal documents. These become readable only after the tender's technical opening phase."
+              bidId={bid.id}
+              envelopeType="TECHNICAL"
+              docs={technicalDocs}
+              onUploaded={doc => setTechnicalDocs(prev => [...prev, doc])}
+              onDelete={id => handleDeleteDoc('TECHNICAL', id)}
+              onPrev={() => goTo(prevStepName)}
+              onNext={() => goTo(nextStepName)}
+              required
+            />
+          );
+        }
+        if (stepName === 'Commercial Pricing') {
+          return (
+            <Step2BoqPricing
+              hasRealBoq={hasRealBoq}
+              boqTemplate={boqTemplate}
+              boqLines={boqLines}
+              setBoqLines={setBoqLines}
+              tenderReferenceNumber={tender?.referenceNumber}
+              saving={boqSaving}
+              onSaveDraft={async () => { try { await handleSaveBoq(); } catch { /* error already in state */ } }}
+              onPrev={() => goTo(prevStepName)}
+              onNext={async () => {
+                if (hasRealBoq) {
+                  try { await handleSaveBoq(); } catch { return; }
+                }
+                goTo(nextStepName);
+              }}
+            />
+          );
+        }
+        if (stepName === 'Commercial PDF') {
+          return (
+            <Step1Envelope
+              /* BUG-137 (2026-06-19): commercial PDF is ALWAYS required.
+                 The old "skip if BoQ filled" exception is gone. */
+              title="Commercial Envelope"
+              description="Upload pricing documents. These remain sealed until the committee opens commercial envelopes. A signed commercial PDF is required for every bid."
+              bidId={bid.id}
+              envelopeType="COMMERCIAL"
+              docs={commercialDocs}
+              onUploaded={doc => setCommercialDocs(prev => [...prev, doc])}
+              onDelete={id => handleDeleteDoc('COMMERCIAL', id)}
+              onPrev={() => goTo(prevStepName)}
+              onNext={() => goTo(nextStepName)}
+              required={true}
+            />
+          );
+        }
+        if (stepName === 'Supporting Documents') {
+          return (
+            <StepSupportingDocuments
+              bidId={bid.id}
+              docs={supportingDocs}
+              setDocs={setSupportingDocs}
+              uploading={supportingUploading}
+              setUploading={setSupportingUploading}
+              onPrev={() => goTo(prevStepName)}
+              onNext={() => goTo(nextStepName)}
+            />
+          );
+        }
+        if (stepName === 'Review & Submit') {
+          return (
+            <Step4Review
+              tender={tender}
+              bid={bid}
+              technicalDocs={technicalDocs}
+              commercialDocs={commercialDocs}
+              hasRealBoq={hasRealBoq}
+              boqTemplate={boqTemplate}
+              boqLines={boqLines}
+              receipt={receipt}
+              submitting={submitting}
+              onPrev={() => !receipt && goTo(prevStepName)}
+              onSubmit={handleSubmit}
+              supportingDocs={supportingDocs}
+              requiresSupporting={requiresSupporting}
+            />
+          );
+        }
+        return null;
+      })()}
     </div>
   );
 }
@@ -548,7 +629,10 @@ function Step1Envelope({
           disabled={required && docs.length === 0}
           className="px-5 py-2 bg-accent text-white rounded-lg font-bold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {required || docs.length > 0 ? 'Continue →' : 'Skip (no upload) →'}
+          {/* BUG-112 (2026-06-07) Piece 5: commercial PDF is now always
+              required (no Skip path). When required and zero docs, the
+              button stays disabled per the line above. */}
+          {'Continue →'}
         </button>
       </div>
     </div>
@@ -924,6 +1008,9 @@ function Step4Review({
   submitting,
   onPrev,
   onSubmit,
+  // BUG-137 (2026-06-19): supporting docs surfacing.
+  supportingDocs,
+  requiresSupporting,
 }: {
   tender: Tender;
   bid: Bid;
@@ -936,6 +1023,8 @@ function Step4Review({
   submitting: boolean;
   onPrev: () => void;
   onSubmit: () => void;
+  supportingDocs: SupportingDoc[];
+  requiresSupporting: boolean;
 }) {
   if (receipt) {
     return (
@@ -1044,7 +1133,30 @@ function Step4Review({
           </table>
         </div>
       )}
-      <ReviewBlock title={hasRealBoq ? 'Commercial PDF (optional reference)' : 'Commercial Envelope'} docs={commercialDocs} optional={hasRealBoq} />
+      {/* BUG-137 (2026-06-19): commercial PDF is now required for every bid. */}
+      <ReviewBlock title="Commercial PDF" docs={commercialDocs} optional={false} />
+
+      {/* BUG-137: supporting docs review block — shown only when the tender flag is on. */}
+      {requiresSupporting && (
+        <div className="bg-card border border-border rounded-xl p-5">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-2.5">
+            Supporting Documents
+            <span className="ml-2 text-[10px] font-bold text-rose-600">Required</span>
+          </p>
+          {supportingDocs.length === 0 ? (
+            <p className="text-xs italic text-danger">No supporting documents uploaded yet — submit will be blocked.</p>
+          ) : (
+            <ul className="text-xs space-y-1">
+              {supportingDocs.map(d => (
+                <li key={d.id} className="flex items-center justify-between bg-bg/40 border border-border rounded px-2 py-1">
+                  <span className="truncate">{d.filename}</span>
+                  <span className="text-text-secondary ml-2">{(d.fileSize / 1024).toFixed(0)} KB</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex gap-2">
         <span className="material-symbols-outlined text-[18px]">warning</span>
@@ -1063,7 +1175,10 @@ function Step4Review({
           disabled={
             submitting
             || technicalDocs.length === 0
-            || (!hasRealBoq && commercialDocs.length === 0)
+            // BUG-137 (2026-06-19): commercial PDF is always required now.
+            || commercialDocs.length === 0
+            // BUG-137: enforce supporting-doc gate client-side.
+            || (requiresSupporting && supportingDocs.length === 0)
           }
           className="px-6 py-2 bg-success text-white rounded-lg font-bold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
         >
@@ -1103,6 +1218,148 @@ function ReceiptRow({ label, value, mono }: { label: string; value: string; mono
     <div>
       <p className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">{label}</p>
       <p className={`text-sm text-text-primary ${mono ? 'font-mono break-all' : ''}`}>{value}</p>
+    </div>
+  );
+}
+
+// BUG-137 (2026-06-19): supporting documents step. Multi-file upload, no
+// envelope concept — these are bid-level attachments. Each file is uploaded
+// immediately on select so the wizard draft already references them.
+function StepSupportingDocuments({
+  bidId,
+  docs,
+  setDocs,
+  uploading,
+  setUploading,
+  onPrev,
+  onNext,
+}: {
+  bidId: string;
+  docs: SupportingDoc[];
+  setDocs: React.Dispatch<React.SetStateAction<SupportingDoc[]>>;
+  uploading: boolean;
+  setUploading: React.Dispatch<React.SetStateAction<boolean>>;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleFile(file: File) {
+    if (file.type !== 'application/pdf') {
+      setError('Only PDF files are accepted.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File exceeds 10 MB limit.');
+      return;
+    }
+    setError(null);
+    setUploading(true);
+    try {
+      const token = getAccessToken();
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}/api/v1/bids/${bidId}/supporting-documents`,
+        { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.message ?? `Upload failed: ${res.status}`);
+      }
+      const data = await res.json();
+      setDocs(prev => [...prev, {
+        id: data.id,
+        filename: data.filename,
+        fileSize: data.fileSize,
+        checksumSha256: data.checksumSha256,
+        uploadedAt: data.uploadedAt,
+      }]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleRemove(id: string) {
+    setError(null);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}/api/v1/bids/${bidId}/supporting-documents/${id}`,
+        { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      );
+      if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+      setDocs(prev => prev.filter(d => d.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed');
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h2 className="text-base font-bold text-text-primary mb-1">Supporting Documents</h2>
+        <p className="text-xs text-text-secondary mb-4">
+          This tender requires you to attach at least one supporting document (certificates, letters of authorisation, ISO certificates, etc.).
+          PDF only, up to 10 MB each.
+        </p>
+        {error && (
+          <div className="mb-3 px-3 py-2 rounded-lg bg-danger/10 border border-danger/30 text-sm text-danger">
+            {error}
+          </div>
+        )}
+        <label className="inline-flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-lg text-sm font-semibold hover:opacity-90 cursor-pointer">
+          {uploading ? 'Uploading…' : '+ Add document'}
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            disabled={uploading}
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+              e.target.value = '';
+            }}
+          />
+        </label>
+        <div className="mt-4 space-y-2">
+          {docs.length === 0 ? (
+            <p className="text-sm italic text-text-secondary">No supporting documents uploaded yet.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {docs.map(d => (
+                <li key={d.id} className="flex items-center justify-between bg-bg/40 border border-border rounded px-3 py-2 text-sm">
+                  <span className="truncate">
+                    <span className="font-semibold text-text-primary">{d.filename}</span>
+                    <span className="text-text-secondary ml-2">({Math.round(d.fileSize / 1024)} KB)</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(d.id)}
+                    className="text-xs text-danger hover:underline"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+      <div className="flex justify-between border-t border-border pt-4">
+        <button onClick={onPrev} className="px-4 py-2 border border-border text-text-secondary rounded-lg font-semibold hover:bg-bg">
+          ← Back
+        </button>
+        <button
+          onClick={onNext}
+          disabled={docs.length === 0}
+          className="px-6 py-2 bg-accent text-white rounded-lg font-bold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Next →
+        </button>
+      </div>
     </div>
   );
 }

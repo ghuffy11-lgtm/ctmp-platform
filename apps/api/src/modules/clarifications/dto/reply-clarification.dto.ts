@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsBoolean } from 'class-validator';
+import { IsString, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ReplyClarificationDto {
@@ -7,7 +7,7 @@ export class ReplyClarificationDto {
   @IsNotEmpty()
   reply: string;
 
-  @ApiProperty({ description: 'true = visible to all vendors; false = private to asking vendor only' })
-  @IsBoolean()
-  isPublic: boolean;
+  // BUG-145 (2026-06-19): every reply is private to the asking vendor. The
+  // public/general-public visibility option was removed at owner request —
+  // see clarifications.service.ts for the simplified visibility model.
 }

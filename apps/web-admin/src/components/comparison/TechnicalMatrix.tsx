@@ -9,6 +9,8 @@ export interface MatrixCriterion {
   maxScore: number;
   weight: number | null;
   mandatory: boolean;
+  // BUG-111 (2026-06-06): per-criterion evaluator role for the chip tag.
+  evaluatorRole?: 'TECHNICAL' | 'PROCUREMENT' | 'EITHER';
 }
 
 export interface MatrixVendor {
@@ -17,6 +19,11 @@ export interface MatrixVendor {
   vendorName: string;
   consensusResult: 'PASS' | 'FAIL' | 'PENDING';
   consensusScore: number | null;
+  // BUG-111: per-section subscores (percentages 0..100) so the matrix can
+  // render "T: X / weightTechnical" and "P: X / weightProcurement" alongside
+  // the combined total.
+  consensusScoreTechnical?: number | null;
+  consensusScoreProcurement?: number | null;
   consensusByCriterion: Array<{
     criterionId: string;
     consensusScore: number | null;
@@ -31,6 +38,13 @@ interface Props {
   passThreshold: number | null;
   selectedVendorId: string | null;
   onSelectVendor: (vendorId: string) => void;
+  // BUG-111 (2026-06-06): per-role weight totals — denominator for subscore display.
+  weightTechnical?: number;
+  weightProcurement?: number;
+  // BUG-095 (2026-06-02): callers can pick the initial layout. The inline
+  // breakdown on each VendorComparisonCard wants criteria-as-rows so the page
+  // doesn't widen unexpectedly when many vendors are present.
+  defaultLayout?: Layout;
 }
 
 type Layout = 'vendor-rows' | 'criterion-rows';
@@ -43,10 +57,12 @@ function toAbsolute(normalised: number | null, max: number): number | null {
   return (normalised / 100) * max;
 }
 
-function fmtScore(v: number | null, max?: number) {
+// BUG-096 (2026-06-03): owner directive — drop the "/ max" denominator and
+// always round to an integer. "Change 25.0 /30 to 25 and only round figure."
+// The Max column already shows the max so the denominator is redundant.
+function fmtScore(v: number | null, _max?: number) {
   if (v == null) return '—';
-  const fmt = Number.isInteger(v) ? v.toFixed(0) : v.toFixed(1);
-  return max != null ? `${fmt} / ${max}` : fmt;
+  return String(Math.round(v));
 }
 
 function resultBadge(result: 'PASS' | 'FAIL' | 'PENDING') {
@@ -89,8 +105,15 @@ export function TechnicalMatrix({
   passThreshold,
   selectedVendorId,
   onSelectVendor,
+  weightTechnical = 0,
+  weightProcurement = 0,
+  defaultLayout = 'vendor-rows',
 }: Props) {
-  const [layout, setLayout] = useState<Layout>('vendor-rows');
+  // BUG-111 (2026-06-06): only show subscores when at least one criterion is
+  // tagged with a role split. Otherwise (all-EITHER tenders), keep the legacy
+  // single-score row uncluttered.
+  const hasRoleSplit = weightTechnical > 0 || weightProcurement > 0;
+  const [layout, setLayout] = useState<Layout>(defaultLayout);
 
   const scoreByPair = useMemo(() => {
     const m = new Map<string, number | null>();
@@ -218,6 +241,25 @@ export function TechnicalMatrix({
                       <td className="px-4 py-3">{resultBadge(v.consensusResult)}</td>
                       <td className="px-4 py-3 text-right font-mono text-sm font-semibold text-text-primary">
                         {fmtScore(toAbsolute(v.consensusScore, totalMaxScore), totalMaxScore || undefined)}
+                        {/* BUG-111 (2026-06-06): per-section subscores when the
+                            tender uses role split. Small T:/P: figures under
+                            the combined total. */}
+                        {hasRoleSplit && (
+                          <div className="text-[10px] text-text-secondary font-normal mt-0.5 space-y-0.5">
+                            {weightTechnical > 0 && (
+                              <div>
+                                <span className="font-mono text-blue-700">T:</span>{' '}
+                                {fmtScore(toAbsolute(v.consensusScoreTechnical ?? null, weightTechnical), weightTechnical)} / {weightTechnical}
+                              </div>
+                            )}
+                            {weightProcurement > 0 && (
+                              <div>
+                                <span className="font-mono text-purple-700">P:</span>{' '}
+                                {fmtScore(toAbsolute(v.consensusScoreProcurement ?? null, weightProcurement), weightProcurement)} / {weightProcurement}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                       {criteria.map(c => {
                         const score = scoreByPair.get(`${v.vendorId}|${c.id}`) ?? null;

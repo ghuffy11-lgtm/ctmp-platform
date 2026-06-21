@@ -19,6 +19,14 @@ export interface AwardSummary {
   confirmedByName: string;
   confirmedAt: string;
   minutesGeneratedAt: string | null;
+  // BUG-115 (2026-06-09): null when the awarded bid was not negotiated.
+  negotiationSavings?: {
+    originalPrice: number;
+    finalPrice: number;
+    savingsAmount: number;
+    savingsPercent: number;
+    roundCount: number;
+  } | null;
 }
 
 function fmtCurrency(amount: number | null, currency: string) {
@@ -132,6 +140,16 @@ export function AwardSummaryCard({ award, tenderId, tenderReference, canGenerate
               </span>
             )}
           </div>
+          {/* BUG-115 (2026-06-09): negotiation savings sub-line. */}
+          {award.negotiationSavings && (
+            <p className="mt-2 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Awarded after <strong>{award.negotiationSavings.roundCount}</strong> negotiation round
+              {award.negotiationSavings.roundCount === 1 ? '' : 's'} — saved{' '}
+              <strong>{fmtCurrency(award.negotiationSavings.savingsAmount, award.winnerCurrency)}</strong>{' '}
+              ({award.negotiationSavings.savingsPercent.toFixed(1)}% off the original{' '}
+              {fmtCurrency(award.negotiationSavings.originalPrice, award.winnerCurrency)}).
+            </p>
+          )}
         </div>
 
         {/* Confirmer + date */}

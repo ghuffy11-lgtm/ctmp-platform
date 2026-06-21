@@ -39,6 +39,8 @@ interface FormData {
   clarificationDeadlineDate: string;
   clarificationDeadlineTime: string;
   description: string;
+  // BUG-137 (2026-06-19): require bidders to upload ≥1 supporting document.
+  requiresSupportingDocuments: boolean;
 }
 
 const EMPTY_FORM: FormData = {
@@ -53,6 +55,7 @@ const EMPTY_FORM: FormData = {
   clarificationDeadlineDate: '',
   clarificationDeadlineTime: '',
   description: '',
+  requiresSupportingDocuments: false,
 };
 
 export default function CreateTenderPage() {
@@ -121,6 +124,8 @@ export default function CreateTenderPage() {
         payload.estimatedBudget = Number(form.estimatedBudget);
       }
       payload.visibility = form.visibility;
+      // BUG-137 (2026-06-19): always pass the flag so backend persists it.
+      payload.requiresSupportingDocuments = form.requiresSupportingDocuments;
       const result = await post<{ id: string }>('/tenders', payload, token);
       // BUG-060 / WALK-007: drop the officer straight into the edit page so
       // they can configure the Technical Evaluation Criteria before submitting
@@ -267,6 +272,25 @@ export default function CreateTenderPage() {
             <p className="text-xs text-slate-400">
               Locked once saved. Invitation-only tenders require at least 3 invited vendors before Publish.
             </p>
+          </div>
+
+          {/* BUG-137 (2026-06-19): require bidders to upload supporting docs. */}
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-slate-700">Supporting Documents</label>
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.requiresSupportingDocuments}
+                onChange={(e) => update('requiresSupportingDocuments', e.target.checked)}
+                className="w-4 h-4 accent-blue-600 mt-0.5"
+              />
+              <span className="text-sm text-slate-700">
+                Require vendors to upload supporting documents (certificates, letters, etc.)
+                <span className="block text-xs text-slate-500 mt-0.5">
+                  When enabled, vendors must attach at least one PDF before submitting their bid.
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="flex flex-col gap-2">

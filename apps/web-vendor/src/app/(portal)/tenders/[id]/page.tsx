@@ -150,14 +150,9 @@ export default function VendorTenderDetailPage({ params }: { params: Promise<{ i
               )}
             </div>
           </div>
-          {tender.estimatedBudget != null && (
-            <div className="text-right">
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-900/55">Estimated Budget</div>
-              <div className="text-3xl md:text-4xl font-semibold text-emerald-600 mt-1">
-                {formatBudget(tender.estimatedBudget)}
-              </div>
-            </div>
-          )}
+          {/* BUG-117 (2026-06-09): estimatedBudget hidden on vendor portal —
+              internal-only reference. Owner directive: vendors should bid
+              against the BoQ, not anchor to the buyer's budget figure. */}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 mt-12">
@@ -444,10 +439,9 @@ function ClarificationsSection({ tenderId, tenderStatus }: { tenderId: string; t
                         <p className="text-[11px] text-slate-900/60">
                           {r.repliedByName ?? 'Procurement'} · {formatDate(r.repliedAt)}
                         </p>
-                        <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
-                          r.visibility === 'GENERAL_PUBLIC' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
-                        }`}>
-                          {r.visibility === 'GENERAL_PUBLIC' ? 'Public' : 'Private to you'}
+                        {/* BUG-145 (2026-06-19): every reply is private to the asking vendor. */}
+                        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">
+                          Private
                         </span>
                       </div>
                       <p className="text-sm whitespace-pre-wrap">{r.reply}</p>

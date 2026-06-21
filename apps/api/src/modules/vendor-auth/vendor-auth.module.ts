@@ -8,12 +8,18 @@ import { VendorJwtStrategy } from './strategies/vendor-jwt.strategy';
 import { CaptchaService } from '../../common/services/captcha.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AuditModule } from '../audit/audit.module';
+import { SystemSettingsModule } from '../system-settings/system-settings.module';
+// BUG-137 (2026-06-19): vendor-auth needs the vendor doc storage service for
+// the anonymous registration-document upload endpoint.
+import { VendorsModule } from '../vendors/vendors.module';
 
 @Module({
   imports: [
     PassportModule,
     NotificationsModule,
     AuditModule,
+    SystemSettingsModule,
+    VendorsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

@@ -5,8 +5,8 @@ import { useConfirm } from '@/components/dialog/DialogProvider';
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { get, post } from '@/lib/api';
-import { getAccessToken } from '@/lib/auth';
+import { get, post, patch } from '@/lib/api';
+import { getAccessToken, hasPermission } from '@/lib/auth';
 import {
   Users,
   ChevronRight,
@@ -47,6 +47,7 @@ interface CommitteeSession {
   openedAt?: string;
   remarks?: string;
   chairName?: string;
+  location?: string | null;
   requiredQuorumCount?: number | null;
   requiredRoleCode?: string;
   members?: CommitteeMember[];
@@ -203,6 +204,59 @@ export default function CommitteeOpeningPage() {
   }, []);
   const scheduledAt = session?.scheduledAt ? new Date(session.scheduledAt) : null;
   const beforeMeeting = scheduledAt != null && nowTick < scheduledAt.getTime();
+  // BUG-097 (2026-06-03): owner directive — attendance is locked until the
+  // day of the scheduled meeting. Day-precision compare so attendance opens
+  // at 00:00 local on the meeting day instead of the meeting minute.
+  const beforeMeetingDay = (() => {
+    if (!scheduledAt) return false;
+    const now = new Date(nowTick);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const meetingDay = new Date(scheduledAt.getFullYear(), scheduledAt.getMonth(), scheduledAt.getDate());
+    return today < meetingDay;
+  })();
+
+  // BUG-097: reschedule permission + modal state.
+  const [canCreateSession, setCanCreateSession] = useState(false);
+  useEffect(() => {
+    const t = getAccessToken();
+    setCanCreateSession(!!t && hasPermission(t, 'committee:create_session'));
+  }, []);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleTime, setRescheduleTime] = useState('');
+  const [rescheduleLocation, setRescheduleLocation] = useState('');
+  const [rescheduling, setRescheduling] = useState(false);
+
+  useEffect(() => {
+    if (rescheduleOpen && session?.scheduledAt) {
+      const d = new Date(session.scheduledAt);
+      setRescheduleDate(d.toISOString().slice(0, 10));
+      setRescheduleTime(d.toTimeString().slice(0, 5));
+      setRescheduleLocation(session.location ?? '');
+    }
+  }, [rescheduleOpen, session?.scheduledAt, session?.location]);
+
+  async function handleReschedule() {
+    if (!session) return;
+    if (!rescheduleDate) return;
+    setRescheduling(true);
+    try {
+      const time = rescheduleTime || '00:00';
+      const scheduledAtIso = new Date(`${rescheduleDate}T${time}:00`).toISOString();
+      const token = getAccessToken();
+      await patch(
+        `/committee-sessions/${session.id}`,
+        { scheduledAt: scheduledAtIso, location: rescheduleLocation || null },
+        token,
+      );
+      setRescheduleOpen(false);
+      if (selectedTenderId) await fetchSessionData(selectedTenderId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Reschedule failed');
+    } finally {
+      setRescheduling(false);
+    }
+  }
   const canOpenEnvelopes = !!session
     && session.status !== 'COMPLETED'
     && quorumMet
@@ -452,6 +506,17 @@ export default function CommitteeOpeningPage() {
                     <span className="flex items-center gap-1.5">
                       <Calendar className="w-4 h-4" />
                       {formatDateTime(session.scheduledAt)}
+                      {/* BUG-097: reschedule. Gated client-side by
+                          committee:create_session (server enforces too). */}
+                      {session.status !== 'COMPLETED' && canCreateSession && (
+                        <button
+                          type="button"
+                          onClick={() => setRescheduleOpen(true)}
+                          className="text-xs font-semibold text-accent hover:underline ml-2"
+                        >
+                          Reschedule
+                        </button>
+                      )}
                     </span>
                     {session.chairName && (
                       <span className="flex items-center gap-1.5">
@@ -651,6 +716,11 @@ export default function CommitteeOpeningPage() {
                     <span className="text-xs text-text-secondary">{members.length} members</span>
                   </div>
                   <div className="p-4 space-y-2">
+                    {beforeMeetingDay && scheduledAt && (
+                      <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 mb-2">
+                        Attendance is locked until the meeting day ({scheduledAt.toLocaleDateString()}). Toggles will enable automatically.
+                      </div>
+                    )}
                     {members.length === 0 ? (
                       <p className="text-xs text-text-secondary italic p-3 text-center">
                         No members assigned to this session.
@@ -667,10 +737,11 @@ export default function CommitteeOpeningPage() {
                               <p className="text-[10px] uppercase tracking-wider text-text-secondary truncate">{m.role}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1 bg-card rounded-full p-0.5 border border-border shrink-0">
+                          <div className="flex items-center gap-1 bg-card rounded-full p-0.5 border border-border shrink-0" title={beforeMeetingDay && scheduledAt ? `Attendance opens on ${scheduledAt.toLocaleDateString()}` : undefined}>
                             <button
                               onClick={() => toggleAttendance(m.userId, true)}
-                              className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition-colors ${
+                              disabled={beforeMeetingDay}
+                              className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                                 m.attended === true ? 'bg-success/15 text-success' : 'text-text-secondary/50 hover:text-text-secondary'
                               }`}
                             >
@@ -678,7 +749,8 @@ export default function CommitteeOpeningPage() {
                             </button>
                             <button
                               onClick={() => toggleAttendance(m.userId, false)}
-                              className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition-colors ${
+                              disabled={beforeMeetingDay}
+                              className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                                 m.attended === false ? 'bg-danger/15 text-danger' : 'text-text-secondary/50 hover:text-text-secondary'
                               }`}
                             >
@@ -827,6 +899,77 @@ export default function CommitteeOpeningPage() {
           </div>
         )}
       </div>
+
+      {/* BUG-097 (2026-06-03): reschedule modal. */}
+      {rescheduleOpen && session && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => !rescheduling && setRescheduleOpen(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            <div className="px-5 py-4 border-b border-border">
+              <h2 className="text-base font-bold text-text-primary">Reschedule meeting</h2>
+              <p className="text-xs text-text-secondary mt-0.5">
+                Change the date, time, or location. Members + perms stay as set.
+              </p>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-sm">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">Date</label>
+                <input
+                  type="date"
+                  value={rescheduleDate}
+                  onChange={e => setRescheduleDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-border rounded-lg bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">Time</label>
+                <input
+                  type="time"
+                  value={rescheduleTime}
+                  onChange={e => setRescheduleTime(e.target.value)}
+                  className="w-full px-3 py-2 border border-border rounded-lg bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1">Location (optional)</label>
+                <input
+                  type="text"
+                  value={rescheduleLocation}
+                  onChange={e => setRescheduleLocation(e.target.value)}
+                  placeholder="Boardroom A"
+                  className="w-full px-3 py-2 border border-border rounded-lg bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+            </div>
+            <div className="px-5 py-3 bg-bg/40 flex justify-end gap-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setRescheduleOpen(false)}
+                disabled={rescheduling}
+                className="px-4 py-2 text-sm font-semibold text-text-secondary border border-border rounded-lg hover:bg-bg disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleReschedule}
+                disabled={rescheduling || !rescheduleDate}
+                className="px-4 py-2 text-sm font-bold bg-accent text-white rounded-lg hover:opacity-90 disabled:opacity-40"
+              >
+                {rescheduling ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

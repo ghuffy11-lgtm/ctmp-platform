@@ -1,6 +1,7 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { RequestContextModule } from './common/request-context/request-context.module';
@@ -32,6 +33,7 @@ import { ComparisonModule } from './modules/comparison/comparison.module';
 import { EvaluationCriteriaModule } from './modules/evaluation-criteria/evaluation-criteria.module';
 import { BoqModule } from './modules/boq/boq.module';
 import { AwardModule } from './modules/award/award.module';
+import { NegotiationModule } from './modules/negotiation/negotiation.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -69,6 +71,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     EvaluationCriteriaModule,
     BoqModule,
     AwardModule,
+    NegotiationModule,
     AuditModule,
     NotificationsModule,
     ReportsModule,
@@ -78,7 +81,15 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     RequestContextModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // BUG-151 (2026-06-22): bind ThrottlerGuard globally so the rate-limit
+    // config registered above is actually enforced. Pre-BUG-151 the
+    // ThrottlerModule was dead code (no APP_GUARD binding, no controller-
+    // level @UseGuards). Per-endpoint @Throttle() decorators on anonymous
+    // vendor flows narrow specific endpoints further than the global cap.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

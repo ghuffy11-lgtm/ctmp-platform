@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsBoolean, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -44,6 +44,15 @@ export class CriterionInputDto {
   @IsNumber()
   @IsOptional()
   sortOrder?: number;
+
+  // BUG-111 (2026-06-06): which evaluator role is responsible for scoring
+  // this criterion. Default EITHER (back-compat for any client that doesn't
+  // send the field).
+  @ApiPropertyOptional({ enum: ['TECHNICAL', 'PROCUREMENT', 'EITHER'], default: 'EITHER' })
+  @IsString()
+  @IsIn(['TECHNICAL', 'PROCUREMENT', 'EITHER'])
+  @IsOptional()
+  evaluatorRole?: 'TECHNICAL' | 'PROCUREMENT' | 'EITHER';
 }
 
 export class ReplaceTenderCriteriaDto {

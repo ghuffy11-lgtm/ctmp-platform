@@ -1,14 +1,21 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuditRiskLevel, BidStatus, EnvelopeStatus, EnvelopeType, TechnicalResult, TenderStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { EvaluateBidDto } from './dto/evaluate-bid.dto';
 
 @Injectable()
 export class TechnicalEvaluationService {
+  private readonly logger = new Logger(TechnicalEvaluationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    // BUG-140 (2026-06-19): manager notification email on finalize.
+    private readonly notifications: NotificationsService,
+    private readonly config: ConfigService,
   ) {}
 
   async openEnvelopes(tenderId: string, userId: string) {
@@ -60,7 +67,96 @@ export class TechnicalEvaluationService {
       riskLevel: AuditRiskLevel.MEDIUM,
     });
 
+    // BUG-143 (2026-06-19): notify the tender department's TECHNICAL_EVALUATOR
+    // role-holders that they can begin scoring. Best-effort — failures logged
+    // but the envelope-open status flip is never rolled back. Closes the long-
+    // standing BUG-020 deferred backlog item.
+    await this.dispatchOpenedEmail(tenderId, result.openedEnvelopeCount).catch(err => {
+      this.logger.warn(`TECHNICAL_ENVELOPES_OPENED email dispatch failed for ${tenderId}: ${err?.message ?? err}`);
+    });
+
     return result;
+  }
+
+  // BUG-143 (2026-06-19): build + send the evaluator notification on
+  // technical-envelopes-opened. Mirrors BUG-140's dispatchFinalizedEmail
+  // shape. Audit row written once (after the loop) carrying the recipient
+  // list, so an empty dispatch leaves a discoverable breadcrumb.
+  private async dispatchOpenedEmail(tenderId: string, openedCount: number): Promise<void> {
+    const tender = await this.prisma.tender.findUnique({
+      where: { id: tenderId },
+      select: {
+        id: true,
+        reference: true,
+        title: true,
+        departmentId: true,
+        department: { select: { name: true } },
+      },
+    });
+    if (!tender) return;
+    if (!tender.departmentId) {
+      this.logger.warn(`Tender ${tenderId} has no department; skipping TECHNICAL_ENVELOPES_OPENED_EVALUATOR email.`);
+      return;
+    }
+
+    const recipients = await this.prisma.user.findMany({
+      where: {
+        status: 'ACTIVE',
+        userRoles: { some: { role: { code: 'TECHNICAL_EVALUATOR' } } },
+        userDepartments: { some: { departmentId: tender.departmentId } },
+      },
+      select: { id: true, email: true, displayName: true },
+    });
+
+    if (recipients.length === 0) {
+      this.logger.warn(`No TECHNICAL_EVALUATOR users in dept ${tender.departmentId}; skipping email for ${tenderId}.`);
+      // Still audit so the operational gap is visible.
+      await this.audit.log({
+        eventType: 'TECHNICAL_OPENED_EMAIL_SENT',
+        entityType: 'Tender',
+        entityId: tenderId,
+        tenderId,
+        afterValue: { recipientCount: 0, reason: 'no_active_evaluators_in_department' },
+        riskLevel: AuditRiskLevel.LOW,
+      });
+      return;
+    }
+
+    // BUG-144 (2026-06-19): registered app.adminPortalUrl is always present
+    // with a hardcoded fallback, so the email always carries an absolute link.
+    const adminBase = this.config.get<string>('app.adminPortalUrl') ?? '';
+    const tenderUrl = `${adminBase.replace(/\/+$/, '')}/technical-evaluation?tenderId=${tenderId}`;
+    const systemName = this.config.get<string>('app.systemName') ?? 'CTMP';
+    const departmentName = tender.department?.name ?? '(department)';
+
+    const sentTo: string[] = [];
+    for (const r of recipients) {
+      if (!r.email) continue;
+      try {
+        await this.notifications.sendEmail(r.email, 'TECHNICAL_ENVELOPES_OPENED_EVALUATOR', {
+          evaluatorName: r.displayName ?? 'Evaluator',
+          tenderReference: tender.reference,
+          tenderTitle: tender.title,
+          submissionCount: String(openedCount),
+          newStatus: 'Technical Opening',
+          departmentName,
+          tenderUrl,
+          systemName,
+        });
+        sentTo.push(r.email);
+      } catch (err) {
+        this.logger.warn(`Failed to email evaluator ${r.email} for ${tenderId}: ${(err as Error)?.message ?? err}`);
+      }
+    }
+
+    await this.audit.log({
+      eventType: 'TECHNICAL_OPENED_EMAIL_SENT',
+      entityType: 'Tender',
+      entityId: tenderId,
+      tenderId,
+      afterValue: { recipients: sentTo, recipientCount: sentTo.length },
+      riskLevel: AuditRiskLevel.LOW,
+    });
   }
 
   async findAll(tenderId: string) {
@@ -100,7 +196,12 @@ export class TechnicalEvaluationService {
     };
   }
 
-  async evaluate(bidId: string, dto: EvaluateBidDto, evaluatorId: string) {
+  async evaluate(bidId: string, dto: EvaluateBidDto, user: { id: string; permissions?: string[] }) {
+    const evaluatorId = user.id;
+    const userPerms = new Set(user.permissions ?? []);
+    const hasTechnical = userPerms.has('technical:evaluate');
+    const hasProcurement = userPerms.has('technical:evaluate:procurement');
+
     const bid = await this.prisma.bid.findUnique({
       where: { id: bidId },
       include: {
@@ -117,6 +218,34 @@ export class TechnicalEvaluationService {
     const threshold = bid.tender.technicalPassThreshold
       ? Number(bid.tender.technicalPassThreshold)
       : 70;
+
+    // BUG-111 (2026-06-06): per-criterion role check. Load tender criteria so
+    // we can look up each submitted score's assigned role and verify the caller
+    // is allowed to score it. Submissions that target a criterion outside the
+    // caller's role get a 403 naming the criterion.
+    const tenderCriteria = await this.prisma.tenderTechnicalCriterion.findMany({
+      where: { tenderId: bid.tenderId },
+      select: { name: true, evaluatorRole: true },
+    });
+    const roleByName = new Map(tenderCriteria.map(c => [c.name, c.evaluatorRole]));
+    if (dto.criterionScores) {
+      for (const c of dto.criterionScores) {
+        const role = roleByName.get(c.criterion) ?? 'EITHER';
+        const allowed =
+          role === 'EITHER'
+            ? (hasTechnical || hasProcurement)
+            : role === 'TECHNICAL'
+              ? hasTechnical
+              : role === 'PROCUREMENT'
+                ? hasProcurement
+                : false;
+        if (!allowed) {
+          throw new ForbiddenException(
+            `Criterion "${c.criterion}" is assigned to ${role} evaluators; you do not have the required permission.`,
+          );
+        }
+      }
+    }
 
     // Compute overallScore from per-criterion rows when provided. Weighted
     // average normalised to 0–100. If only the aggregate `score` is sent
@@ -281,6 +410,9 @@ export class TechnicalEvaluationService {
       }),
     ]);
 
+    const passed = updates.filter(u => u.result === TechnicalResult.PASS).length;
+    const failed = updates.filter(u => u.result === TechnicalResult.FAIL).length;
+
     await this.audit.log({
       eventType: 'TECHNICAL_RESULTS_FINALIZED',
       entityType: 'Tender',
@@ -289,13 +421,98 @@ export class TechnicalEvaluationService {
       actorUserId: userId,
       afterValue: {
         status: TenderStatus.COMMERCIAL_SEALED,
-        passed: updates.filter(u => u.result === TechnicalResult.PASS).length,
-        failed: updates.filter(u => u.result === TechnicalResult.FAIL).length,
+        passed,
+        failed,
       },
       riskLevel: AuditRiskLevel.HIGH,
     });
 
+    // BUG-140 (2026-06-19): notify the tender's owning manager that the
+    // engineering / evaluator team have completed their technical work.
+    // Best-effort — failure logged but does not roll back the finalize.
+    await this.dispatchFinalizedEmail(tenderId, updates.length, passed, failed).catch(err => {
+      this.logger.warn(`TECHNICAL_EVALUATION_FINALIZED email dispatch failed for ${tenderId}: ${err?.message ?? err}`);
+    });
+
     return this.findAll(tenderId);
+  }
+
+  // BUG-140 (2026-06-19): build + send the manager confirmation email.
+  private async dispatchFinalizedEmail(
+    tenderId: string,
+    totalBids: number,
+    passCount: number,
+    failCount: number,
+  ): Promise<void> {
+    // Load tender + manager + evaluator list in one round-trip.
+    const tender = await this.prisma.tender.findUnique({
+      where: { id: tenderId },
+      select: {
+        id: true,
+        reference: true,
+        title: true,
+        status: true,
+        owningUserId: true,
+        createdBy: true,
+        owningUser: { select: { displayName: true, email: true } },
+        createdByUser: { select: { displayName: true, email: true } },
+        bids: {
+          select: {
+            technicalEvaluations: {
+              select: { evaluatorUser: { select: { displayName: true, email: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!tender) return;
+
+    const manager = tender.owningUser ?? tender.createdByUser;
+    if (!manager?.email) {
+      this.logger.warn(`No owning/createdBy user email on tender ${tenderId}; skipping TECHNICAL_EVALUATION_FINALIZED email.`);
+      return;
+    }
+
+    // Distinct evaluator names across all bids' technical evaluations.
+    const evaluatorNames = new Set<string>();
+    for (const bid of tender.bids) {
+      for (const te of bid.technicalEvaluations) {
+        const u = te.evaluatorUser;
+        if (u?.displayName) evaluatorNames.add(u.displayName);
+        else if (u?.email) evaluatorNames.add(u.email);
+      }
+    }
+    const evaluatorList = evaluatorNames.size > 0
+      ? Array.from(evaluatorNames).join(', ')
+      : '(no evaluators recorded)';
+
+    // BUG-144 (2026-06-19): registered app.adminPortalUrl is always present
+    // with a hardcoded fallback, so the email always carries an absolute link.
+    const adminBase = this.config.get<string>('app.adminPortalUrl') ?? '';
+    const tenderUrl = `${adminBase.replace(/\/+$/, '')}/tenders/${tenderId}`;
+    const systemName = this.config.get<string>('app.systemName') ?? 'CTMP';
+
+    await this.notifications.sendEmail(manager.email, 'TECHNICAL_EVALUATION_FINALIZED', {
+      managerName: manager.displayName ?? 'Procurement Manager',
+      tenderReference: tender.reference,
+      tenderTitle: tender.title,
+      totalBids: String(totalBids),
+      passCount: String(passCount),
+      failCount: String(failCount),
+      evaluatorList,
+      newStatus: 'Commercial Sealed',
+      tenderUrl,
+      systemName,
+    });
+
+    await this.audit.log({
+      eventType: 'TECHNICAL_FINALIZED_EMAIL_SENT',
+      entityType: 'Tender',
+      entityId: tenderId,
+      tenderId,
+      afterValue: { recipient: manager.email, evaluators: Array.from(evaluatorNames), passed: passCount, failed: failCount },
+      riskLevel: AuditRiskLevel.LOW,
+    });
   }
 
   async listCriteria(tenderId: string) {
@@ -322,6 +539,9 @@ export class TechnicalEvaluationService {
           maxScore: Number(c.maxScore),
           weight: c.weight ? Number(c.weight) : undefined,
           mandatory: c.mandatory,
+          // BUG-111: surface the per-criterion role so the scorecard UI can
+          // filter visible rows by the caller's permissions.
+          evaluatorRole: c.evaluatorRole,
         })),
       };
     }

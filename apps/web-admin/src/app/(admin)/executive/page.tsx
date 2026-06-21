@@ -16,11 +16,13 @@
 //   - Scheduled email digest to executives
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   AlertCircle,
   ArrowDownRight,
   ArrowUpRight,
   Building2,
+  ChevronRight,
   Clock,
   Loader2,
   Minus,
@@ -35,7 +37,9 @@ import { getAccessToken } from '@/lib/auth';
 
 interface KpiCard {
   label: string;
-  value: number;
+  // BUG-133 (2026-06-14): nullable so "Avg Days to Award" can render "—"
+  // when no awarded tenders match.
+  value: number | null;
   unit: 'count' | 'KWD' | 'days' | 'percent';
   yoyDelta?: number | null;
   numerator?: number;
@@ -100,7 +104,34 @@ function fmtPct(v: number): string {
   return `${v.toFixed(1)}%`;
 }
 
-function fmtKpi(value: number, unit: KpiCard['unit']): string {
+// BUG-133 (2026-06-14): each KPI tile drills into a filtered tender list.
+function drillDownHrefForKpi(label: string, year: number): string {
+  const base = '/executive/tenders';
+  switch (label) {
+    case 'Tenders Created':
+      return `${base}?createdYear=${year}`;
+    case 'Estimated Value':
+      return `${base}?createdYear=${year}&statusNot=Cancelled&sort=estimatedBudget:desc`;
+    case 'Awarded Value':
+      return `${base}?awardedYear=${year}&hasAward=true&sort=awardedAmount:desc`;
+    case 'Realised Savings':
+    case 'Savings Rate':
+      return `${base}?awardedYear=${year}&hasAward=true&sort=savings:desc`;
+    case 'Negotiation Savings':
+      return `${base}?awardedYear=${year}&hasAward=true&hasNegotiation=true&sort=savings:desc`;
+    case 'Active Pipeline':
+      return `${base}?activeOnly=true&sort=estimatedBudget:desc`;
+    case 'Avg Days to Award':
+      return `${base}?awardedYear=${year}&hasAward=true&sort=cycleDays:desc`;
+    case 'Awarded Tenders':
+      return `${base}?awardedYear=${year}&hasAward=true&sort=awardedAt:desc`;
+    default:
+      return base;
+  }
+}
+
+function fmtKpi(value: number | null, unit: KpiCard['unit']): string {
+  if (value == null) return '—';
   switch (unit) {
     case 'KWD':
       return `${fmtKwd(value)} KWD`;
@@ -120,10 +151,40 @@ const KPI_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   'Awarded Value': Wallet,
   'Realised Savings': TrendingDown,
   'Savings Rate': TrendingDown,
+  // BUG-133 (2026-06-14): new Negotiation Savings tile.
+  'Negotiation Savings': TrendingDown,
   'Active Pipeline': TrendingUp,
   'Avg Days to Award': Clock,
   'Awarded Tenders': Building2,
 };
+
+// BUG-101 (2026-06-04): owner asked for a more colourful Executive Dashboard
+// matching "standard colors of expenses" — blue/indigo for counts + estimates,
+// emerald/teal for money awarded + savings (positive), amber for in-flight,
+// purple for time. Each KPI gets a distinct accent so the strip reads at a
+// glance instead of being a wall of neutral cards. Tailwind classes are
+// inlined (not interpolated) so the JIT compiler retains them at build.
+interface KpiStyle {
+  card: string;
+  iconWrap: string;
+  iconColor: string;
+  value: string;
+  topBar: string;
+}
+const KPI_STYLES: Record<string, KpiStyle> = {
+  'Tenders Created':     { card: 'bg-blue-50/60 border-blue-200',     iconWrap: 'bg-blue-100',     iconColor: 'text-blue-600',     value: 'text-blue-700',     topBar: 'bg-blue-500' },
+  'Estimated Value':     { card: 'bg-indigo-50/60 border-indigo-200', iconWrap: 'bg-indigo-100',   iconColor: 'text-indigo-600',   value: 'text-indigo-700',   topBar: 'bg-indigo-500' },
+  'Awarded Value':       { card: 'bg-emerald-50/60 border-emerald-200', iconWrap: 'bg-emerald-100', iconColor: 'text-emerald-600', value: 'text-emerald-700', topBar: 'bg-emerald-500' },
+  'Realised Savings':    { card: 'bg-teal-50/60 border-teal-200',     iconWrap: 'bg-teal-100',     iconColor: 'text-teal-600',     value: 'text-teal-700',     topBar: 'bg-teal-500' },
+  'Savings Rate':        { card: 'bg-green-50/60 border-green-200',   iconWrap: 'bg-green-100',    iconColor: 'text-green-600',    value: 'text-green-700',    topBar: 'bg-green-500' },
+  // BUG-133 (2026-06-14): Negotiation Savings — sky to distinguish from green
+  // (estimate-vs-award) Realised Savings.
+  'Negotiation Savings': { card: 'bg-sky-50/60 border-sky-200',       iconWrap: 'bg-sky-100',      iconColor: 'text-sky-600',      value: 'text-sky-700',      topBar: 'bg-sky-500' },
+  'Active Pipeline':     { card: 'bg-amber-50/60 border-amber-200',   iconWrap: 'bg-amber-100',    iconColor: 'text-amber-600',    value: 'text-amber-700',    topBar: 'bg-amber-500' },
+  'Avg Days to Award':   { card: 'bg-purple-50/60 border-purple-200', iconWrap: 'bg-purple-100',   iconColor: 'text-purple-600',   value: 'text-purple-700',   topBar: 'bg-purple-500' },
+  'Awarded Tenders':     { card: 'bg-cyan-50/60 border-cyan-200',     iconWrap: 'bg-cyan-100',     iconColor: 'text-cyan-600',     value: 'text-cyan-700',     topBar: 'bg-cyan-500' },
+};
+const KPI_FALLBACK: KpiStyle = { card: 'bg-slate-50/60 border-slate-200', iconWrap: 'bg-slate-100', iconColor: 'text-slate-600', value: 'text-slate-700', topBar: 'bg-slate-400' };
 
 export default function ExecutiveDashboardPage() {
   const currentYear = new Date().getFullYear();
@@ -220,20 +281,40 @@ export default function ExecutiveDashboardPage() {
 
       {summary && (
         <>
-          {/* KPI Strip */}
+          {/* KPI Strip — BUG-101 colourised; BUG-133 drill-down links. */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {summary.kpis.map(kpi => {
               const Icon = KPI_ICONS[kpi.label] ?? TrendingUp;
+              const style = KPI_STYLES[kpi.label] ?? KPI_FALLBACK;
               const delta = kpi.yoyDelta;
+              // BUG-133: each tile drills into a focused tender list.
+              const drillHref = drillDownHrefForKpi(kpi.label, year);
+              // BUG-133: Realised Savings + Savings Rate render red when
+              // the value is negative (overruns exceeded gains).
+              const isNegative =
+                (kpi.label === 'Realised Savings' || kpi.label === 'Savings Rate') &&
+                typeof kpi.value === 'number' && kpi.value < 0;
+              const valueColor = isNegative ? 'text-danger' : style.value;
               return (
-                <div key={kpi.label} className="bg-card border border-border rounded-xl p-5 space-y-2">
-                  <div className="flex items-center justify-between">
+                <Link
+                  key={kpi.label}
+                  href={drillHref}
+                  className={`relative ${style.card} border rounded-xl p-5 space-y-2 overflow-hidden block hover:shadow-md hover:-translate-y-0.5 transition`}
+                >
+                  <span className={`absolute inset-x-0 top-0 h-1 ${style.topBar}`} />
+                  <div className="flex items-center justify-between pt-1">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">
                       {kpi.label}
+                      {kpi.label === 'Active Pipeline' && (
+                        <span className="ml-1 font-normal normal-case text-text-secondary/80">(all years)</span>
+                      )}
                     </p>
-                    <Icon className="w-4 h-4 text-text-secondary/70" />
+                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg ${style.iconWrap}`}>
+                      <Icon className={`w-4 h-4 ${style.iconColor}`} />
+                    </span>
                   </div>
-                  <p className="text-2xl font-bold text-text-primary tracking-tight">
+                  <p className={`text-2xl font-bold tracking-tight ${valueColor} flex items-center gap-1`}>
+                    {isNegative && <ArrowDownRight className="w-5 h-5" />}
                     {fmtKpi(kpi.value, kpi.unit)}
                   </p>
                   {delta != null && (
@@ -243,12 +324,23 @@ export default function ExecutiveDashboardPage() {
                       <span className="text-text-secondary font-normal">vs {year - 1}</span>
                     </div>
                   )}
-                  {kpi.numerator != null && kpi.denominator != null && kpi.denominator > 0 && (
+                  {/* Realised Savings: show ratio. Negotiation Savings:
+                      show award count + avg %. */}
+                  {kpi.label === 'Negotiation Savings' && kpi.numerator != null && kpi.denominator != null && (
                     <p className="text-[11px] text-text-secondary">
-                      {fmtKwd(kpi.numerator)} of {fmtKwd(kpi.denominator)} KWD estimated
+                      {kpi.numerator.toLocaleString('en-GB')} awards · avg {kpi.denominator.toFixed(1)}%
                     </p>
                   )}
-                </div>
+                  {kpi.label === 'Realised Savings' && kpi.numerator != null && kpi.denominator != null && kpi.denominator > 0 && (
+                    // BUG-134 (2026-06-15): clearer sub-line. Owner read the
+                    // old "2.7K of 150K KWD estimated" as a progress fraction.
+                    // Show what was actually awarded vs what was budgeted —
+                    // the savings = budgeted − awarded is the main tile value.
+                    <p className="text-[11px] text-text-secondary">
+                      Awarded {fmtKwd(kpi.denominator - kpi.numerator)} of {fmtKwd(kpi.denominator)} KWD budgeted
+                    </p>
+                  )}
+                </Link>
               );
             })}
           </div>
@@ -306,6 +398,8 @@ export default function ExecutiveDashboardPage() {
                 awardedValue: d.awardedValue,
               }))}
               max={maxDept}
+              // BUG-133 (2026-06-14): drill into per-department executive view.
+              linkTarget={(deptId) => `/executive/departments/${deptId}?year=${year}`}
             />
             <BreakdownCard
               title="By Category"
@@ -318,6 +412,8 @@ export default function ExecutiveDashboardPage() {
                 awardedValue: c.awardedValue,
               }))}
               max={maxCat}
+              // BUG-133: drill into a filtered tender list scoped to the category.
+              linkTarget={(_key, label) => `/executive/tenders?awardedYear=${year}&category=${encodeURIComponent(label)}&hasAward=true&sort=awardedAmount:desc`}
             />
           </div>
 
@@ -353,16 +449,35 @@ export default function ExecutiveDashboardPage() {
                       <th className="px-5 py-2.5 text-right w-20">Awards</th>
                       <th className="px-5 py-2.5 text-right w-32">Total (KWD)</th>
                       <th className="px-5 py-2.5 text-right w-24">Share</th>
+                      <th className="px-5 py-2.5 text-right w-8" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
+                    {/* BUG-100 (2026-06-04): rows are now clickable — link to
+                        the per-vendor executive profile drill-down. */}
                     {summary.topVendors.map((v, i) => (
                       <tr key={v.vendorId} className="hover:bg-bg/40">
                         <td className="px-5 py-2.5 text-text-secondary font-mono">{i + 1}</td>
-                        <td className="px-5 py-2.5 text-text-primary">{v.vendorName}</td>
+                        <td className="px-5 py-2.5">
+                          <Link
+                            href={`/executive/vendors/${v.vendorId}`}
+                            className="text-text-primary hover:text-accent"
+                          >
+                            {v.vendorName}
+                          </Link>
+                        </td>
                         <td className="px-5 py-2.5 text-right font-mono">{v.awardCount}</td>
                         <td className="px-5 py-2.5 text-right font-mono">{fmtFullKwd(v.totalAwarded)}</td>
                         <td className="px-5 py-2.5 text-right font-mono text-text-secondary">{fmtPct(v.shareOfTotal)}</td>
+                        <td className="px-5 py-2.5 text-right">
+                          <Link
+                            href={`/executive/vendors/${v.vendorId}`}
+                            className="inline-flex items-center text-accent hover:text-accent/80"
+                            title="View vendor profile"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </Link>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -383,12 +498,18 @@ export default function ExecutiveDashboardPage() {
               ) : (
                 <ul className="divide-y divide-border">
                   {summary.pipeline.map(p => (
-                    <li key={p.status} className="px-5 py-2.5 flex items-center justify-between text-sm">
-                      <div>
-                        <p className="text-text-primary font-medium">{p.status}</p>
-                        <p className="text-xs text-text-secondary">{p.count} tender{p.count === 1 ? '' : 's'}</p>
-                      </div>
-                      <p className="text-text-primary font-mono font-semibold">{fmtKwd(p.estimatedValue)} KWD</p>
+                    <li key={p.status} className="hover:bg-bg/40 transition">
+                      {/* BUG-133 (2026-06-14): drill into tenders in this state. */}
+                      <Link
+                        href={`/executive/tenders?activeOnly=true&status=${encodeURIComponent(p.status)}&sort=estimatedBudget:desc`}
+                        className="px-5 py-2.5 flex items-center justify-between text-sm"
+                      >
+                        <div>
+                          <p className="text-text-primary font-medium">{p.status}</p>
+                          <p className="text-xs text-text-secondary">{p.count} tender{p.count === 1 ? '' : 's'}</p>
+                        </div>
+                        <p className="text-text-primary font-mono font-semibold">{fmtKwd(p.estimatedValue)} KWD</p>
+                      </Link>
                     </li>
                   ))}
                 </ul>
@@ -430,11 +551,14 @@ function BreakdownCard({
   subtitle,
   items,
   max,
+  // BUG-133 (2026-06-14): optional row→href so each breakdown row drills in.
+  linkTarget,
 }: {
   title: string;
   subtitle: string;
   items: Array<{ key: string; label: string; count: number; estimatedValue: number; awardedValue: number }>;
   max: number;
+  linkTarget?: (key: string, label: string) => string;
 }) {
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -449,8 +573,8 @@ function BreakdownCard({
           {items.map(it => {
             const estPct = (it.estimatedValue / max) * 100;
             const awdPct = (it.awardedValue / max) * 100;
-            return (
-              <li key={it.key} className="px-5 py-3 space-y-1.5">
+            const content = (
+              <>
                 <div className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-text-primary font-semibold truncate">{it.label}</span>
@@ -469,6 +593,15 @@ function BreakdownCard({
                     <div className="h-full bg-emerald-500 rounded" style={{ width: `${awdPct}%` }} />
                   </div>
                 </div>
+              </>
+            );
+            return (
+              <li key={it.key} className="px-5 py-3 space-y-1.5 hover:bg-bg/40 transition">
+                {linkTarget ? (
+                  <Link href={linkTarget(it.key, it.label)} className="block space-y-1.5">
+                    {content}
+                  </Link>
+                ) : content}
               </li>
             );
           })}

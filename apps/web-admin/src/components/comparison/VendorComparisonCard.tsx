@@ -10,18 +10,26 @@ import {
   AlertTriangle,
   Clock,
   Building2,
+  Download,
+  Eye,
   FileText,
   Loader2,
   Pencil,
   Shield,
   TrendingDown,
-  X,
 } from 'lucide-react';
 import { CommercialDocumentsList } from '@/components/CommercialDocumentsList';
+import { SupportingDocumentsList } from '@/components/SupportingDocumentsList';
+import { usePdfViewer } from '@/components/viewer/PdfViewerProvider';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
-import { VendorTechnicalCard, type ComparisonVendor, type ComparisonCriterion } from '@/components/comparison/VendorTechnicalCard';
-import { TechnicalMatrix, type MatrixCriterion, type MatrixVendor } from '@/components/comparison/TechnicalMatrix';
+
+// BUG-129 (2026-06-11): API base for direct fetch of streamed PDFs (the
+// generic api.ts client doesn't handle binary streams).
+const NEGOTIATION_API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+import { type ComparisonVendor, type ComparisonCriterion } from '@/components/comparison/VendorTechnicalCard';
+// BUG-098: TechnicalMatrix import removed — per-vendor inline breakdown is now
+// a simple single-vendor table, no matrix.
 
 export interface CardCommercialDoc {
   id: string;
@@ -54,6 +62,32 @@ export interface CardVendor {
     unitPrice: number | null;
     lineTotal: number | null;
   }>;
+  // BUG-115 (2026-06-09): negotiation history. commercialTotal above is the
+  // resolved CURRENT price (latest non-superseded). originalCommercialTotal
+  // is the pre-negotiation baseline. negotiationHistory stacks per-round.
+  // BUG-129 (2026-06-11): submissionId added so the per-round PDF buttons
+  // can build the download URL.
+  // BUG-130 (2026-06-12): boqLines per round so BoqBreakdownBlock can show
+  // per-line Original vs Negotiated unit prices.
+  originalCommercialTotal?: number | null;
+  negotiationHistory?: Array<{
+    submissionId: string;
+    roundNumber: number;
+    submittedAt: string;
+    totalPrice: number | null;
+    currency: string;
+    percentReductionVsPrevious: number | null;
+    percentReductionVsOriginal: number | null;
+    commercialPdfFilename: string | null;
+    remarks: string | null;
+    boqLines?: Array<{
+      tenderBoqItemId: string;
+      status: 'BIDDING' | 'NOT_BIDDING';
+      unitPrice: number | null;
+    }>;
+  }>;
+  hasOpenNegotiationInvitation?: boolean;
+  openNegotiationRoundNumber?: number | null;
 }
 
 export interface CardBoqRow {
@@ -88,10 +122,17 @@ function fmtCurrency(amount: number | null, currency: string) {
   }).format(amount);
 }
 
-function fmtScore(v: number | null, max: number | null) {
-  if (v == null) return '—';
-  const f = Number.isInteger(v) ? v.toFixed(0) : v.toFixed(1);
-  return max != null ? `${f} / ${max}` : f;
+// BUG-097-fix (2026-06-03): round integer only.
+// BUG-101 (2026-06-04): owner reported the displayed score reads as a
+// percentage. Convert backend percentage (0..100, clamped in
+// technical-evaluation.service) to absolute units against the criteria max
+// so the figure matches the standalone Technical Comparison page —
+// "93" → "28 / 30".
+function fmtScore(percent: number | null, max: number | null) {
+  if (percent == null) return '—';
+  if (max == null || max <= 0) return String(Math.round(percent));
+  const absolute = Math.round((percent / 100) * max);
+  return `${absolute} / ${max}`;
 }
 
 function resultPill(result: 'PASS' | 'FAIL' | 'PENDING') {
@@ -146,6 +187,47 @@ export function VendorComparisonCard({
   // continues to handle manual price entry / display for legacy tenders.
   const hasBoq = (boqTemplate?.length ?? 0) > 0 && (vendor.boqLines?.length ?? 0) > 0;
 
+  // BUG-129 (2026-06-11): negotiation PDF view/download.
+  const { openPdfViewer } = usePdfViewer();
+  async function viewNegotiationPdf(submissionId: string, filename: string) {
+    try {
+      const token = getAccessToken();
+      const res = await fetch(
+        `${NEGOTIATION_API_BASE}/api/v1/tenders/${tenderId}/negotiation-submissions/${submissionId}/commercial-pdf/view`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      );
+      if (res.status === 403) { alert('Your role cannot view this PDF (comparison:commercial:view required).'); return; }
+      if (!res.ok) throw new Error(`Open failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      openPdfViewer({ src: url, title: filename, onClose: () => URL.revokeObjectURL(url) });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Open failed');
+    }
+  }
+  async function downloadNegotiationPdf(submissionId: string, filename: string) {
+    try {
+      const token = getAccessToken();
+      const res = await fetch(
+        `${NEGOTIATION_API_BASE}/api/v1/tenders/${tenderId}/negotiation-submissions/${submissionId}/commercial-pdf`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      );
+      if (res.status === 403) { alert('Your role cannot download this PDF.'); return; }
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Download failed');
+    }
+  }
+
   return (
     <div
       id={`commercial-vendor-${vendor.vendorId}`}
@@ -187,6 +269,162 @@ export function VendorComparisonCard({
 
       {expanded && (
         <div className="border-t border-border bg-bg/30">
+          {/* BUG-115 (2026-06-09): negotiation-history block.
+              BUG-129 (2026-06-11): restructured into a side-by-side headline
+              (Original | Latest Negotiation) with a savings chip, plus a
+              collapsed expander for the per-round detail when N > 0. Each
+              round entry exposes View/Download buttons for that submission's
+              commercial PDF. */}
+          {((vendor.negotiationHistory?.length ?? 0) > 0 || vendor.hasOpenNegotiationInvitation) && (() => {
+            const history = vendor.negotiationHistory ?? [];
+            const latest = history.length > 0 ? history[history.length - 1] : null;
+            const orig = vendor.originalCommercialTotal ?? null;
+            return (
+              <section className="px-5 py-4 border-b border-border">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-3 flex items-center gap-1.5">
+                  Negotiation rounds
+                  {history.length > 0 && (
+                    <span className="text-[10px] text-text-secondary font-normal normal-case">
+                      ({history.length} submission{history.length === 1 ? '' : 's'})
+                    </span>
+                  )}
+                </h4>
+
+                {/* Side-by-side headline (only when at least 1 round submitted). */}
+                {latest ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-card border border-border rounded-lg px-3 py-3">
+                      <p className="text-[10px] uppercase tracking-wider text-text-secondary font-semibold">
+                        Original
+                      </p>
+                      <p className="font-mono font-semibold text-text-primary text-lg mt-1">
+                        {fmtCurrency(orig, vendor.currency)}
+                      </p>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-3">
+                      <p className="text-[10px] uppercase tracking-wider text-amber-900 font-semibold flex items-center justify-between gap-2">
+                        <span>Negotiated · R{latest.roundNumber}</span>
+                        {latest.percentReductionVsOriginal != null && (
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            latest.percentReductionVsOriginal >= 0
+                              ? 'bg-emerald-200 text-emerald-900'
+                              : 'bg-rose-200 text-rose-900'
+                          }`}>
+                            {latest.percentReductionVsOriginal >= 0 ? '−' : '+'}
+                            {Math.abs(latest.percentReductionVsOriginal).toFixed(1)}%
+                          </span>
+                        )}
+                      </p>
+                      <p className="font-mono font-semibold text-amber-900 text-lg mt-1">
+                        {fmtCurrency(latest.totalPrice, latest.currency)}
+                      </p>
+                      {latest.commercialPdfFilename && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => viewNegotiationPdf(latest.submissionId, latest.commercialPdfFilename!)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-card text-text-primary border border-border rounded hover:bg-amber-100"
+                            title={`View ${latest.commercialPdfFilename}`}
+                          >
+                            <Eye className="w-3 h-3" /> View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => downloadNegotiationPdf(latest.submissionId, latest.commercialPdfFilename!)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-card text-text-primary border border-border rounded hover:bg-amber-100"
+                            title={`Download ${latest.commercialPdfFilename}`}
+                          >
+                            <Download className="w-3 h-3" /> Download
+                          </button>
+                          <span className="text-[10px] text-amber-800 truncate" title={latest.commercialPdfFilename}>
+                            {latest.commercialPdfFilename}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* Open invitation but no submission yet — show original only + pending note. */
+                  orig != null && (
+                    <div className="bg-card border border-border rounded-lg px-3 py-3">
+                      <p className="text-[10px] uppercase tracking-wider text-text-secondary font-semibold">
+                        Original
+                      </p>
+                      <p className="font-mono font-semibold text-text-primary text-lg mt-1">
+                        {fmtCurrency(orig, vendor.currency)}
+                      </p>
+                    </div>
+                  )
+                )}
+
+                {vendor.hasOpenNegotiationInvitation && (
+                  <div className="mt-3 bg-amber-100 border border-amber-300 rounded-lg px-3 py-2 text-xs text-amber-900">
+                    Round {vendor.openNegotiationRoundNumber ?? '?'} pending — vendor has been invited
+                    but has not yet submitted.
+                  </div>
+                )}
+
+                {/* Per-round detail expander — only useful when ≥ 2 rounds. */}
+                {history.length > 1 && (
+                  <details className="mt-3 text-xs">
+                    <summary className="cursor-pointer text-text-secondary hover:text-text-primary font-semibold">
+                      All rounds ({history.length})
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      {history.map((r) => (
+                        <div
+                          key={r.submissionId}
+                          className="bg-amber-50/60 border border-amber-200 rounded-lg px-3 py-2 flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-amber-900">
+                              <span className="font-semibold">Round {r.roundNumber}</span>
+                              <span className="text-xs text-amber-700 ml-2">
+                                {new Date(r.submittedAt).toLocaleDateString('en-GB')}
+                                {r.percentReductionVsOriginal != null && ` · ${r.percentReductionVsOriginal.toFixed(1)}% vs original`}
+                                {r.percentReductionVsPrevious != null && ` · ${r.percentReductionVsPrevious.toFixed(1)}% vs previous`}
+                              </span>
+                            </p>
+                            {r.commercialPdfFilename && (
+                              <p className="text-[10px] text-amber-800 truncate mt-0.5" title={r.commercialPdfFilename}>
+                                <FileText className="inline w-3 h-3 mr-1" />{r.commercialPdfFilename}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-mono font-semibold text-amber-900 text-sm">
+                              {fmtCurrency(r.totalPrice, r.currency)}
+                            </span>
+                            {r.commercialPdfFilename && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => viewNegotiationPdf(r.submissionId, r.commercialPdfFilename!)}
+                                  className="p-1 text-amber-900 hover:bg-amber-200 rounded"
+                                  title="View PDF"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => downloadNegotiationPdf(r.submissionId, r.commercialPdfFilename!)}
+                                  className="p-1 text-amber-900 hover:bg-amber-200 rounded"
+                                  title="Download PDF"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </section>
+            );
+          })()}
+
           {/* Block 1: Commercial total. When the bid carries per-line BOQ
               entries (Phase F / BUG-068), render the structured breakdown.
               Otherwise fall back to BUG-053's manual-entry block. */}
@@ -201,30 +439,39 @@ export function VendorComparisonCard({
             />
           )}
 
-          {/* Block 2: Technical detail (read-only) */}
+          {/* Block 2: Technical score (BUG-095 (2026-06-02) — relabeled). */}
           <section className="px-5 py-4 border-b border-border">
             <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2 flex items-center gap-1.5">
-              <Shield className="w-3.5 h-3.5" /> Technical score (read-only)
+              <Shield className="w-3.5 h-3.5" /> Technical score
             </h4>
-            <div className="bg-card border border-border rounded-lg px-4 py-3 flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <p className="text-sm text-text-primary font-semibold">
-                  {fmtScore(vendor.technicalScore, vendor.technicalMaxScore)}
-                </p>
-                <p className="text-xs text-text-secondary mt-0.5">
-                  Result: {vendor.technicalResult}
-                </p>
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <div className="px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <p className="text-sm text-text-primary font-semibold">
+                    {fmtScore(vendor.technicalScore, vendor.technicalMaxScore)}
+                  </p>
+                  <p className="text-xs text-text-secondary mt-0.5">
+                    Result: {vendor.technicalResult}
+                  </p>
+                </div>
+                {/* BUG-094 (2026-06-02): owner wanted the tech breakdown inline
+                     (like commercial breakdown above) instead of popping a
+                     modal. Replaces the BUG-069/BUG-070 TechDetailModal trigger
+                     with an in-place expander that fetches once and shows the
+                     same TechnicalMatrix below this row. */}
+                <button
+                  type="button"
+                  onClick={() => setTechOpen(o => !o)}
+                  className="text-xs font-semibold text-accent hover:underline"
+                >
+                  {techOpen ? 'Hide technical breakdown ▲' : 'Show technical breakdown ▼'}
+                </button>
               </div>
-              {/* BUG-069: open this vendor's tech detail in a modal — no
-                  navigation. Owner explicitly wants to stay on Commercial
-                  Comparison; the previous Link navigated to /technical-comparison. */}
-              <button
-                type="button"
-                onClick={() => setTechOpen(true)}
-                className="text-xs font-semibold text-accent hover:underline"
-              >
-                View Technical Comparison →
-              </button>
+              {techOpen && (
+                <div className="border-t border-border bg-bg/30 p-4">
+                  <InlineTechBreakdown tenderId={tenderId} highlightVendorId={vendor.vendorId} />
+                </div>
+              )}
             </div>
           </section>
 
@@ -237,6 +484,21 @@ export function VendorComparisonCard({
               <CommercialDocumentsList
                 bidId={vendor.bidId}
                 envelopeStatus={vendor.commercialEnvelopeStatus ?? 'SEALED'}
+              />
+            </div>
+          </section>
+
+          {/* Block 3b: Supporting documents (BUG-142). Relocated here from
+              the tender Bids tab so commercial-side evidence lives next to
+              the priced offer. Same OPENED-envelope gate as block 3. */}
+          <section className="px-5 py-4 border-b border-border">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2 flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5" /> Supporting documents
+            </h4>
+            <div className="bg-card border border-border rounded-lg px-4 py-3">
+              <SupportingDocumentsList
+                bidId={vendor.bidId}
+                commercialEnvelopeStatus={vendor.commercialEnvelopeStatus ?? 'SEALED'}
               />
             </div>
           </section>
@@ -283,46 +545,55 @@ export function VendorComparisonCard({
           {/* Block 5: Award action */}
           <section className="px-5 py-4">
             <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">Award action</h4>
-            {isFail ? (
-              <div className="bg-danger/5 border border-danger/20 rounded-lg px-4 py-3 text-sm text-danger">
-                This vendor failed technical evaluation and cannot be awarded.
-              </div>
-            ) : vendor.technicalResult === 'PENDING' ? (
+            {vendor.technicalResult === 'PENDING' ? (
               <div className="bg-bg border border-border rounded-lg px-4 py-3 text-sm text-text-secondary">
-                Technical evaluation pending. Award becomes available once a PASS result is recorded.
+                Technical evaluation pending. Award becomes available once a result is recorded.
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => onRecommend(vendor.bidId, isLowestPass)}
-                className={`w-full px-5 py-3 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 ${
-                  isLowestPass
-                    ? 'bg-success text-white hover:opacity-90'
-                    : 'bg-card text-text-primary border border-border hover:bg-bg'
-                }`}
-              >
-                <Award className="w-4 h-4" />
-                {isLowestPass ? 'Recommend (lowest PASS)' : 'Recommend with override'}
-              </button>
-            )}
-            {!isFail && !isLowestPass && vendor.technicalResult === 'PASS' && (
-              <p className="text-[11px] text-text-secondary mt-2 italic">
-                Override needs written justification + an attached PDF (Phase D enforces this in the dialog).
-              </p>
+              <>
+                {/* BUG-094 (2026-06-02): owner directive — allow awarding a
+                    technically-FAIL vendor with approver justification (text +
+                    PDF). Same override flow as a non-lowest PASS pick, just a
+                    more pointed warning. */}
+                {isFail && (
+                  <div className="bg-danger/5 border border-danger/30 rounded-lg px-4 py-3 text-sm text-danger mb-2">
+                    <p className="font-bold mb-0.5">This vendor failed technical evaluation.</p>
+                    <p className="text-xs">
+                      Awarding to a FAIL vendor is an override decision. The Confirm dialog will require written justification (min 20 chars) AND an attached PDF.
+                    </p>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onRecommend(vendor.bidId, isLowestPass)}
+                  className={`w-full px-5 py-3 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 ${
+                    isLowestPass
+                      ? 'bg-success text-white hover:opacity-90'
+                      : isFail
+                        ? 'bg-danger/10 text-danger border border-danger/30 hover:bg-danger/15'
+                        : 'bg-card text-text-primary border border-border hover:bg-bg'
+                  }`}
+                >
+                  <Award className="w-4 h-4" />
+                  {isLowestPass
+                    ? 'Recommend (lowest PASS)'
+                    : isFail
+                      ? 'Recommend FAIL vendor (override)'
+                      : 'Recommend with override'}
+                </button>
+                {!isLowestPass && !isFail && (
+                  <p className="text-[11px] text-text-secondary mt-2 italic">
+                    Override needs written justification + an attached PDF (Phase D enforces this in the dialog).
+                  </p>
+                )}
+              </>
             )}
           </section>
         </div>
       )}
 
-      {/* BUG-069: tech-detail modal — only this vendor, no navigation. */}
-      {techOpen && (
-        <TechDetailModal
-          tenderId={tenderId}
-          vendorId={vendor.vendorId}
-          vendorName={vendor.vendorName}
-          onClose={() => setTechOpen(false)}
-        />
-      )}
+      {/* BUG-094 (2026-06-02): TechDetailModal removed — tech breakdown is now
+          inline above (InlineTechBreakdown) per owner directive. */}
     </div>
   );
 }
@@ -458,6 +729,13 @@ function CommercialTotalBlock({
 // BUG-068 / Phase F BOQ: per-line breakdown rendered on the per-vendor card
 // when the bid carries boqLines + the tender has a real BOQ template. Mirrors
 // the Itemized view in CommercialMatrix but for a single vendor.
+//
+// BUG-130 (2026-06-12, owner-walkthrough 2026-06-13): when this vendor has at
+// least one negotiation round, the table grows: Original Price | Negotiated
+// Price (latest round) | -X%. Per-line totals (LT orig / LT neg) were dropped
+// from the row layout — the footer carries the grand totals, which is what
+// the committee actually compares. Original-only mode is preserved for
+// vendors without negotiation history so legacy display is untouched.
 function BoqBreakdownBlock({
   vendor,
   boqTemplate,
@@ -469,27 +747,73 @@ function BoqBreakdownBlock({
     (vendor.boqLines ?? []).map(l => [l.tenderBoqItemId, l]),
   );
 
+  // BUG-130: latest negotiation round's per-line submissions (if any). Drives
+  // the wider table layout below.
+  const history = vendor.negotiationHistory ?? [];
+  const latest = history.length > 0 ? history[history.length - 1] : null;
+  const negLineByItem = new Map(
+    (latest?.boqLines ?? []).map(l => [l.tenderBoqItemId, l]),
+  );
+  const hasNegotiation = !!latest;
+
+  // Grand-total computations across the table for the footer row.
+  let totalOriginal = 0;
+  let totalNegotiated = 0;
+  let negSeenAtLeastOne = false;
+
   return (
     <section className="px-5 py-4 border-b border-border">
       <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2 flex items-center gap-1.5">
         <TrendingDown className="w-3.5 h-3.5" /> Commercial breakdown (BOQ)
+        {hasNegotiation && (
+          <span className="text-[10px] text-text-secondary font-normal normal-case">
+            · Original vs Negotiated R{latest.roundNumber}
+          </span>
+        )}
       </h4>
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-bg/40 border-b border-border">
             <tr className="text-[10px] uppercase tracking-wider text-text-secondary">
-              <th className="px-3 py-2 text-left font-bold w-16">Item</th>
+              <th className="px-3 py-2 text-left font-bold w-14">Item</th>
               <th className="px-3 py-2 text-left font-bold">Description</th>
-              <th className="px-3 py-2 text-right font-bold w-20">Qty</th>
-              <th className="px-3 py-2 text-left font-bold w-14">Unit</th>
-              <th className="px-3 py-2 text-right font-bold w-32">Unit price</th>
-              <th className="px-3 py-2 text-right font-bold w-32">Line total</th>
+              <th className="px-3 py-2 text-right font-bold w-16">Qty</th>
+              <th className="px-3 py-2 text-left font-bold w-12">Unit</th>
+              <th className="px-3 py-2 text-right font-bold w-32">
+                {hasNegotiation ? 'Original Price' : 'Unit price'}
+              </th>
+              {hasNegotiation && (
+                <>
+                  <th className="px-3 py-2 text-right font-bold w-32 bg-amber-50/40">
+                    Negotiated Price
+                  </th>
+                  <th className="px-3 py-2 text-right font-bold w-16 bg-amber-50/40">%</th>
+                </>
+              )}
+              {!hasNegotiation && (
+                <th className="px-3 py-2 text-right font-bold w-28">Line total</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {boqTemplate.map(row => {
               const line = linesByItem.get(row.id);
               const notBidding = !line || line.status === 'NOT_BIDDING';
+              const origUnit = !notBidding && line!.unitPrice != null ? Number(line!.unitPrice) : null;
+              const origLine = !notBidding && line!.lineTotal != null ? Number(line!.lineTotal) : (origUnit != null ? origUnit * Number(row.qty) : null);
+
+              const negLine = negLineByItem.get(row.id);
+              const negNotBidding = !negLine || negLine.status === 'NOT_BIDDING';
+              const negUnit = !negNotBidding && negLine!.unitPrice != null ? Number(negLine!.unitPrice) : null;
+              const negLineTotal = negUnit != null ? negUnit * Number(row.qty) : null;
+
+              if (origLine != null) totalOriginal += origLine;
+              if (negLineTotal != null) { totalNegotiated += negLineTotal; negSeenAtLeastOne = true; }
+
+              const pct = origUnit != null && origUnit > 0 && negUnit != null
+                ? ((origUnit - negUnit) / origUnit) * 100
+                : null;
+
               return (
                 <tr key={row.id} className={notBidding ? 'opacity-60' : ''}>
                   <td className="px-3 py-2 font-mono text-xs text-text-secondary">{row.itemNo}</td>
@@ -497,57 +821,91 @@ function BoqBreakdownBlock({
                   <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">{row.qty}</td>
                   <td className="px-3 py-2 text-xs text-text-secondary">{row.unit}</td>
                   {notBidding ? (
-                    <>
-                      <td className="px-3 py-2 text-right text-xs italic text-text-secondary/70" colSpan={2}>
-                        Not bidding
-                      </td>
-                    </>
+                    <td className="px-3 py-2 text-right text-xs italic text-text-secondary/70" colSpan={hasNegotiation ? 3 : 2}>
+                      Not bidding
+                    </td>
                   ) : (
                     <>
                       <td className="px-3 py-2 text-right font-mono text-text-primary">
-                        {fmtCurrency(line!.unitPrice, vendor.currency)}
+                        {fmtCurrency(origUnit, vendor.currency)}
                       </td>
-                      <td className="px-3 py-2 text-right font-mono text-text-primary">
-                        {fmtCurrency(line!.lineTotal, vendor.currency)}
-                      </td>
+                      {hasNegotiation ? (
+                        <>
+                          <td className="px-3 py-2 text-right font-mono bg-amber-50/40 text-amber-900">
+                            {negUnit == null ? <span className="italic text-amber-700/70">—</span> : fmtCurrency(negUnit, vendor.currency)}
+                          </td>
+                          <td className="px-3 py-2 text-right bg-amber-50/40">
+                            {pct != null ? (
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                pct >= 0 ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'
+                              }`}>
+                                {pct >= 0 ? '−' : '+'}{Math.abs(pct).toFixed(1)}%
+                              </span>
+                            ) : <span className="text-xs text-text-secondary/60">—</span>}
+                          </td>
+                        </>
+                      ) : (
+                        <td className="px-3 py-2 text-right font-mono text-text-primary">
+                          {fmtCurrency(origLine, vendor.currency)}
+                        </td>
+                      )}
                     </>
                   )}
                 </tr>
               );
             })}
-            <tr className="bg-bg/50 font-bold">
-              <td className="px-3 py-2" colSpan={5}>Bid total</td>
-              <td className="px-3 py-2 text-right font-mono text-text-primary">
-                {fmtCurrency(vendor.commercialTotal, vendor.currency)}
-              </td>
-            </tr>
+            {/* Footer with grand totals. With LT columns removed (BUG-130
+                walkthrough 2026-06-13), the footer now carries the only
+                line-totals on the table: Bid total label + Original total +
+                Negotiated total + overall % chip. */}
+            {hasNegotiation ? (
+              <tr className="bg-bg/50 font-bold">
+                <td className="px-3 py-2" colSpan={4}>Bid total</td>
+                <td className="px-3 py-2 text-right font-mono text-text-primary">
+                  {fmtCurrency(totalOriginal, vendor.currency)}
+                </td>
+                <td className="px-3 py-2 text-right font-mono bg-amber-100/60 text-amber-900">
+                  {negSeenAtLeastOne ? fmtCurrency(totalNegotiated, vendor.currency) : '—'}
+                </td>
+                <td className="px-3 py-2 text-right bg-amber-100/60">
+                  {negSeenAtLeastOne && totalOriginal > 0 ? (() => {
+                    const pct = ((totalOriginal - totalNegotiated) / totalOriginal) * 100;
+                    return (
+                      <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        pct >= 0 ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'
+                      }`}>
+                        {pct >= 0 ? '−' : '+'}{Math.abs(pct).toFixed(1)}%
+                      </span>
+                    );
+                  })() : <span className="text-xs text-text-secondary/60">—</span>}
+                </td>
+              </tr>
+            ) : (
+              <tr className="bg-bg/50 font-bold">
+                <td className="px-3 py-2" colSpan={5}>Bid total</td>
+                <td className="px-3 py-2 text-right font-mono text-text-primary">
+                  {fmtCurrency(vendor.commercialTotal, vendor.currency)}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
       <p className="text-[11px] text-text-secondary italic mt-2">
-        Submitted by the vendor at bid time. Read-only here; values are locked once the bid is SUBMITTED.
+        {hasNegotiation
+          ? `Amber columns show the vendor's latest negotiation (Round ${latest!.roundNumber}) submitted on ${new Date(latest!.submittedAt).toLocaleDateString('en-GB')}. Original columns are the locked-on-submit bid.`
+          : 'Submitted by the vendor at bid time. Read-only here; values are locked once the bid is SUBMITTED.'}
       </p>
     </section>
   );
 }
 
-// BUG-070 (2026-06-01, supersedes BUG-069 body): the modal now renders the full
-// Technical Comparison matrix with the clicked vendor highlighted. Owner walked
-// the BUG-069 single-vendor view and asked for the same matrix as the standalone
-// `/technical-comparison` page, in-modal. Modal shell unchanged (ESC + backdrop
-// close); body swapped from <VendorTechnicalCard> to <TechnicalMatrix>; width
-// bumped to max-w-6xl to fit the matrix.
-function TechDetailModal({
-  tenderId,
-  vendorId,
-  vendorName,
-  onClose,
-}: {
-  tenderId: string;
-  vendorId: string;
-  vendorName: string;
-  onClose: () => void;
-}) {
+// BUG-098 (2026-06-03, supersedes BUG-094): single-vendor breakdown only.
+// Owner directive: "when you click on Show Technical breakdown it extends
+// below technical for all vendors instead it should only show only 1 vendor
+// the one selected." Renders a small 3-column table: Criterion / Max / This
+// vendor's score. No matrix, no other vendors.
+function InlineTechBreakdown({ tenderId, highlightVendorId }: { tenderId: string; highlightVendorId: string }) {
   interface TechResponse {
     tender: { technicalPassThreshold: number | null };
     criteria: ComparisonCriterion[];
@@ -571,82 +929,77 @@ function TechDetailModal({
     return () => { cancelled = true; };
   }, [tenderId]);
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const matrixCriteria: MatrixCriterion[] = (data?.criteria ?? []).map(c => ({
-    id: c.id,
-    name: c.name,
-    maxScore: c.maxScore,
-    weight: c.weight,
-    mandatory: c.mandatory,
-  }));
-  const matrixVendors: MatrixVendor[] = (data?.vendors ?? []).map(v => ({
-    bidId: v.bidId,
-    vendorId: v.vendorId,
-    vendorName: v.vendorName,
-    consensusResult: v.consensusResult,
-    consensusScore: v.consensusScore,
-    consensusByCriterion: v.consensusByCriterion.map(c => ({
-      criterionId: c.criterionId,
-      consensusScore: c.consensusScore,
-      evaluatorCount: c.evaluatorCount,
-    })),
-  }));
-
+  if (error) return <p className="text-sm text-danger">{error}</p>;
+  if (!data) {
+    return (
+      <p className="text-sm text-text-secondary flex items-center gap-2">
+        <Loader2 className="w-4 h-4 animate-spin" /> Loading technical breakdown…
+      </p>
+    );
+  }
+  const me = data.vendors.find(v => v.vendorId === highlightVendorId);
+  if (!me) {
+    return <p className="text-sm text-text-secondary italic">No technical evaluation data for this vendor.</p>;
+  }
+  // Map criterion scores by id for quick lookup.
+  const scoreByCriterion = new Map<string, number | null>();
+  for (const c of me.consensusByCriterion ?? []) {
+    scoreByCriterion.set(c.criterionId, c.consensusScore);
+  }
+  // BUG-103 (2026-06-05): owner reported "Max 30 Score 93" still showing as a
+  // percentage in this breakdown. Per-criterion `score` is stored 0..100 in
+  // `technical_evaluation_scores` (see technical-evaluation.service.ts:134),
+  // and `consensusScore` here is the average of those per-evaluator percents
+  // — also 0..100. Convert to absolute against the criterion's `maxScore`
+  // for the per-criterion rows, and against `totalMaxScore` for the total
+  // row, matching the `toAbsolute()` pattern in TechnicalMatrix (BUG-061).
+  // "93 / 30" → "28 / 30" so the column reads "Score 28" with "Max 30".
+  const fmtAbs = (percent: number | null, max: number) => {
+    if (percent == null) return '—';
+    if (max <= 0) return String(Math.round(percent));
+    return String(Math.round((percent / 100) * max));
+  };
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Technical comparison (highlighted: ${vendorName})`}
-      onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        className="bg-card border border-border rounded-xl shadow-2xl max-w-6xl w-full max-h-[90vh] flex flex-col overflow-hidden"
-      >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-bg">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-text-secondary font-semibold">Technical comparison</p>
-            <h3 className="text-base font-bold text-text-primary">Highlighted: {vendorName}</h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded hover:bg-card text-text-secondary"
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5">
-          {error ? (
-            <p className="text-sm text-danger">{error}</p>
-          ) : !data ? (
-            <p className="text-sm text-text-secondary flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" /> Loading…
-            </p>
-          ) : matrixVendors.length === 0 ? (
-            <p className="text-sm text-text-secondary italic">No technical evaluation data yet.</p>
-          ) : (
-            <TechnicalMatrix
-              criteria={matrixCriteria}
-              vendors={matrixVendors}
-              totalMaxScore={data.totalMaxScore}
-              passThreshold={data.tender?.technicalPassThreshold ?? null}
-              selectedVendorId={vendorId}
-              onSelectVendor={() => { /* no-op in modal context */ }}
-            />
-          )}
-        </div>
-      </div>
-    </div>
+    <table className="w-full text-sm border-collapse">
+      <thead>
+        <tr className="border-b border-border text-[10px] uppercase tracking-wider text-text-secondary">
+          <th className="px-3 py-2 text-left">Criterion</th>
+          <th className="px-3 py-2 text-right w-20">Max</th>
+          <th className="px-3 py-2 text-right w-32">Score</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-border">
+        {data.criteria.map(c => (
+          <tr key={c.id} className="hover:bg-bg/40">
+            <td className="px-3 py-2 text-text-primary">
+              {c.name}
+              {c.mandatory && (
+                <span className="ml-1.5 text-[10px] font-bold text-amber-700 uppercase">Mandatory</span>
+              )}
+            </td>
+            <td className="px-3 py-2 text-right font-mono text-text-secondary">{c.maxScore}</td>
+            <td className="px-3 py-2 text-right font-mono font-semibold text-text-primary">
+              {fmtAbs(scoreByCriterion.get(c.id) ?? null, Number(c.maxScore))}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr className="border-t-2 border-border bg-bg/50">
+          <td className="px-3 py-2 font-bold text-text-primary">Total</td>
+          <td className="px-3 py-2 text-right font-mono font-bold">{data.totalMaxScore}</td>
+          <td className="px-3 py-2 text-right font-mono font-bold">
+            {fmtAbs(me.consensusScore, data.totalMaxScore)}
+            <span className={`ml-2 text-[10px] font-bold uppercase ${
+              me.consensusResult === 'PASS' ? 'text-success'
+                : me.consensusResult === 'FAIL' ? 'text-danger'
+                : 'text-text-secondary'
+            }`}>
+              {me.consensusResult}
+            </span>
+          </td>
+        </tr>
+      </tfoot>
+    </table>
   );
 }

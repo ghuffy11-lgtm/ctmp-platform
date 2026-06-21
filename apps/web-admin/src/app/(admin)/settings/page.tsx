@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { get, post, patch, del } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { useConfirm } from '@/components/dialog/DialogProvider';
-import { ShieldCheck, Mail, MessageSquare, Bell, Building2, Users, Plus, Pencil, Trash2 } from 'lucide-react';
+import { ShieldCheck, Mail, MessageSquare, Bell, Building2, Users, Plus, Pencil, Trash2, Image as ImageIcon, Server, Lock, Clock, Upload as UploadIcon, Settings as SettingsIcon } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +41,10 @@ interface PlatformSetting {
   description?: string;
   category?: string;
   type?: 'STRING' | 'NUMBER' | 'BOOLEAN' | 'JSON';
+  // BUG-107 Piece 5: encrypted rows display as a sentinel value; admin updates
+  // via the dedicated secure-set endpoint, not the batch update path.
+  isEncrypted?: boolean;
+  readOnly?: boolean;
 }
 
 interface Department {
@@ -121,6 +125,28 @@ export default function SettingsPage() {
 
 // ─── Roles tab ────────────────────────────────────────────────────────────────
 
+// BUG-093 (2026-06-02): catalogue of sidebar entries an admin can hide per
+// role. Kept in sync with apps/web-admin/src/components/layout/Sidebar.tsx.
+// `href` is the stable key written to roles.hidden_sidebar_items.
+const SIDEBAR_CATALOGUE: { href: string; label: string }[] = [
+  { href: '/dashboard', label: 'Dashboard' },
+  { href: '/executive', label: 'Executive' },
+  { href: '/tenders', label: 'Tenders' },
+  { href: '/approvals', label: 'Approvals' },
+  { href: '/clarifications', label: 'Clarifications' },
+  { href: '/technical-evaluation', label: 'Technical Evaluation' },
+  { href: '/technical-comparison', label: 'Technical Comparison' },
+  { href: '/committee-opening', label: 'Committee & Commercial' },
+  { href: '/commercial-comparison', label: 'Commercial Comparison' },
+  { href: '/awarded-tenders', label: 'Awarded Tenders' },
+  { href: '/vendors', label: 'Vendor Management' },
+  { href: '/reports', label: 'Reports' },
+  { href: '/audit-log', label: 'Audit Log' },
+  { href: '/security-alerts', label: 'Security Alerts' },
+  { href: '/settings/evaluation-criteria', label: 'Evaluation Criteria' },
+  { href: '/settings', label: 'System Configuration' },
+];
+
 function RolesTab() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
@@ -130,6 +156,15 @@ function RolesTab() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // BUG-093: per-role sidebar hide list. Loaded from `/roles/:id` and edited
+  // with the checkboxes in the new "Hidden sidebar entries" section.
+  const [hiddenSidebar, setHiddenSidebar] = useState<Set<string>>(new Set());
+  const [hiddenDirty, setHiddenDirty] = useState(false);
+  const [savingHidden, setSavingHidden] = useState(false);
+  // BUG-107 Piece 4: per-role custom labels for sidebar entries. Keyed by href.
+  const [labelOverrides, setLabelOverrides] = useState<Record<string, string>>({});
+  const [labelDirty, setLabelDirty] = useState(false);
+  const [savingLabels, setSavingLabels] = useState(false);
   // WALK-035: minimal create-role form state.
   const [showCreate, setShowCreate] = useState(false);
   const [createDraft, setCreateDraft] = useState({ code: '', name: '', description: '' });
@@ -159,19 +194,84 @@ function RolesTab() {
     async function loadRolePerms() {
       if (!selectedRoleId) return;
       setDirty(false);
+      setHiddenDirty(false);
       try {
         const token = getAccessToken();
-        const res = await get<{ permissionIds: string[] }>(
-          `/roles/${selectedRoleId}/permissions`,
-          token,
-        ).catch(() => ({ permissionIds: [] }));
-        setRolePerms(new Set(res.permissionIds));
+        const [permsRes, roleRes] = await Promise.all([
+          get<{ permissionIds: string[] }>(`/roles/${selectedRoleId}/permissions`, token).catch(() => ({ permissionIds: [] })),
+          // BUG-093 + BUG-107 Piece 4: roles detail returns hiddenSidebarItems + sidebarLabelOverrides.
+          get<{ hiddenSidebarItems?: string[]; sidebarLabelOverrides?: Record<string, string> }>(`/roles/${selectedRoleId}`, token)
+            .catch(() => ({ hiddenSidebarItems: [], sidebarLabelOverrides: {} })),
+        ]);
+        setRolePerms(new Set(permsRes.permissionIds));
+        setHiddenSidebar(new Set(roleRes.hiddenSidebarItems ?? []));
+        setLabelOverrides(roleRes.sidebarLabelOverrides ?? {});
+        setLabelDirty(false);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load role permissions');
       }
     }
     loadRolePerms();
   }, [selectedRoleId]);
+
+  function toggleHidden(href: string) {
+    setHiddenSidebar(prev => {
+      const next = new Set(prev);
+      if (next.has(href)) next.delete(href); else next.add(href);
+      return next;
+    });
+    setHiddenDirty(true);
+  }
+
+  async function handleSaveHidden() {
+    if (!selectedRoleId) return;
+    setSavingHidden(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      await patch(
+        `/roles/${selectedRoleId}/hidden-sidebar`,
+        { items: Array.from(hiddenSidebar) },
+        token,
+      );
+      setHiddenDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save sidebar hide list');
+    } finally {
+      setSavingHidden(false);
+    }
+  }
+
+  // BUG-107 Piece 4: save sidebar label overrides for the selected role.
+  async function handleSaveLabels() {
+    if (!selectedRoleId) return;
+    setSavingLabels(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      // Strip empty values — sending empty string for an href means "clear override".
+      const clean: Record<string, string> = {};
+      for (const [h, l] of Object.entries(labelOverrides)) {
+        if (typeof l === 'string' && l.trim() !== '') clean[h] = l.trim();
+      }
+      await patch(
+        `/roles/${selectedRoleId}/sidebar-labels`,
+        { overrides: clean },
+        token,
+      );
+      setLabelOverrides(clean);
+      setLabelDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save label overrides');
+    } finally {
+      setSavingLabels(false);
+    }
+  }
+
+  function setLabelOverride(href: string, label: string) {
+    setLabelOverrides(prev => ({ ...prev, [href]: label }));
+    setLabelDirty(true);
+  }
 
   function togglePerm(permId: string) {
     setRolePerms(prev => {
@@ -370,6 +470,78 @@ function RolesTab() {
         ) : (
           <>
             <div className="overflow-y-auto pr-1 space-y-5 flex-1">
+              {/* BUG-093: Hidden sidebar entries — independent of permissions.
+                   Owner explicitly wanted a way to hide menu items without
+                   stripping data perms. */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Hidden sidebar entries</p>
+                  <button
+                    onClick={handleSaveHidden}
+                    disabled={!hiddenDirty || savingHidden}
+                    className="px-3 py-1 bg-accent text-white rounded text-[11px] font-bold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {savingHidden ? 'Saving…' : 'Save hide list'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-text-secondary mb-2 italic">
+                  Tick to hide that sidebar entry for users in this role. Data permissions stay intact — the user can still reach those screens through other surfaces (e.g. Awarded Tenders archive).
+                </p>
+                <div className="space-y-1 bg-bg/30 border border-border rounded-lg p-2">
+                  {SIDEBAR_CATALOGUE.map(item => (
+                    <label
+                      key={item.href}
+                      className="flex items-center gap-2.5 cursor-pointer hover:bg-bg p-1.5 rounded transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={hiddenSidebar.has(item.href)}
+                        onChange={() => toggleHidden(item.href)}
+                        className="w-4 h-4 rounded text-accent border-border focus:ring-1 focus:ring-accent"
+                      />
+                      <span className="text-sm text-text-primary flex-1">{item.label}</span>
+                      <span className="text-[10px] text-text-secondary font-mono">{item.href}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* BUG-107 Piece 4: per-role sidebar label rename.
+                   Empty label = use the default hardcoded text. */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Sidebar labels (rename per role)</p>
+                  <button
+                    onClick={handleSaveLabels}
+                    disabled={!labelDirty || savingLabels}
+                    className="text-xs font-semibold text-accent hover:opacity-80 disabled:opacity-40"
+                  >
+                    {savingLabels ? 'Saving…' : 'Save labels'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-text-secondary mb-2">
+                  Override the displayed text for sidebar entries when a user holds this role. Leave blank to keep the default.
+                </p>
+                <div className="space-y-1 bg-bg/30 border border-border rounded-lg p-2">
+                  {SIDEBAR_CATALOGUE.map(item => (
+                    <div
+                      key={item.href}
+                      className="flex items-center gap-2.5 p-1.5"
+                    >
+                      <span className="text-sm text-text-primary flex-1 truncate">{item.label}</span>
+                      <input
+                        type="text"
+                        value={labelOverrides[item.href] ?? ''}
+                        onChange={e => setLabelOverride(item.href, e.target.value)}
+                        placeholder="(default)"
+                        maxLength={64}
+                        className="w-48 px-2 py-1 text-xs border border-border rounded bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+                      />
+                      <span className="text-[10px] text-text-secondary font-mono w-44 text-right">{item.href}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
               {Object.entries(grouped).map(([group, perms]) => (
                 <div key={group}>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-2">{group}</p>
@@ -569,122 +741,591 @@ function TemplatesTab() {
 
 // ─── Platform tab ─────────────────────────────────────────────────────────────
 
+// BUG-108 (2026-06-05): Platform tab redesigned as sectioned enterprise
+// settings form. Each section has friendly field labels (raw setting keys
+// shown small + monospace under the label for transparency), inline help,
+// and its own per-section Save button.
+
 function PlatformTab() {
   const [settings, setSettings] = useState<PlatformSetting[]>([]);
   const [loading, setLoading] = useState(true);
-  const [edits, setEdits] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
+
+  async function reload() {
+    const token = getAccessToken();
+    const res = await get<{ items: PlatformSetting[] }>('/system-settings', token).catch(() => ({ items: [] }));
+    setSettings(res.items ?? []);
+  }
 
   useEffect(() => {
     async function load() {
       setLoading(true);
-      try {
-        const token = getAccessToken();
-        const res = await get<{ items: PlatformSetting[] }>('/system-settings', token).catch(() => ({ items: [] }));
-        setSettings(res.items ?? []);
-      } finally { setLoading(false); }
+      try { await reload(); } finally { setLoading(false); }
     }
     load();
   }, []);
 
-  function changed(key: string): boolean {
-    return key in edits && edits[key] !== settings.find(s => s.key === key)?.value;
-  }
-
-  const dirty = Object.keys(edits).some(changed);
-
-  async function handleSave() {
-    setSaving(true);
-    try {
-      const token = getAccessToken();
-      const updates = Object.entries(edits)
-        .filter(([k]) => changed(k))
-        .map(([key, value]) => ({ key, value }));
-      await post('/system-settings/batch', { updates }, token);
-      setSettings(prev => prev.map(s => key2Updated(s, edits)));
-      setEdits({});
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to save');
-    } finally { setSaving(false); }
-  }
-
   if (loading) return <div className="text-sm text-text-secondary p-6 text-center">Loading…</div>;
-
-  const grouped = settings.reduce<Record<string, PlatformSetting[]>>((acc, s) => {
-    const c = s.category ?? 'General';
-    (acc[c] ??= []).push(s);
-    return acc;
-  }, {});
+  if (settings.length === 0) {
+    return (
+      <div className="bg-card rounded-xl border border-border p-8 text-center text-sm text-text-secondary">
+        No platform settings available. Endpoint <code>GET /system-settings</code> may be unreachable.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
-      {settings.length === 0 ? (
-        <div className="bg-card rounded-xl border border-border p-8 text-center text-sm text-text-secondary">
-          No platform settings exposed. Endpoint <code>GET /system-settings</code> pending.
-        </div>
-      ) : (
-        Object.entries(grouped).map(([cat, items]) => (
-          <div key={cat} className="bg-card rounded-xl border border-border shadow-sm">
-            <div className="px-5 py-3 border-b border-border bg-bg">
-              <h3 className="text-sm font-bold text-text-primary">{cat}</h3>
-            </div>
-            <div className="divide-y divide-border">
-              {items.map(s => (
-                <div key={s.key} className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-                  <div>
-                    <p className="text-sm font-semibold text-text-primary font-mono">{s.key}</p>
-                    {s.description && <p className="text-xs text-text-secondary mt-0.5">{s.description}</p>}
-                  </div>
-                  <div className="md:col-span-2">
-                    {s.type === 'BOOLEAN' ? (
-                      <select
-                        value={edits[s.key] ?? s.value}
-                        onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
-                        className="px-3 py-2 border border-border rounded-lg text-sm bg-bg w-full md:w-40 focus:outline-none focus:ring-1 focus:ring-accent"
-                      >
-                        <option value="true">true</option>
-                        <option value="false">false</option>
-                      </select>
-                    ) : (
-                      <input
-                        type={s.type === 'NUMBER' ? 'number' : 'text'}
-                        value={edits[s.key] ?? s.value}
-                        onChange={e => setEdits({ ...edits, [s.key]: e.target.value })}
-                        className="px-3 py-2 border border-border rounded-lg text-sm bg-bg w-full font-mono focus:outline-none focus:ring-1 focus:ring-accent"
-                      />
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))
-      )}
-
-      {settings.length > 0 && (
-        <div className="flex justify-end gap-2 sticky bottom-0 bg-bg/80 backdrop-blur-sm py-3">
-          <button
-            onClick={() => setEdits({})}
-            disabled={!dirty}
-            className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card disabled:opacity-40"
-          >
-            Discard
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!dirty || saving}
-            className="px-5 py-2 bg-accent text-white rounded-lg text-sm font-bold hover:opacity-90 disabled:opacity-40"
-          >
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
-        </div>
-      )}
+      <GeneralSection settings={settings} onSaved={reload} />
+      <BrandingSection settings={settings} onSaved={reload} />
+      <EmailSection settings={settings} onSaved={reload} />
+      <ActiveDirectorySection settings={settings} onSaved={reload} />
+      <VendorPortalSection settings={settings} onSaved={reload} />
+      <SecuritySection settings={settings} onSaved={reload} />
+      <UploadsSection settings={settings} onSaved={reload} />
     </div>
   );
 }
 
-function key2Updated(s: PlatformSetting, edits: Record<string, string>): PlatformSetting {
-  return s.key in edits ? { ...s, value: edits[s.key] } : s;
+// ─── Shared section primitives ───────────────────────────────────────────────
+
+function SectionCard({
+  icon: Icon,
+  title,
+  description,
+  children,
+  footer,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  return (
+    <section className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+      <header className="px-5 py-4 border-b border-border bg-bg flex items-start gap-3">
+        <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-accent/10 text-accent shrink-0 mt-0.5">
+          <Icon className="w-4 h-4" />
+        </span>
+        <div className="min-w-0">
+          <h3 className="text-sm font-bold text-text-primary">{title}</h3>
+          <p className="text-xs text-text-secondary mt-0.5">{description}</p>
+        </div>
+      </header>
+      <div className="p-5 space-y-5">{children}</div>
+      {footer && (
+        <div className="px-5 py-3 border-t border-border bg-bg/30 flex justify-end items-center gap-2">
+          {footer}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LabeledField({
+  label,
+  hint,
+  settingKey,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  settingKey?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+      <div className="space-y-1">
+        <label className="text-sm font-semibold text-text-primary block">{label}</label>
+        {hint && <p className="text-xs text-text-secondary leading-snug">{hint}</p>}
+        {settingKey && <p className="text-[10px] text-text-secondary/60 font-mono">{settingKey}</p>}
+      </div>
+      <div className="md:col-span-2">{children}</div>
+    </div>
+  );
+}
+
+function SaveButton({ dirty, saving, onSave }: { dirty: boolean; saving: boolean; onSave: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onSave}
+      disabled={!dirty || saving}
+      className="px-4 py-2 bg-accent text-white rounded-lg text-xs font-bold hover:opacity-90 disabled:opacity-40"
+    >
+      {saving ? 'Saving…' : 'Save'}
+    </button>
+  );
+}
+
+// Hook: tracks edits + dirty + save against a subset of settings keys.
+function useSectionEdits(settings: PlatformSetting[]) {
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  function getValue(key: string): string {
+    if (key in edits) return edits[key];
+    return settings.find(s => s.key === key)?.value ?? '';
+  }
+  function setValue(key: string, value: string) {
+    setEdits(prev => ({ ...prev, [key]: value }));
+  }
+  const dirty = Object.entries(edits).some(
+    ([k, v]) => v !== (settings.find(s => s.key === k)?.value ?? ''),
+  );
+
+  async function save(onSaved?: () => void | Promise<void>) {
+    setSaving(true);
+    try {
+      const token = getAccessToken();
+      const updates = Object.entries(edits)
+        .filter(([k, v]) => v !== (settings.find(s => s.key === k)?.value ?? ''))
+        .map(([key, value]) => ({ key, value }));
+      if (updates.length > 0) {
+        await post('/system-settings/batch', { updates }, token);
+      }
+      setEdits({});
+      await onSaved?.();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+  return { getValue, setValue, dirty, saving, save };
+}
+
+function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      type="text"
+      {...props}
+      className={
+        'w-full px-3 py-2 border border-border rounded-lg text-sm bg-bg focus:outline-none focus:ring-1 focus:ring-accent '
+        + (props.className ?? '')
+      }
+    />
+  );
+}
+
+// ─── General section ─────────────────────────────────────────────────────────
+
+function GeneralSection({ settings, onSaved }: { settings: PlatformSetting[]; onSaved: () => void }) {
+  const ed = useSectionEdits(settings);
+  return (
+    <SectionCard
+      icon={SettingsIcon}
+      title="General"
+      description="Top-level platform brand strings used by the admin and vendor portals."
+      footer={<SaveButton dirty={ed.dirty} saving={ed.saving} onSave={() => ed.save(onSaved)} />}
+    >
+      <LabeledField
+        label="System Name"
+        hint="Shown in the admin sidebar header, admin login page, and as the creator metadata on exported reports."
+        settingKey="branding.system_name"
+      >
+        <TextInput
+          value={ed.getValue('branding.system_name')}
+          onChange={e => ed.setValue('branding.system_name', e.target.value)}
+          placeholder="CTMP"
+        />
+      </LabeledField>
+      <LabeledField
+        label="Vendor Portal Name"
+        hint="Shown in the vendor portal top nav and on vendor login / registration pages. Leave empty to fall back to System Name."
+        settingKey="branding.vendor_portal_name"
+      >
+        <TextInput
+          value={ed.getValue('branding.vendor_portal_name')}
+          onChange={e => ed.setValue('branding.vendor_portal_name', e.target.value)}
+          placeholder="(falls back to System Name)"
+        />
+      </LabeledField>
+    </SectionCard>
+  );
+}
+
+// ─── Branding section ────────────────────────────────────────────────────────
+
+function BrandingSection({ settings, onSaved }: { settings: PlatformSetting[]; onSaved: () => void }) {
+  const find = (k: string) => settings.find(s => s.key === k)?.value ?? '';
+  return (
+    <SectionCard
+      icon={ImageIcon}
+      title="Branding · Logos"
+      description="Upload logos used on admin and vendor surfaces and embedded in report PDF/XLSX headers."
+    >
+      <LogoUploadRow type="admin_logo" label="Admin Portal Logo" hint={find('branding.hint_admin_logo')} onUploaded={onSaved} />
+      <LogoUploadRow type="vendor_logo" label="Vendor Portal Logo" hint={find('branding.hint_vendor_logo')} onUploaded={onSaved} />
+      <LogoUploadRow type="report_logo" label="Report Header Logo" hint={find('branding.hint_report_logo')} onUploaded={onSaved} />
+    </SectionCard>
+  );
+}
+
+// ─── Email (SMTP) section ────────────────────────────────────────────────────
+
+function EmailSection({ settings, onSaved }: { settings: PlatformSetting[]; onSaved: () => void }) {
+  const ed = useSectionEdits(settings);
+  return (
+    <SectionCard
+      icon={Mail}
+      title="Email (SMTP)"
+      description="Outbound mail server settings. Falls back to environment variables when a field is left empty. Password is encrypted at rest."
+      footer={<SaveButton dirty={ed.dirty} saving={ed.saving} onSave={() => ed.save(onSaved)} />}
+    >
+      <LabeledField label="Host" hint="SMTP server hostname (e.g. smtp.office365.com)." settingKey="smtp.host">
+        <TextInput value={ed.getValue('smtp.host')} onChange={e => ed.setValue('smtp.host', e.target.value)} placeholder="smtp.example.com" />
+      </LabeledField>
+      <LabeledField label="Port" hint="Standard ports: 25 (plain), 465 (TLS), 587 (STARTTLS)." settingKey="smtp.port">
+        <TextInput type="number" value={ed.getValue('smtp.port')} onChange={e => ed.setValue('smtp.port', e.target.value)} placeholder="587" />
+      </LabeledField>
+      <LabeledField label="Username" hint="SMTP auth username (often the full From address)." settingKey="smtp.user">
+        <TextInput value={ed.getValue('smtp.user')} onChange={e => ed.setValue('smtp.user', e.target.value)} placeholder="noreply@example.com" />
+      </LabeledField>
+      <LabeledField label="From Address" hint="Default sender address for outbound mail. Must be authorised by your SMTP provider." settingKey="smtp.from">
+        <TextInput type="email" value={ed.getValue('smtp.from')} onChange={e => ed.setValue('smtp.from', e.target.value)} placeholder="noreply@example.com" />
+      </LabeledField>
+      <SecureSetterRow keyName="smtp.password" label="Password" placeholder="enter new SMTP password" onSaved={onSaved} />
+      <SmtpTestRow />
+    </SectionCard>
+  );
+}
+
+// ─── Active Directory section ───────────────────────────────────────────────
+
+function ActiveDirectorySection({ settings, onSaved }: { settings: PlatformSetting[]; onSaved: () => void }) {
+  const ed = useSectionEdits(settings);
+  return (
+    <SectionCard
+      icon={Server}
+      title="Active Directory"
+      description="LDAP / AD authentication target for internal user logins. Bind uses the user's own credentials at sign-in."
+      footer={<SaveButton dirty={ed.dirty} saving={ed.saving} onSave={() => ed.save(onSaved)} />}
+    >
+      <LabeledField label="LDAP URL" hint="Full URL including scheme + port, e.g. ldap://dc.example.com:389 or ldaps://dc.example.com:636." settingKey="ad.url">
+        <TextInput value={ed.getValue('ad.url')} onChange={e => ed.setValue('ad.url', e.target.value)} placeholder="ldap://dc.example.com:389" />
+      </LabeledField>
+      <LabeledField label="Domain" hint="Domain suffix appended to usernames at bind time (e.g. corp.example.com → user@corp.example.com)." settingKey="ad.domain">
+        <TextInput value={ed.getValue('ad.domain')} onChange={e => ed.setValue('ad.domain', e.target.value)} placeholder="corp.example.com" />
+      </LabeledField>
+      <SecureSetterRow keyName="ad.bind_password" label="Service-Account Password (optional)" placeholder="enter bind password" onSaved={onSaved} />
+      <AdTestRow />
+    </SectionCard>
+  );
+}
+
+// ─── Vendor Portal section ──────────────────────────────────────────────────
+
+function VendorPortalSection({ settings, onSaved }: { settings: PlatformSetting[]; onSaved: () => void }) {
+  const ed = useSectionEdits(settings);
+  return (
+    <SectionCard
+      icon={Users}
+      title="Vendor Portal"
+      description="Self-service vendor portal policies."
+      footer={<SaveButton dirty={ed.dirty} saving={ed.saving} onSave={() => ed.save(onSaved)} />}
+    >
+      <LabeledField label="CAPTCHA Enabled" hint="Require CAPTCHA on vendor public endpoints (registration, password reset)." settingKey="vendor.captcha.enabled">
+        <select
+          value={ed.getValue('vendor.captcha.enabled')}
+          onChange={e => ed.setValue('vendor.captcha.enabled', e.target.value)}
+          className="px-3 py-2 border border-border rounded-lg text-sm bg-bg w-full md:w-40 focus:outline-none focus:ring-1 focus:ring-accent"
+        >
+          <option value="true">Enabled</option>
+          <option value="false">Disabled</option>
+        </select>
+      </LabeledField>
+      <LabeledField label="Minimum Password Length" hint="Enforced on vendor self-registration and password resets." settingKey="vendor.password.min_length">
+        <TextInput type="number" value={ed.getValue('vendor.password.min_length')} onChange={e => ed.setValue('vendor.password.min_length', e.target.value)} placeholder="12" />
+      </LabeledField>
+    </SectionCard>
+  );
+}
+
+// ─── Security & Audit section ───────────────────────────────────────────────
+
+function SecuritySection({ settings, onSaved }: { settings: PlatformSetting[]; onSaved: () => void }) {
+  const ed = useSectionEdits(settings);
+  return (
+    <SectionCard
+      icon={Lock}
+      title="Security & Audit"
+      description="Session lifetime, audit retention, and late-submission policy."
+      footer={<SaveButton dirty={ed.dirty} saving={ed.saving} onSave={() => ed.save(onSaved)} />}
+    >
+      <LabeledField label="Session Idle Timeout (minutes)" hint="Inactive users are signed out after this many minutes." settingKey="session.idle_timeout_minutes">
+        <TextInput type="number" value={ed.getValue('session.idle_timeout_minutes')} onChange={e => ed.setValue('session.idle_timeout_minutes', e.target.value)} placeholder="30" />
+      </LabeledField>
+      <LabeledField label="Audit Retention (days)" hint="How long audit log entries are retained before archival. Default ~7 years (2555 days)." settingKey="audit.retention_days">
+        <TextInput type="number" value={ed.getValue('audit.retention_days')} onChange={e => ed.setValue('audit.retention_days', e.target.value)} placeholder="2555" />
+      </LabeledField>
+      <LabeledField label="Late Submission After Technical Opening" hint="Whether late-submission exceptions may be granted once the technical envelope has been opened." settingKey="late_submission.allow_after_technical_opening">
+        <select
+          value={ed.getValue('late_submission.allow_after_technical_opening')}
+          onChange={e => ed.setValue('late_submission.allow_after_technical_opening', e.target.value)}
+          className="px-3 py-2 border border-border rounded-lg text-sm bg-bg w-full md:w-40 focus:outline-none focus:ring-1 focus:ring-accent"
+        >
+          <option value="true">Allowed</option>
+          <option value="false">Blocked</option>
+        </select>
+      </LabeledField>
+    </SectionCard>
+  );
+}
+
+// ─── Uploads section ────────────────────────────────────────────────────────
+
+function UploadsSection({ settings, onSaved }: { settings: PlatformSetting[]; onSaved: () => void }) {
+  const ed = useSectionEdits(settings);
+  return (
+    <SectionCard
+      icon={UploadIcon}
+      title="Uploads"
+      description="File upload limits."
+      footer={<SaveButton dirty={ed.dirty} saving={ed.saving} onSave={() => ed.save(onSaved)} />}
+    >
+      <LabeledField label="Maximum File Size (bytes)" hint="Maximum size per uploaded file across all surfaces. Default 50 MB (52,428,800)." settingKey="upload.max_file_size_bytes">
+        <TextInput type="number" value={ed.getValue('upload.max_file_size_bytes')} onChange={e => ed.setValue('upload.max_file_size_bytes', e.target.value)} placeholder="52428800" />
+      </LabeledField>
+    </SectionCard>
+  );
+}
+
+// BUG-108: LogoUploadRow now also handles admin_logo.
+function LogoUploadRow({ type, label, hint, onUploaded }: {
+  type: 'admin_logo' | 'vendor_logo' | 'report_logo';
+  label: string;
+  hint: string;
+  onUploaded: () => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [preview, setPreview] = useState<number>(Date.now()); // cache-busting
+
+  async function upload(file: File) {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const token = getAccessToken();
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const form = new FormData();
+      form.append('file', file);
+      form.append('type', type);
+      const res = await fetch(`${apiBase}/api/v1/system-settings/branding/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(typeof body.message === 'string' ? body.message : res.statusText);
+      }
+      setMsg({ kind: 'ok', text: `Uploaded ${(file.size / 1024).toFixed(0)} KB` });
+      setPreview(Date.now());
+      await onUploaded();
+    } catch (err) {
+      setMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Upload failed' });
+    } finally { setBusy(false); }
+  }
+
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+  return (
+    <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+      <div>
+        <p className="text-sm font-semibold text-text-primary">{label}</p>
+        {hint && <p className="text-xs text-text-secondary mt-0.5">{hint}</p>}
+      </div>
+      <div className="md:col-span-2 flex items-center gap-4">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={`${apiBase}/api/v1/branding/${type}?t=${preview}`}
+          alt="current"
+          onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }}
+          className="w-24 h-12 object-contain bg-bg rounded border border-border"
+        />
+        <label className="px-3 py-2 bg-accent text-white text-xs font-semibold rounded-lg cursor-pointer hover:opacity-90">
+          {busy ? 'Uploading…' : 'Choose file'}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/svg+xml,image/webp"
+            disabled={busy}
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }}
+          />
+        </label>
+        {msg && (
+          <span className={`text-xs ${msg.kind === 'ok' ? 'text-emerald-700' : 'text-danger'}`}>
+            {msg.text}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// BUG-108: SecureSetterRow + Test rows are composed by EmailSection /
+// ActiveDirectorySection in the new sectioned PlatformTab.
+function SecureSetterRow({ keyName, label, placeholder, onSaved }: {
+  keyName: string;
+  label: string;
+  placeholder: string;
+  onSaved: () => void | Promise<void>;
+}) {
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  async function save() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const token = getAccessToken();
+      await post('/system-settings/secure', { key: keyName, value }, token);
+      setMsg({ kind: 'ok', text: 'Saved (encrypted)' });
+      setValue('');
+      await onSaved();
+    } catch (err) {
+      setMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Save failed' });
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+      <div>
+        <p className="text-sm font-semibold text-text-primary">{label}</p>
+        <p className="text-[10px] text-text-secondary font-mono mt-0.5">{keyName}</p>
+      </div>
+      <div className="md:col-span-2 flex items-center gap-2">
+        <input
+          type="password"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          placeholder={placeholder}
+          className="flex-1 px-3 py-2 border border-border rounded-lg text-sm bg-bg font-mono focus:outline-none focus:ring-1 focus:ring-accent"
+        />
+        <button
+          type="button"
+          onClick={save}
+          disabled={!value || busy}
+          className="px-4 py-2 bg-accent text-white text-xs font-semibold rounded-lg disabled:opacity-40"
+        >
+          {busy ? 'Saving…' : 'Set'}
+        </button>
+        {msg && (
+          <span className={`text-xs ${msg.kind === 'ok' ? 'text-emerald-700' : 'text-danger'}`}>
+            {msg.text}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SmtpTestRow() {
+  const [to, setTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  async function send() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const token = getAccessToken();
+      const res = await post<{ ok: boolean; message: string }>('/system-settings/test-smtp', { to }, token);
+      setMsg({ kind: res.ok ? 'ok' : 'err', text: res.message });
+    } catch (err) {
+      setMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Test failed' });
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-center bg-bg/30">
+      <div>
+        <p className="text-sm font-semibold text-text-primary">Test SMTP</p>
+        <p className="text-xs text-text-secondary mt-0.5">Sends a one-shot mail through the current SMTP config.</p>
+      </div>
+      <div className="md:col-span-2 flex items-center gap-2">
+        <input
+          type="email"
+          value={to}
+          onChange={e => setTo(e.target.value)}
+          placeholder="recipient@example.com"
+          className="flex-1 px-3 py-2 border border-border rounded-lg text-sm bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+        />
+        <button
+          type="button"
+          onClick={send}
+          disabled={!to || busy}
+          className="px-4 py-2 bg-text-primary text-white text-xs font-semibold rounded-lg disabled:opacity-40"
+        >
+          {busy ? 'Sending…' : 'Send Test'}
+        </button>
+        {msg && (
+          <span className={`text-xs ${msg.kind === 'ok' ? 'text-emerald-700' : 'text-danger'}`}>
+            {msg.text}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdTestRow() {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  async function probe() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const token = getAccessToken();
+      const res = await post<{ ok: boolean; message: string }>('/system-settings/test-ad', { username, password }, token);
+      setMsg({ kind: res.ok ? 'ok' : 'err', text: res.message });
+    } catch (err) {
+      setMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Test failed' });
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-center bg-bg/30">
+      <div>
+        <p className="text-sm font-semibold text-text-primary">Test AD Bind</p>
+        <p className="text-xs text-text-secondary mt-0.5">Probes LDAP bind against the current AD config with provided credentials.</p>
+      </div>
+      <div className="md:col-span-2 flex items-center gap-2 flex-wrap">
+        <input
+          type="text"
+          value={username}
+          onChange={e => setUsername(e.target.value)}
+          placeholder="ad-username"
+          className="flex-1 min-w-[140px] px-3 py-2 border border-border rounded-lg text-sm bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+        />
+        <input
+          type="password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          placeholder="password"
+          className="flex-1 min-w-[140px] px-3 py-2 border border-border rounded-lg text-sm bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+        />
+        <button
+          type="button"
+          onClick={probe}
+          disabled={!username || !password || busy}
+          className="px-4 py-2 bg-text-primary text-white text-xs font-semibold rounded-lg disabled:opacity-40"
+        >
+          {busy ? 'Binding…' : 'Probe'}
+        </button>
+        {msg && (
+          <span className={`text-xs w-full ${msg.kind === 'ok' ? 'text-emerald-700' : 'text-danger'}`}>
+            {msg.text}
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─── Departments tab ──────────────────────────────────────────────────────────

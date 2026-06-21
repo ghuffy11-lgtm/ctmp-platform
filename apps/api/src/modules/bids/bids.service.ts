@@ -4,6 +4,7 @@ import { AuditRiskLevel, BidStatus, EnvelopeStatus, EnvelopeType, Prisma, Tender
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { BidStorageService } from './bid-storage.service';
+import { BidSupportingDocumentStorageService } from './bid-supporting-document-storage.service';
 import { UploadEnvelopeDto } from './dto/upload-envelope.dto';
 
 interface MulterFile {
@@ -21,6 +22,7 @@ export class BidsService {
     private readonly prisma: PrismaService,
     private readonly storage: BidStorageService,
     private readonly audit: AuditService,
+    private readonly supportingStorage: BidSupportingDocumentStorageService,
   ) {}
 
   async draftBid(tenderId: string, vendor: any) {
@@ -83,9 +85,12 @@ export class BidsService {
     const bid = await this.prisma.bid.findUnique({
       where: { id: bidId },
       include: {
-        tender: { select: { id: true, status: true, submissionCloseAt: true } },
+        // BUG-137 (2026-06-19): pull requiresSupportingDocuments from the
+        // tender so submit can validate the new gate.
+        tender: { select: { id: true, status: true, submissionCloseAt: true, requiresSupportingDocuments: true } },
         bidEnvelopes: { include: { bidDocuments: true } },
         lateException: { select: { status: true, expiresAt: true } },
+        supportingDocuments: { select: { id: true } },
       },
     });
     if (!bid) throw new NotFoundException('Bid not found');
@@ -132,14 +137,22 @@ export class BidsService {
       }
     }
 
-    // Envelope content checks: technical always requires docs; commercial
-    // requires docs only when no real BOQ template (legacy fallback path).
+    // BUG-137 (2026-06-19): both envelopes always require at least one PDF.
+    // The old "skip commercial PDF when BoQ is filled" exception is removed —
+    // the commercial PDF is the signed legal record alongside the BoQ.
     for (const env of bid.bidEnvelopes) {
-      const isTechnical = env.envelopeType === EnvelopeType.TECHNICAL;
-      const requiresDocs = isTechnical || !hasRealBoq;
-      if (requiresDocs && env.bidDocuments.length === 0) {
-        throw new BadRequestException(`${env.envelopeType} envelope is empty`);
+      if (env.bidDocuments.length === 0) {
+        const label = env.envelopeType === EnvelopeType.TECHNICAL ? 'Technical' : 'Commercial';
+        throw new BadRequestException(`${label} envelope is empty — at least one PDF is required.`);
       }
+    }
+
+    // BUG-137 (2026-06-19): supporting documents gate. When the tender flag
+    // is on, ≥1 supporting doc must be attached before submit.
+    if (bid.tender.requiresSupportingDocuments && (bid as any).supportingDocuments.length === 0) {
+      throw new BadRequestException(
+        'This tender requires at least one supporting document. Upload one before submitting.',
+      );
     }
 
     // Generate receipt: SHA-256 over canonical snapshot.
@@ -187,6 +200,12 @@ export class BidsService {
       this.prisma.bidDocument.updateMany({
         where: { bidEnvelope: { bidId: bid.id } },
         data: { submittedAt: now, lockedAt: now },
+      }),
+      // BUG-137 (2026-06-19): lock the supporting docs too so they're
+      // immutable post-submit.
+      this.prisma.bidSupportingDocument.updateMany({
+        where: { bidId: bid.id, lockedAt: null },
+        data: { lockedAt: now },
       }),
       this.prisma.bidSubmissionReceipt.create({
         data: {
@@ -588,5 +607,239 @@ export class BidsService {
     }
 
     return { envelopeId: envelope.id, documentCount: docs.length };
+  }
+
+  // ----------------------------------------------------------------
+  // BUG-137 (2026-06-19): bid supporting documents
+  // ----------------------------------------------------------------
+
+  async listSupportingDocuments(bidId: string, user: any) {
+    const bid = await this.prisma.bid.findUnique({
+      where: { id: bidId },
+      select: {
+        id: true,
+        vendorId: true,
+        // BUG-142 (2026-06-19): supporting docs are surfaced inside the
+        // Commercial Comparison per-vendor card alongside the priced offer,
+        // so the gate follows the commercial envelope only. (Was both-
+        // envelopes in BUG-139, when these docs lived on the Bids tab.)
+        bidEnvelopes: { select: { envelopeType: true, status: true } },
+      },
+    });
+    if (!bid) throw new NotFoundException('Bid not found');
+
+    // Authorisation: bid's vendor (own data) OR an admin user gated on the
+    // commercial-envelope-opening rule below.
+    const isVendor = !!user?.vendorId;
+    if (isVendor && user.vendorId !== bid.vendorId) {
+      throw new ForbiddenException('Not your bid');
+    }
+    if (!isVendor && !BidsService.commercialEnvelopeOpened(bid.bidEnvelopes)) {
+      throw new ForbiddenException(
+        'Supporting documents become visible once the commercial envelope is opened.',
+      );
+    }
+
+    const docs = await this.prisma.bidSupportingDocument.findMany({
+      where: { bidId },
+      orderBy: { uploadedAt: 'asc' },
+      select: {
+        id: true,
+        originalFilename: true,
+        mimeType: true,
+        fileSize: true,
+        checksumSha256: true,
+        uploadedAt: true,
+        lockedAt: true,
+      },
+    });
+    return {
+      bidId,
+      items: docs.map(d => ({
+        id: d.id,
+        filename: d.originalFilename,
+        mimeType: d.mimeType,
+        fileSize: Number(d.fileSize),
+        checksumSha256: d.checksumSha256,
+        uploadedAt: d.uploadedAt.toISOString(),
+        lockedAt: d.lockedAt?.toISOString() ?? null,
+      })),
+    };
+  }
+
+  // BUG-142 (2026-06-19): commercial-envelope-opened gate for supporting
+  // docs. Supersedes BUG-139's both-envelopes gate now that the surface is
+  // the Commercial Comparison per-vendor card, not the tender Bids tab.
+  // Single source of truth used by listSupportingDocuments + stream.
+  private static commercialEnvelopeOpened(
+    bidEnvelopes: Array<{ envelopeType: EnvelopeType | string; status: EnvelopeStatus | string }>,
+  ): boolean {
+    const commercial = bidEnvelopes.find(e => e.envelopeType === EnvelopeType.COMMERCIAL);
+    return commercial?.status === EnvelopeStatus.OPENED;
+  }
+
+  async uploadSupportingDocument(bidId: string, file: MulterFile, vendor: any) {
+    if (!file) throw new BadRequestException('File is required');
+    if (file.mimetype !== 'application/pdf') {
+      throw new BadRequestException('Only PDF files are accepted for supporting documents.');
+    }
+    const head = file.buffer?.subarray(0, 5).toString('ascii');
+    if (head !== '%PDF-') {
+      throw new BadRequestException('File does not appear to be a valid PDF.');
+    }
+    const MAX = 10 * 1024 * 1024;
+    if (file.size > MAX) throw new BadRequestException('File exceeds 10 MB limit.');
+
+    const bid = await this.prisma.bid.findUnique({
+      where: { id: bidId },
+      select: { id: true, vendorId: true, status: true },
+    });
+    if (!bid) throw new NotFoundException('Bid not found');
+    if (bid.vendorId !== vendor.vendorId) throw new ForbiddenException('Not your bid');
+    if (bid.status !== BidStatus.DRAFT) {
+      throw new ConflictException('Bid already submitted; supporting documents are locked.');
+    }
+
+    const docId = randomUUID();
+    const { storageKey, checksumSha256, fileSize } = await this.supportingStorage.write({
+      bidId,
+      docId,
+      originalFilename: file.originalname,
+      payload: file.buffer,
+      mimeType: file.mimetype,
+    });
+
+    // BUG-138 (2026-06-19): unique-checksum index removed — vendors can
+    // attach the same PDF more than once if they want to.
+    const doc = await this.prisma.bidSupportingDocument.create({
+      data: {
+        id: docId,
+        bidId,
+        originalFilename: file.originalname,
+        storageKey,
+        mimeType: file.mimetype,
+        fileSize: BigInt(fileSize),
+        checksumSha256,
+        uploadedByVendorUserId: vendor.id,
+      },
+    });
+
+    await this.audit.log({
+      eventType: 'BID_SUPPORTING_DOCUMENT_UPLOADED',
+      entityType: 'BidSupportingDocument',
+      entityId: doc.id,
+      bidId,
+      actorVendorUserId: vendor.id,
+      afterValue: { filename: doc.originalFilename, sha256: checksumSha256, fileSize },
+      riskLevel: AuditRiskLevel.MEDIUM,
+    });
+
+    return {
+      id: doc.id,
+      filename: doc.originalFilename,
+      fileSize,
+      checksumSha256,
+      uploadedAt: doc.uploadedAt.toISOString(),
+    };
+  }
+
+  async deleteSupportingDocument(bidId: string, documentId: string, vendor: any) {
+    const doc = await this.prisma.bidSupportingDocument.findUnique({
+      where: { id: documentId },
+      select: { id: true, bidId: true, storageKey: true, lockedAt: true, originalFilename: true,
+        bid: { select: { vendorId: true, status: true } } } as any,
+    });
+    if (!doc || doc.bidId !== bidId) throw new NotFoundException('Document not found');
+    const docBid = (doc as any).bid;
+    if (!docBid || docBid.vendorId !== vendor.vendorId) {
+      throw new ForbiddenException('Not your bid');
+    }
+    if (docBid.status !== BidStatus.DRAFT || doc.lockedAt) {
+      throw new ConflictException('Bid already submitted; supporting documents are locked.');
+    }
+
+    await this.prisma.bidSupportingDocument.delete({ where: { id: documentId } });
+    await this.supportingStorage.delete(doc.storageKey).catch(() => undefined);
+
+    await this.audit.log({
+      eventType: 'BID_SUPPORTING_DOCUMENT_DELETED',
+      entityType: 'BidSupportingDocument',
+      entityId: documentId,
+      bidId,
+      actorVendorUserId: vendor.id,
+      beforeValue: { filename: doc.originalFilename },
+      riskLevel: AuditRiskLevel.MEDIUM,
+    });
+  }
+
+  async streamSupportingDocument(
+    bidId: string,
+    documentId: string,
+    user: any,
+    mode: 'view' | 'download',
+  ): Promise<{
+    filename: string;
+    mimeType: string;
+    fileSize: number;
+    checksumSha256: string;
+    stream: import('stream').Readable;
+  }> {
+    const doc = await this.prisma.bidSupportingDocument.findUnique({
+      where: { id: documentId },
+      select: {
+        id: true, bidId: true, originalFilename: true, storageKey: true,
+        mimeType: true, fileSize: true, checksumSha256: true,
+        bid: {
+          select: {
+            vendorId: true,
+            status: true,
+            // BUG-139 (2026-06-19): need envelope statuses for the gate.
+            bidEnvelopes: { select: { envelopeType: true, status: true } },
+          },
+        },
+      } as any,
+    });
+    if (!doc || doc.bidId !== bidId) throw new NotFoundException('Document not found');
+    const docBid = (doc as any).bid;
+
+    const isVendor = !!user?.vendorId;
+    if (isVendor) {
+      if (docBid.vendorId !== user.vendorId) throw new ForbiddenException('Not your bid');
+    } else {
+      const perms: string[] = user?.permissions ?? [];
+      // Admin/evaluator side: gate behind technical:view (same level as
+      // technical envelope documents — supporting docs are non-commercial).
+      if (!perms.includes('technical:view') && !perms.includes('vendor:view')) {
+        throw new ForbiddenException('technical:view or vendor:view permission required');
+      }
+      // BUG-142 (2026-06-19): commercial envelope must be OPENED before
+      // admins can view supporting documents. Surface is the Commercial
+      // Comparison per-vendor card; gate follows the commercial side.
+      if (!BidsService.commercialEnvelopeOpened(docBid.bidEnvelopes ?? [])) {
+        throw new ForbiddenException(
+          'Supporting documents become visible once the commercial envelope is opened.',
+        );
+      }
+    }
+
+    await this.audit.log({
+      eventType: mode === 'view' ? 'BID_SUPPORTING_DOCUMENT_VIEWED' : 'BID_SUPPORTING_DOCUMENT_DOWNLOADED',
+      entityType: 'BidSupportingDocument',
+      entityId: documentId,
+      bidId,
+      actorUserId: isVendor ? undefined : (user?.id ?? undefined),
+      actorVendorUserId: isVendor ? (user?.id ?? undefined) : undefined,
+      afterValue: { filename: doc.originalFilename, sha256: doc.checksumSha256 },
+      riskLevel: AuditRiskLevel.LOW,
+    });
+
+    const { stream, size, mimeType } = await this.supportingStorage.stream(doc.storageKey);
+    return {
+      filename: doc.originalFilename,
+      mimeType: doc.mimeType || mimeType,
+      fileSize: Number(doc.fileSize) || size,
+      checksumSha256: doc.checksumSha256,
+      stream,
+    };
   }
 }

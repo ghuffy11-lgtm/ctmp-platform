@@ -377,3 +377,41 @@ If a future agent reaches a junction that this plan does not anticipate, **stop 
 | Design partner | Claude (Opus 4.7) | 2026-05-27 |
 
 **This document is locked.** See section "Change-control rules" before modifying.
+
+---
+
+## 10. Amendments
+
+### 2026-06-09 — BUG-114: Amend-Award PDF made OPTIONAL
+
+**Owner directive (verbatim):** "After awarded option to Amend Award, cannot click on submit amendment, as this button is disabled, also dont make upload document mandatory. just keep reason as mandatory only."
+
+**Original rule deviated from:** §A6 ("Override always requires text + PDF") + §F7 ("Amendments are by definition an override — text + PDF always required.").
+
+**New rule:** For the Amend-Award flow specifically, the supporting PDF is **optional**. The written justification (`justificationText`, 100-char min) remains **mandatory**. The Confirm-Award override rule (non-lowest at first-confirm) is unchanged — it still requires text + PDF, since that path has a much shorter audit footprint than an amendment.
+
+**Compliance rationale (owner-supplied):** in practice the audit trail of an amendment already captures the amender's identity, the timestamp, the before/after Award rows, the justification text, the originating tender, and the `AWARD_AMENDED` HIGH-risk audit event — the PDF was duplicating documentation that procurement already keeps in their own DMS. Forcing it inside the app was creating friction without adding evidentiary value.
+
+**Schema impact:** none. `awards.justification_pdf_*` columns are already nullable. The CHECK constraint `awards_override_requires_justification` checks `justification_text IS NOT NULL`, not the PDF.
+
+**Code changes:** `apps/api/src/modules/award/dto/amend-award.dto.ts` (`justificationDocumentId?` made optional), `apps/api/src/modules/award/award.service.ts:amendAward()` (PDF lookup skipped when omitted; pending-reference delete guarded), `apps/web-admin/src/components/comparison/AmendAwardDialog.tsx` (canSubmit no longer requires `pdfDocumentId`; banner + field label updated).
+
+**Sign-off:** Owner — 2026-06-09; implementing agent — Claude (Opus 4.7).
+
+### 2026-06-09 — BUG-115: New lifecycle state `Negotiation` introduced
+
+**Locked rule deviated from:** "No new tender lifecycle states. The new pages slot into existing states; do not invent new ones."
+
+**New rule:** A 15th state `Negotiation` slots between `Commercial Evaluation / Comparison` and `Award Recommendation`. Tenders enter `Negotiation` when procurement launches a round and exit when they close it (back to `Commercial Evaluation / Comparison`) or click Confirm Award (forward to `Awarded`).
+
+**Owner directive (verbatim, 2026-06-09):** "In commercial comparison need to add option beside Award for Negotiate, means there will be logic here if require a re negotiate from all the submitters, this option will keep the tender in Negotiation workflow instead of Award. This re negotiation will be sent back to a selected vendor or vendors, in which bidder will submit again another re negotiated price as BoQ items and submit another commercial proposal. This will not earse the olde Prices which was already submiteed, this will be a new section of provided commercial."
+
+**Compliance rationale:** The negotiation phase is a real operational mode where vendors are doing work and procurement is waiting; hiding it behind a sub-status on `Commercial Evaluation / Comparison` would confuse users into thinking the comparison is still being scored. The new state is purely additive — all existing transitions remain valid. Original bids remain immutable (the locked "Submitted bids are immutable" rule is honoured — negotiation submissions are new entities referencing the parent `Bid` via `negotiation_invitations.bid_id`).
+
+**Lifecycle:** `Commercial Evaluation / Comparison → Negotiation` on `POST /tenders/:id/negotiation/rounds`. `Negotiation → Commercial Evaluation / Comparison` on `POST /tenders/:id/negotiation/close` (explicit close without launching next). `Negotiation → Awarded` on `POST /tenders/:id/award/confirm` (open rounds auto-closed in the same transaction).
+
+**Schema impact:** migration 032 adds `NEGOTIATION` enum value + 4 new tables (`negotiation_rounds`, `negotiation_invitations`, `bid_negotiation_submissions`, `bid_negotiation_boq_items`) + 2 perms (`negotiation:launch`, `negotiation:view`).
+
+**Code changes:** New `apps/api/src/modules/negotiation/` module (service + controller + 3 DTOs). Comparison + Award + AwardMinutes + Reports services extended to consume the new resolver chain (latest negotiation submission > BoQ > CommercialEvaluation). `AmendAwardDialog`-style new `LaunchNegotiationDialog.tsx`. Admin Commercial Comparison gets a Negotiate button + banner. Vendor bid detail gets a `NegotiationSection` that renders open invitations as editable forms and submitted rounds as read-only cards. AwardSummaryCard gets a "Awarded after N rounds — X% saved" sub-line.
+
+**Sign-off:** Owner — 2026-06-09; implementing agent — Claude (Opus 4.7).

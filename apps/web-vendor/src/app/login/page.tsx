@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { post } from '@/lib/api';
 import { setTokens } from '@/lib/auth';
 import { AuthShell } from '@/components/layout/AuthShell';
@@ -17,8 +17,36 @@ interface LoginResponse {
   mfaSessionToken?: string;
 }
 
+// BUG-110 (2026-06-05): if the visitor clicked a tender card while anonymous,
+// they arrived at /login?next=/tenders/<uuid>. After successful login we want
+// to forward to that intended detail page instead of /dashboard. Sanitise to
+// defend against open-redirect: must start with `/` and not begin with `//` or
+// contain `:` (which would indicate a scheme).
+function sanitiseNext(raw: string | null): string {
+  if (!raw) return '/dashboard';
+  if (!raw.startsWith('/')) return '/dashboard';
+  if (raw.startsWith('//')) return '/dashboard';
+  if (raw.includes(':')) return '/dashboard';
+  return raw;
+}
+
+// BUG-110: Next.js requires `useSearchParams()` callers to be wrapped in
+// a Suspense boundary so the build can prerender the page.
 export default function VendorLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" />}>
+      <VendorLoginPageInner />
+    </Suspense>
+  );
+}
+
+function VendorLoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = sanitiseNext(searchParams.get('next'));
+  // BUG-112 (2026-06-07) Piece 4: banner shown when the vendor was
+  // signed out by idle-timeout or by the 401 interceptor.
+  const signoutReason = searchParams.get('reason');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mfaCode, setMfaCode] = useState('');
@@ -36,7 +64,7 @@ export default function VendorLoginPage() {
         setMfaSession(res.mfaSessionToken);
       } else {
         setTokens(res.accessToken, res.refreshToken);
-        router.push('/dashboard');
+        router.push(nextPath);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -56,7 +84,7 @@ export default function VendorLoginPage() {
         code: mfaCode,
       });
       setTokens(res.accessToken, res.refreshToken);
-      router.push('/dashboard');
+      router.push(nextPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'MFA verification failed');
     } finally {
@@ -70,6 +98,16 @@ export default function VendorLoginPage() {
       subtitle={mfaSession ? 'Enter the 6-digit code from your authenticator app.' : 'Sign in to manage your bids.'}
     >
       {error && <div className="mb-5"><ErrorBanner message={error} /></div>}
+
+      {signoutReason && !error && (
+        <div className="mb-5 px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-sm text-center">
+          {signoutReason === 'timeout'
+            ? 'You were signed out due to inactivity. Please sign in again.'
+            : signoutReason === 'expired'
+              ? 'Your session has expired. Please sign in again.'
+              : 'Please sign in to continue.'}
+        </div>
+      )}
 
       {!mfaSession ? (
         <form onSubmit={handleLogin} className="space-y-5">

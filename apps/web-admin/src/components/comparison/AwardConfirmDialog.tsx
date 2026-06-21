@@ -44,7 +44,7 @@ function fmtCurrency(amount: number | null, currency: string) {
  * Phase D (BUG-039 + BUG-040). The single source of truth for the Recommend →
  * Confirm flow:
  *   • Lowest-PASS pick = zero-friction Confirm (no text, no PDF) per F3.
- *   • Override = required text (min 100 chars) + required PDF per F2.
+ *   • Override = required text (min 20 chars per BUG-149) + optional PDF.
  *   • Notify-winner / notify-losers toggles default OFF per F6.
  *   • Confirm button disabled if quorum + Chair check failing per G4.
  *   • Override path uploads the PDF FIRST (returns documentId), then references
@@ -83,9 +83,13 @@ export function AwardConfirmDialog({ open, tenderId, vendor, isLowestPass, quoru
   if (!open || !vendor) return null;
 
   const quorumBlocking = !!quorum && !quorum.hasQuorum;
-  const overrideMissingText = !isLowestPass && justification.trim().length < 100;
-  const overrideMissingPdf = !isLowestPass && !pdfDocumentId;
-  const canConfirm = !quorumBlocking && !overrideMissingText && !overrideMissingPdf && !confirming && !uploading;
+  // BUG-149 (2026-06-21): owner reduced minimum override justification length
+  // from 100 (DTO) / 50 (frontend mismatch) → 20 across the board. Now the
+  // UI text + the DTO enforcement match.
+  const overrideMissingText = !isLowestPass && justification.trim().length < 20;
+  // BUG-095 (2026-06-02): PDF justification is now OPTIONAL per owner directive.
+  // Text rationale is still required for override / FAIL awards.
+  const canConfirm = !quorumBlocking && !overrideMissingText && !confirming && !uploading;
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const next = e.target.files?.[0] ?? null;
@@ -196,8 +200,7 @@ export function AwardConfirmDialog({ open, tenderId, vendor, isLowestPass, quoru
               <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-start gap-2.5 text-sm">
                 <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
                 <p className="text-amber-900">
-                  This vendor is NOT the lowest-PASS pick. Override requires written justification
-                  AND an attached PDF (master plan §F2).
+                  This vendor is NOT the lowest-PASS pick. Override requires written justification (min 20 chars). Attaching a supporting PDF is optional.
                 </p>
               </div>
               <div>
@@ -207,17 +210,17 @@ export function AwardConfirmDialog({ open, tenderId, vendor, isLowestPass, quoru
                 <textarea
                   value={justification}
                   onChange={e => setJustification(e.target.value)}
-                  placeholder="Explain why this vendor is being recommended over the lowest-PASS bid. Minimum 100 characters."
+                  placeholder="Explain why this vendor is being recommended over the lowest-PASS bid. Minimum 20 characters."
                   rows={5}
                   className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-bg focus:outline-none focus:ring-2 focus:ring-accent resize-y"
                 />
-                <p className={`text-xs mt-1 ${justification.trim().length < 100 ? 'text-text-secondary' : 'text-success'}`}>
-                  {justification.trim().length} / 100 characters minimum
+                <p className={`text-xs mt-1 ${justification.trim().length < 20 ? 'text-text-secondary' : 'text-success'}`}>
+                  {justification.trim().length} / 20 characters minimum
                 </p>
               </div>
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1.5">
-                  Justification PDF <span className="text-danger">*</span>
+                  Justification PDF <span className="text-text-secondary">(optional)</span>
                 </label>
                 <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-border rounded-lg cursor-pointer hover:bg-bg/40 transition-colors">
                   <input

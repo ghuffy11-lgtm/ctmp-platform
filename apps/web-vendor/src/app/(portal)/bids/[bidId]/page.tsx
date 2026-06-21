@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { get } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { NegotiationSection } from '@/components/bids/NegotiationSection';
 
 // BUG-082 (2026-06-01): read-only BoQ view for vendors' submitted bids.
 interface BoqTemplateRow { id: string; itemNo: string; description: string; qty: number; unit: string }
@@ -234,6 +235,17 @@ export default function VendorBidDetailPage({ params }: { params: Promise<{ bidI
           </div>
         );
       })()}
+
+      {/* BUG-115 (2026-06-09): negotiation rounds — visible when this bid has
+          at least one INVITED or SUBMITTED invitation. Returns null otherwise. */}
+      {boqTemplate.length > 0 && (
+        <NegotiationSection
+          bidId={bid.id}
+          tenderId={bid.tenderId}
+          boqTemplate={boqTemplate}
+          previousBoqLines={boqLines}
+        />
+      )}
 
       {receipt && (
         <div className="bg-card border border-border rounded-xl p-5 space-y-3">

@@ -20,6 +20,7 @@ import { VendorComparisonCard, type CardVendor } from '@/components/comparison/V
 import { AwardConfirmDialog } from '@/components/comparison/AwardConfirmDialog';
 import { AwardSummaryCard, type AwardSummary } from '@/components/comparison/AwardSummaryCard';
 import { QuorumStatus, type QuorumState } from '@/components/comparison/QuorumStatus';
+import { LaunchNegotiationDialog } from '@/components/comparison/LaunchNegotiationDialog';
 
 interface TenderListItem {
   id: string;
@@ -66,16 +67,18 @@ interface CommercialComparisonResponse {
   }>;
 }
 
-const ACTIVE_STATUSES = [
+// BUG-090 (2026-06-02): WALK-051's "Active / Completed" optgroup split is
+// retired. Awarded / Tender Closed tenders now live in the dedicated
+// /awarded-tenders archive page; this picker only shows tenders that still
+// have live commercial work to do. Owner reported the Completed group as
+// clutter during routine evaluation work.
+const ELIGIBLE_STATUSES = [
   'Committee Commercial Opening',
   'Commercial Evaluation / Comparison',
+  // BUG-115 (2026-06-09): Negotiation phase keeps tenders visible on this page.
+  'Negotiation',
   'Award Recommendation',
 ];
-const COMPLETED_STATUSES = ['Awarded', 'Tender Closed'];
-const ELIGIBLE_STATUSES = [...ACTIVE_STATUSES, ...COMPLETED_STATUSES];
-// WALK-051: pickers group by Active / Completed so awarded/closed tenders
-// stay findable without dominating the active queue.
-const COMPLETED_SET = new Set(COMPLETED_STATUSES);
 
 function NoAccessScreen() {
   return (
@@ -104,6 +107,9 @@ function CommercialComparisonContent() {
   const [canView, setCanView] = useState(false);
   const [canEvaluate, setCanEvaluate] = useState(false);
   const [canGenerateMinutes, setCanGenerateMinutes] = useState(false);
+  // BUG-115 (2026-06-09): negotiation:launch perm gates the Negotiate button.
+  const [canLaunchNegotiation, setCanLaunchNegotiation] = useState(false);
+  const [negotiationDialogOpen, setNegotiationDialogOpen] = useState(false);
   // WALK-056: text filter so the Completed group stays navigable.
   const [tenderFilter, setTenderFilter] = useState('');
 
@@ -132,6 +138,8 @@ function CommercialComparisonContent() {
     setCanEvaluate(!!token && hasPermission(token, 'commercial:evaluate'));
     // BUG-054: surfaces the AwardSummaryCard's Generate/Regenerate Minutes button.
     setCanGenerateMinutes(!!token && hasPermission(token, 'award:minutes:generate'));
+    // BUG-115 (2026-06-09): negotiation launch.
+    setCanLaunchNegotiation(!!token && hasPermission(token, 'negotiation:launch'));
     setPermissionChecked(true);
   }, []);
 
@@ -212,22 +220,130 @@ function CommercialComparisonContent() {
     if (selectedTenderId) loadComparison(selectedTenderId);
   }
 
-  const matrixVendors = useMemo<CommercialMatrixVendor[]>(
-    () =>
-      comparison?.vendors.map(v => ({
-        bidId: v.bidId,
-        vendorId: v.vendorId,
-        vendorName: v.vendorName,
-        technicalResult: v.technicalResult,
-        technicalScore: v.technicalScore,
-        technicalMaxScore: v.technicalMaxScore,
-        commercialTotal: v.commercialTotal,
-        currency: v.currency,
-        commercialEnvelopeStatus: v.commercialEnvelopeStatus,
-        boqLines: v.boqLines,
-      })) ?? [],
-    [comparison],
-  );
+  // BUG-130 (2026-06-12): build N+1 matrix sections — one "Original" + one
+  // per submitted negotiation round. Each section has its own vendor list,
+  // its own lowest-PASS, and its own boqLines for the Itemized view. The
+  // PROJECT spec is "exclude non-participants from a round's matrix" so
+  // round sections only show vendors that actually submitted that round.
+  //
+  // Each vendor's `boqLines` for the round is materialised from the negotiation
+  // submission's per-line entries; lineTotal is recomputed from the BOQ
+  // template qty (the response only carries unitPrice — line totals are
+  // intentionally derived to avoid double-storage).
+  const matrixSections = useMemo<Array<{
+    key: string;
+    kind: 'original' | 'round';
+    roundNumber?: number;
+    submittedAt?: string;
+    label: string;
+    subtitle: string | null;
+    vendors: CommercialMatrixVendor[];
+    lowestPassBidId: string | null;
+  }>>(() => {
+    if (!comparison) return [];
+    const allVendors = comparison.vendors ?? [];
+    const boqTemplate = comparison.boqTemplate ?? [];
+    const qtyByItemId = new Map(boqTemplate.map(t => [t.id, Number(t.qty)]));
+
+    function computeLowestPass(vendors: CommercialMatrixVendor[]): string | null {
+      const pass = vendors
+        .filter(v => v.technicalResult === 'PASS' && v.commercialTotal != null)
+        .sort((a, b) => (a.commercialTotal ?? Infinity) - (b.commercialTotal ?? Infinity));
+      return pass.length > 0 ? pass[0].bidId : null;
+    }
+
+    // Original section — always present. Uses originalCommercialTotal +
+    // the original boqLines (pre-negotiation).
+    const originalVendors: CommercialMatrixVendor[] = allVendors.map(v => ({
+      bidId: v.bidId,
+      vendorId: v.vendorId,
+      vendorName: v.vendorName,
+      technicalResult: v.technicalResult,
+      technicalScore: v.technicalScore,
+      technicalMaxScore: v.technicalMaxScore,
+      commercialTotal: (v as any).originalCommercialTotal ?? v.commercialTotal,
+      currency: v.currency,
+      commercialEnvelopeStatus: v.commercialEnvelopeStatus,
+      boqLines: v.boqLines,
+    }));
+
+    const sections: Array<{
+      key: string;
+      kind: 'original' | 'round';
+      roundNumber?: number;
+      submittedAt?: string;
+      label: string;
+      subtitle: string | null;
+      vendors: CommercialMatrixVendor[];
+      lowestPassBidId: string | null;
+    }> = [
+      {
+        key: 'original',
+        kind: 'original',
+        label: 'Original Commercial Comparison',
+        subtitle: 'Pre-negotiation prices as submitted.',
+        vendors: originalVendors,
+        lowestPassBidId: computeLowestPass(originalVendors),
+      },
+    ];
+
+    // Per-round sections — derive distinct round numbers across all vendors.
+    const allRoundNumbers = Array.from(
+      new Set(
+        allVendors.flatMap(v =>
+          (v.negotiationHistory ?? []).map(h => h.roundNumber),
+        ),
+      ),
+    ).sort((a, b) => a - b);
+
+    for (const roundNumber of allRoundNumbers) {
+      // Each round shows ONLY vendors who submitted that round.
+      const roundVendors: CommercialMatrixVendor[] = [];
+      let submittedAt: string | undefined;
+      for (const v of allVendors) {
+        const entry = (v.negotiationHistory ?? []).find(h => h.roundNumber === roundNumber);
+        if (!entry) continue; // exclude non-participants (owner directive)
+        if (!submittedAt) submittedAt = entry.submittedAt;
+        // Materialise boqLines for the round with derived lineTotal.
+        const lines = (entry.boqLines ?? []).map(l => ({
+          tenderBoqItemId: l.tenderBoqItemId,
+          status: l.status,
+          unitPrice: l.unitPrice,
+          lineTotal:
+            l.status === 'BIDDING' && l.unitPrice != null
+              ? Number(l.unitPrice) * (qtyByItemId.get(l.tenderBoqItemId) ?? 0)
+              : null,
+        }));
+        roundVendors.push({
+          bidId: v.bidId,
+          vendorId: v.vendorId,
+          vendorName: v.vendorName,
+          technicalResult: v.technicalResult,
+          technicalScore: v.technicalScore,
+          technicalMaxScore: v.technicalMaxScore,
+          commercialTotal: entry.totalPrice,
+          currency: entry.currency ?? v.currency,
+          commercialEnvelopeStatus: v.commercialEnvelopeStatus,
+          boqLines: lines,
+        });
+      }
+      if (roundVendors.length === 0) continue;
+      sections.push({
+        key: `round-${roundNumber}`,
+        kind: 'round',
+        roundNumber,
+        submittedAt,
+        label: `Negotiated Commercial Comparison — Round ${roundNumber}`,
+        subtitle: submittedAt
+          ? `${roundVendors.length} vendor${roundVendors.length === 1 ? '' : 's'} submitted from ${new Date(submittedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`
+          : `${roundVendors.length} vendor${roundVendors.length === 1 ? '' : 's'} submitted`,
+        vendors: roundVendors,
+        lowestPassBidId: computeLowestPass(roundVendors),
+      });
+    }
+
+    return sections;
+  }, [comparison]);
 
   if (!permissionChecked) return null;
   if (!canView) return <NoAccessScreen />;
@@ -291,22 +407,11 @@ function CommercialComparisonContent() {
                     t.title.toLowerCase().includes(q),
                   )
                 : tenders;
-              const active = matches.filter(t => !COMPLETED_SET.has(t.status));
-              const completed = matches.filter(t => COMPLETED_SET.has(t.status));
               return (
                 <>
-                  {active.length > 0 && (
+                  {matches.length > 0 && (
                     <optgroup label="Active">
-                      {active.map(t => (
-                        <option key={t.id} value={t.id}>
-                          {t.referenceNumber} — {t.title} ({t.status})
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {completed.length > 0 && (
-                    <optgroup label="Completed (awarded / closed)">
-                      {completed.map(t => (
+                      {matches.map(t => (
                         <option key={t.id} value={t.id}>
                           {t.referenceNumber} — {t.title} ({t.status})
                         </option>
@@ -393,24 +498,81 @@ function CommercialComparisonContent() {
             />
           )}
 
-          {comparison.award ? (
-            <details className="bg-card border border-border rounded-xl">
-              <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-text-primary hover:bg-bg/40 select-none">
-                Full comparison (audit reference)
-              </summary>
-              <div className="px-5 py-4 border-t border-border space-y-4">
+          {/* BUG-115 (2026-06-09): negotiation banner + Negotiate launch button. */}
+          {!comparison.award && canLaunchNegotiation && (
+            <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-5 py-3">
+              <div className="text-sm text-amber-900">
+                {comparison.tender.status === 'Negotiation' ? (
+                  <>
+                    <span className="font-semibold">Negotiation in progress.</span>{' '}
+                    {comparison.vendors.some((v: any) => v.hasOpenNegotiationInvitation) ? (
+                      <>
+                        Vendors with an open invitation will appear with a "Negotiation pending" tag.
+                        Launch another round when you want to push selected vendors further.
+                      </>
+                    ) : (
+                      <>All invited vendors have submitted. Review their stacked prices below, then launch another round or confirm an award.</>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold">Negotiate</span> to invite selected PASS vendors for a revised price. Original prices are preserved forever.
+                  </>
+                )}
+              </div>
+              <button
+                onClick={() => setNegotiationDialogOpen(true)}
+                className="px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:opacity-90 whitespace-nowrap"
+              >
+                {comparison.tender.status === 'Negotiation' ? 'Launch another round' : 'Negotiate'}
+              </button>
+            </div>
+          )}
+
+          {/* BUG-098 (2026-06-03, supersedes BUG-097 standalone tech matrix):
+               Commercial matrix stays, standalone Technical matrix removed.
+               Per-vendor tech breakdown lives inside each vendor card and
+               shows only that vendor's criterion scores.
+
+               BUG-130 (2026-06-12): single matrix split into N+1 sections —
+               always-present Original + one per submitted negotiation round.
+               Each section has its own lowest-PASS scoped to participants. */}
+          <div className="space-y-6">
+            {matrixSections.map(section => (
+              <div key={section.key} className="space-y-2">
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  <h2
+                    className={
+                      section.kind === 'original'
+                        ? 'text-sm font-bold uppercase tracking-wide text-text-secondary'
+                        : 'text-sm font-bold uppercase tracking-wide text-amber-700'
+                    }
+                  >
+                    {section.label}
+                  </h2>
+                  {section.subtitle && (
+                    <span className="text-xs text-text-secondary">{section.subtitle}</span>
+                  )}
+                </div>
                 <CommercialMatrix
-                  vendors={matrixVendors}
-                  lowestPassBidId={comparison.lowestPassBidId}
+                  vendors={section.vendors}
+                  lowestPassBidId={section.lowestPassBidId}
                   selectedBidId={selectedBidId}
                   onSelect={handleSelectBid}
                   boqTemplate={comparison.boqTemplate}
                 />
+              </div>
+            ))}
+          </div>
+
+          {comparison.award ? (
+            <details className="bg-card border border-border rounded-xl" open>
+              <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-text-primary hover:bg-bg/40 select-none">
+                Per-vendor detail (audit reference)
+              </summary>
+              <div className="px-5 py-4 border-t border-border space-y-4">
                 {comparison.vendors.length > 0 && (
                   <section className="space-y-3">
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-text-secondary">
-                      Per-vendor detail
-                    </h3>
                     {comparison.vendors.map(v => (
                       <VendorComparisonCard
                         key={v.bidId}
@@ -431,13 +593,6 @@ function CommercialComparisonContent() {
             </details>
           ) : (
             <>
-              <CommercialMatrix
-                vendors={matrixVendors}
-                lowestPassBidId={comparison.lowestPassBidId}
-                selectedBidId={selectedBidId}
-                onSelect={handleSelectBid}
-                boqTemplate={comparison.boqTemplate}
-              />
               {comparison.vendors.length > 0 && (
                 <section className="space-y-3">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-text-secondary">
@@ -498,6 +653,27 @@ function CommercialComparisonContent() {
             quorum={quorum}
             onClose={() => setConfirmTarget(null)}
             onConfirmed={handleConfirmed}
+          />
+
+          {/* BUG-115 (2026-06-09): launch a negotiation round. */}
+          <LaunchNegotiationDialog
+            open={negotiationDialogOpen}
+            tenderId={comparison.tender.id}
+            tenderReference={comparison.tender.referenceNumber}
+            passVendors={comparison.vendors
+              .filter((v: any) => v.technicalResult === 'PASS')
+              .map((v: any) => ({
+                bidId: v.bidId,
+                vendorName: v.vendorName,
+                commercialTotal: v.commercialTotal,
+                currency: v.currency,
+                lowestPass: v.bidId === comparison.lowestPassBidId,
+              }))}
+            onClose={() => setNegotiationDialogOpen(false)}
+            onLaunched={() => {
+              setNegotiationDialogOpen(false);
+              if (selectedTenderId) loadComparison(selectedTenderId);
+            }}
           />
         </div>
       )}

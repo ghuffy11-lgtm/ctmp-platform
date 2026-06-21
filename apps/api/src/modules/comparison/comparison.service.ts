@@ -14,6 +14,8 @@ const STATUS_DB_TO_API: Record<TenderStatus, string> = {
   COMMERCIAL_SEALED: 'Commercial Sealed',
   COMMITTEE_COMMERCIAL_OPENING: 'Committee Commercial Opening',
   COMMERCIAL_EVALUATION: 'Commercial Evaluation / Comparison',
+  // BUG-115 (2026-06-09): negotiation phase. See master plan §10.
+  NEGOTIATION: 'Negotiation',
   AWARD_RECOMMENDATION: 'Award Recommendation',
   AWARDED: 'Awarded',
   TENDER_CLOSED: 'Tender Closed',
@@ -73,6 +75,21 @@ export class ComparisonService {
     const criteriaNames = new Set(criteria.map(c => c.name));
     const maxByCriterion = new Map(criteria.map(c => [c.name, Number(c.maxScore)]));
     const totalMaxScore = criteria.reduce((sum, c) => sum + Number(c.maxScore), 0);
+    // BUG-111 (2026-06-06): per-section weight totals + role lookup.
+    const roleByCriterion = new Map(criteria.map(c => [c.name, (c as any).evaluatorRole ?? 'EITHER']));
+    const weightByCriterion = new Map(
+      criteria.map(c => [c.name, c.weight != null ? Number(c.weight) : 0]),
+    );
+    let weightTechnical = 0;
+    let weightProcurement = 0;
+    let weightEither = 0;
+    for (const c of criteria) {
+      const w = c.weight != null ? Number(c.weight) : 0;
+      const role = (c as any).evaluatorRole ?? 'EITHER';
+      if (role === 'TECHNICAL') weightTechnical += w;
+      else if (role === 'PROCUREMENT') weightProcurement += w;
+      else weightEither += w;
+    }
 
     const vendors = bids.map(bid => {
       const evaluators = bid.technicalEvaluations.map(te => {
@@ -116,10 +133,32 @@ export class ComparisonService {
           maxScore: Number(c.maxScore),
           weight: c.weight != null ? Number(c.weight) : null,
           mandatory: c.mandatory,
+          // BUG-111: surface role so frontend can chip-tag per criterion.
+          evaluatorRole: roleByCriterion.get(c.name) ?? 'EITHER',
           consensusScore: average,
           evaluatorCount: values.length,
         };
       });
+
+      // BUG-111 (2026-06-06): per-section weighted subscores. For each role,
+      // compute the weighted average of criterion consensus scores limited to
+      // criteria of that role. Stays 0..100 percent within the section, so
+      // the UI can render "T: X / weightTechnical" and "P: X / weightProcurement"
+      // as `toAbsolute(percent, weight)` integers.
+      const consensusForRole = (role: 'TECHNICAL' | 'PROCUREMENT') => {
+        let weightedSum = 0;
+        let weightTotal = 0;
+        for (const cc of consensusByCriterion) {
+          if (cc.evaluatorRole !== role) continue;
+          if (cc.consensusScore == null) continue;
+          const w = cc.weight ?? 0;
+          weightedSum += cc.consensusScore * w;
+          weightTotal += w;
+        }
+        return weightTotal > 0 ? weightedSum / weightTotal : null;
+      };
+      const consensusScoreTechnical = consensusForRole('TECHNICAL');
+      const consensusScoreProcurement = consensusForRole('PROCUREMENT');
 
       return {
         bidId: bid.id,
@@ -132,6 +171,9 @@ export class ComparisonService {
         consensusResult: bid.technicalResult,
         consensusFinalised: bid.technicalResult !== TechnicalResult.PENDING,
         consensusScore,
+        // BUG-111 (2026-06-06): per-section subscores for the split UI.
+        consensusScoreTechnical,
+        consensusScoreProcurement,
         evaluators,
         consensusByCriterion,
       };
@@ -163,8 +205,15 @@ export class ComparisonService {
         weight: c.weight != null ? Number(c.weight) : null,
         mandatory: c.mandatory,
         sortOrder: c.sortOrder,
+        // BUG-111: per-criterion role so the matrix UI can chip-tag rows.
+        evaluatorRole: (c as any).evaluatorRole ?? 'EITHER',
       })),
       totalMaxScore,
+      // BUG-111 (2026-06-06): per-section weight totals so the UI can render
+      // "T: X / weightTechnical" and "P: X / weightProcurement".
+      weightTechnical,
+      weightProcurement,
+      weightEither,
       summary: {
         bidCount: vendors.length,
         passCount,
@@ -213,6 +262,8 @@ export class ComparisonService {
     const allowedTenderStatuses: TenderStatus[] = [
       TenderStatus.COMMITTEE_COMMERCIAL_OPENING,
       TenderStatus.COMMERCIAL_EVALUATION,
+      // BUG-115 (2026-06-09): keep comparison surface live during negotiation.
+      TenderStatus.NEGOTIATION,
       TenderStatus.AWARD_RECOMMENDATION,
       TenderStatus.AWARDED,
       TenderStatus.TENDER_CLOSED,
@@ -243,6 +294,15 @@ export class ComparisonService {
         // bids that have no boq rows.
         bidBoqItems: {
           include: { tenderBoqItem: { select: { qty: true } } },
+        },
+        // BUG-115 (2026-06-09): pull every negotiation invitation for this
+        // bid with its submission + per-line prices. Service derives
+        // negotiationHistory[] for the comparison response.
+        negotiationInvitations: {
+          include: {
+            round: { select: { roundNumber: true, launchedAt: true, closedAt: true } },
+            submission: { include: { boqItems: true } },
+          },
         },
       },
       orderBy: { submittedAt: 'asc' },
@@ -277,13 +337,77 @@ export class ComparisonService {
             0,
           )
         : null;
-      const commercialTotal = boqTotal != null
+      const originalCommercialTotal = boqTotal != null
         ? boqTotal
         : prices.length > 0
           ? prices.reduce((s, v) => s + v, 0) / prices.length
           : null;
       const currency =
         bid.commercialEvaluations.find(e => e.currency)?.currency ?? 'KWD';
+
+      // BUG-115 (2026-06-09): build per-round negotiation history. Sorted by
+      // round number ascending. `% reduction vs previous` walks down the
+      // chain (round N vs round N-1; round 1 vs original).
+      const submittedInvitations = (bid.negotiationInvitations ?? [])
+        .filter((i: any) => i.submission != null)
+        .sort((a: any, b: any) => a.round.roundNumber - b.round.roundNumber);
+
+      const negotiationHistory = submittedInvitations.map((inv: any, idx: number) => {
+        const sub = inv.submission as any;
+        const subTotal = sub.totalPrice == null ? null : Number(sub.totalPrice);
+        const prevSub = idx === 0 ? null : submittedInvitations[idx - 1].submission as any;
+        const prevTotal = idx === 0
+          ? originalCommercialTotal
+          : (prevSub == null || prevSub.totalPrice == null ? null : Number(prevSub.totalPrice));
+        const percentReductionVsPrevious =
+          subTotal != null && prevTotal != null && prevTotal > 0
+            ? ((prevTotal - subTotal) / prevTotal) * 100
+            : null;
+        const percentReductionVsOriginal =
+          subTotal != null && originalCommercialTotal != null && originalCommercialTotal > 0
+            ? ((originalCommercialTotal - subTotal) / originalCommercialTotal) * 100
+            : null;
+        return {
+          // BUG-129 (2026-06-11): submissionId so the frontend can build
+          // the negotiation PDF view/download URL.
+          submissionId: inv.submission.id,
+          roundNumber: inv.round.roundNumber,
+          submittedAt: inv.submission.submittedAt.toISOString(),
+          totalPrice: subTotal,
+          currency: inv.submission.currency ?? currency,
+          percentReductionVsPrevious,
+          percentReductionVsOriginal,
+          commercialPdfFilename: inv.submission.commercialPdfFilename,
+          remarks: inv.submission.remarks ?? null,
+          boqLines: (inv.submission.boqItems ?? []).map((b: any) => ({
+            tenderBoqItemId: b.tenderBoqItemId,
+            status: b.status,
+            unitPrice: b.unitPrice == null ? null : Number(b.unitPrice),
+            lineTotal: b.status === 'BIDDING' && b.unitPrice != null
+              // Note: qty is on the template line; comparison page also has the
+              // tender's boqTemplate so the renderer can resolve qty there
+              // when needed. We expose unitPrice here; the FE multiplies by qty
+              // from its own template lookup (matches the existing boqLines pattern).
+              ? null
+              : null,
+          })),
+        };
+      });
+
+      // "Current" price for lowest-PASS + downstream resolution = latest
+      // non-null negotiation submission total, else the original.
+      const latestNegotiationTotal = negotiationHistory.length > 0
+        ? negotiationHistory[negotiationHistory.length - 1].totalPrice
+        : null;
+      const commercialTotal = latestNegotiationTotal != null
+        ? latestNegotiationTotal
+        : originalCommercialTotal;
+
+      // Open invitation (no submission yet) tells the page to show
+      // "negotiation pending" badges on the per-vendor card.
+      const openInvitation = (bid.negotiationInvitations ?? []).find(
+        (i: any) => i.submission == null && i.round.closedAt == null,
+      );
 
       const commercialEnvelope = bid.bidEnvelopes.find(e => e.envelopeType === EnvelopeType.COMMERCIAL);
 
@@ -325,6 +449,12 @@ export class ComparisonService {
             ? Number(i.unitPrice) * Number(i.tenderBoqItem.qty)
             : null,
         })),
+        // BUG-115 (2026-06-09): original + negotiated views.
+        originalCommercialTotal,
+        negotiationHistory,
+        hasOpenNegotiationInvitation: openInvitation != null,
+        openNegotiationInvitationId: openInvitation?.id ?? null,
+        openNegotiationRoundNumber: openInvitation?.round?.roundNumber ?? null,
       };
     });
 
@@ -409,6 +539,20 @@ export class ComparisonService {
         where: { id: award.recommendedBidId },
         include: {
           commercialEvaluations: { select: { totalPrice: true, currency: true } },
+          // BUG-095 (2026-06-02): include BoQ rows so winnerPrice can compute
+          // from the structured per-line totals when BoQ exists (matches the
+          // vendor-list aggregator + BUG-091 fix on award.service).
+          bidBoqItems: {
+            include: { tenderBoqItem: { select: { qty: true } } },
+          },
+          // BUG-115 (2026-06-09): include the latest negotiation submission so
+          // winnerPrice prefers it over BoQ / commercial evaluation totals.
+          negotiationInvitations: {
+            include: {
+              round:      { select: { roundNumber: true } },
+              submission: { select: { totalPrice: true, currency: true, submittedAt: true } },
+            },
+          },
         },
       }),
       this.prisma.user.findUnique({
@@ -422,14 +566,49 @@ export class ComparisonService {
       }),
     ]);
 
+    // BUG-095: BoQ-driven total first, fall back to manual entry average.
+    const biddingLines = (bid?.bidBoqItems ?? []).filter(
+      (i: any) => i.status === 'BIDDING' && i.unitPrice != null,
+    );
+    const boqTotal = biddingLines.length > 0
+      ? biddingLines.reduce(
+          (s: number, i: any) => s + Number(i.unitPrice) * Number(i.tenderBoqItem.qty),
+          0,
+        )
+      : null;
     const prices = (bid?.commercialEvaluations ?? [])
       .map(e => (e.totalPrice != null ? Number(e.totalPrice) : null))
       .filter((v): v is number => typeof v === 'number');
-    const winnerPrice = prices.length > 0
+    const manualAvg = prices.length > 0
       ? prices.reduce((s, v) => s + v, 0) / prices.length
       : null;
+
+    // BUG-115 (2026-06-09): if the awarded bid was negotiated, the LATEST
+    // round's submission total trumps every other source. We also surface
+    // the savings figure so AwardSummaryCard can render "Awarded after N
+    // rounds — X% saved".
+    const submitted = (bid?.negotiationInvitations ?? [])
+      .filter((i: any) => i.submission?.totalPrice != null)
+      .sort((a: any, b: any) => b.round.roundNumber - a.round.roundNumber);
+    const negotiatedTotal = submitted.length > 0 && submitted[0].submission?.totalPrice != null
+      ? Number(submitted[0].submission.totalPrice)
+      : null;
+    const negotiatedRoundCount = submitted.length;
+    const originalPrice = boqTotal ?? manualAvg;
+    const winnerPrice = negotiatedTotal != null ? negotiatedTotal : originalPrice;
+    const negotiationSavings = (negotiatedTotal != null && originalPrice != null && originalPrice > 0)
+      ? {
+          originalPrice,
+          finalPrice: negotiatedTotal,
+          savingsAmount: originalPrice - negotiatedTotal,
+          savingsPercent: ((originalPrice - negotiatedTotal) / originalPrice) * 100,
+          roundCount: negotiatedRoundCount,
+        }
+      : null;
     const winnerCurrency =
-      bid?.commercialEvaluations.find(e => e.currency)?.currency ?? 'KWD';
+      submitted[0]?.submission?.currency
+      ?? bid?.commercialEvaluations.find(e => e.currency)?.currency
+      ?? 'KWD';
 
     return {
       awardId: award.id,
@@ -446,6 +625,8 @@ export class ComparisonService {
       confirmedByName: confirmer?.displayName ?? confirmer?.email ?? '—',
       confirmedAt: award.confirmedAt.toISOString(),
       minutesGeneratedAt: latestMinutes?.generatedAt.toISOString() ?? null,
+      // BUG-115 (2026-06-09): additive. Null when no negotiation happened.
+      negotiationSavings,
     };
   }
 }

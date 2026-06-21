@@ -159,6 +159,14 @@ export class EvaluationCriteriaService {
       // Upsert each.
       for (let i = 0; i < dto.criteria.length; i++) {
         const c = dto.criteria[i];
+        // BUG-111 (2026-06-06): per-criterion evaluator role. Defaults to
+        // EITHER when the caller doesn't specify, preserving back-compat.
+        const role = (c.evaluatorRole ?? 'EITHER').toUpperCase();
+        if (!['TECHNICAL', 'PROCUREMENT', 'EITHER'].includes(role)) {
+          throw new BadRequestException(
+            `Invalid evaluatorRole "${c.evaluatorRole}" on criterion "${c.code}". Allowed: TECHNICAL, PROCUREMENT, EITHER.`,
+          );
+        }
         const data = {
           tenderId,
           code: c.code.trim(),
@@ -168,6 +176,7 @@ export class EvaluationCriteriaService {
           weight: new Prisma.Decimal(c.weight),
           mandatory: c.mandatory,
           sortOrder: c.sortOrder ?? i,
+          evaluatorRole: role,
         };
         if (c.id && existingIds.has(c.id)) {
           await tx.tenderTechnicalCriterion.update({ where: { id: c.id }, data });
@@ -218,5 +227,7 @@ export class EvaluationCriteriaService {
     weight: c.weight != null ? Number(c.weight) : null,
     mandatory: c.mandatory,
     sortOrder: c.sortOrder,
+    // BUG-111 (2026-06-06): per-criterion evaluator role.
+    evaluatorRole: c.evaluatorRole ?? 'EITHER',
   });
 }

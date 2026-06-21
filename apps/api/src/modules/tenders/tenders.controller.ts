@@ -13,6 +13,11 @@ import { CreateTenderDto } from './dto/create-tender.dto';
 import { UpdateTenderDto } from './dto/update-tender.dto';
 import { ListTendersDto } from './dto/list-tenders.dto';
 import { InviteVendorDto } from './dto/invite-vendor.dto';
+import { RevertTenderDto } from './dto/revert-tender.dto';
+import { SuspendTenderDto } from './dto/suspend-tender.dto';
+import { ResumeTenderDto } from './dto/resume-tender.dto';
+import { CancelTenderDto } from './dto/cancel-tender.dto';
+import { ExtendSubmissionDto } from './dto/extend-submission.dto';
 
 const MAX_TENDER_DOC_BYTES = 50 * 1024 * 1024;
 
@@ -116,7 +121,38 @@ export class TendersController {
     @Body() dto: InviteVendorDto,
     @CurrentUser('id') userId: string,
   ) {
-    return this.tendersService.inviteVendor(id, dto.vendorId, userId);
+    // BUG-120 (2026-06-10): pass extra ad-hoc emails through; service
+    // normalises + dedupes before persisting.
+    return this.tendersService.inviteVendor(id, dto.vendorId, userId, dto.extraEmails ?? []);
+  }
+
+  // BUG-120 (2026-06-10): PATCH endpoint to edit the ad-hoc extras for an
+  // already-invited vendor without removing them. (Removal isn't allowed
+  // post-publish per BUG-015.)
+  @Patch(':id/invited-vendors/:vendorId/extra-emails')
+  @RequirePermissions('tender:edit')
+  @ApiOperation({ operationId: 'updateInvitationExtras', summary: 'Update ad-hoc extra notification emails for an invited vendor' })
+  updateExtras(
+    @Param('id') id: string,
+    @Param('vendorId') vendorId: string,
+    @Body() body: { extraEmails: string[] },
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.updateInvitationExtras(id, vendorId, body?.extraEmails ?? [], userId);
+  }
+
+  // BUG-123 (2026-06-11): manual resend of the invitation as a reminder.
+  // Uses TENDER_INVITATION_REMINDER template + force=true so notified_at
+  // doesn't block. Only valid for Published / Clarification Period tenders.
+  @Post(':id/invited-vendors/:vendorId/resend-invitation')
+  @RequirePermissions('tender:edit')
+  @ApiOperation({ operationId: 'resendInvitation', summary: 'Send a reminder invitation email to an already-invited vendor' })
+  resendInvitation(
+    @Param('id') id: string,
+    @Param('vendorId') vendorId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.resendInvitation(id, vendorId, userId);
   }
 
   @Delete(':id/invited-vendors/:vendorId')
@@ -146,9 +182,37 @@ export class TendersController {
 
   @Post(':id/cancel')
   @RequirePermissions('tender:cancel')
-  @ApiOperation({ operationId: 'cancelTender', summary: 'Cancel tender' })
-  cancel(@Param('id') id: string, @Body('reason') reason: string, @CurrentUser('id') userId: string) {
-    return this.tendersService.cancel(id, reason, userId);
+  @ApiOperation({ operationId: 'cancelTender', summary: 'Cancel tender (any state); cascades close negotiation rounds + lock envelopes' })
+  cancel(
+    @Param('id') id: string,
+    @Body() dto: CancelTenderDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.cancel(id, dto.reason, userId);
+  }
+
+  // BUG-132 (2026-06-14): Hold (Suspend) — pause the tender; remembers the
+  // prior state for Resume. Single permission tender:suspend covers both.
+  @Post(':id/suspend')
+  @RequirePermissions('tender:suspend')
+  @ApiOperation({ operationId: 'suspendTender', summary: 'Put the tender on Hold; Resume returns it to the prior state' })
+  suspend(
+    @Param('id') id: string,
+    @Body() dto: SuspendTenderDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.suspend(id, dto, userId);
+  }
+
+  @Post(':id/resume')
+  @RequirePermissions('tender:suspend')
+  @ApiOperation({ operationId: 'resumeTender', summary: 'Resume a held tender to its previous status' })
+  resume(
+    @Param('id') id: string,
+    @Body() dto: ResumeTenderDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.resume(id, dto, userId);
   }
 
   @Post(':id/close-submissions')
@@ -158,12 +222,41 @@ export class TendersController {
     return this.tendersService.closeSubmissions(id, userId);
   }
 
+  // BUG-141 (2026-06-19): re-open a Submission Closed tender with a new
+  // future deadline. Same authority as closing — reuse tender:close_submission.
+  @Post(':id/extend-submission')
+  @RequirePermissions('tender:close_submission')
+  @ApiOperation({
+    operationId: 'extendSubmission',
+    summary: 'Re-open a Submission Closed tender with a new submission deadline',
+  })
+  extendSubmission(
+    @Param('id') id: string,
+    @Body() dto: ExtendSubmissionDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.extendSubmission(id, dto, userId);
+  }
+
   // WALK-052: Final tender lifecycle close (Awarded → Tender Closed).
   @Post(':id/close-tender')
   @RequirePermissions('tender:close')
   @ApiOperation({ operationId: 'closeTender', summary: 'Close awarded tender (final lifecycle step)' })
   closeTender(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.tendersService.closeTender(id, userId);
+  }
+
+  // BUG-125 (2026-06-11): reverse of close. Tender Closed → Awarded. Requires
+  // a reason ≥20 chars; HIGH-risk audit. Same perm as close.
+  @Post(':id/reopen')
+  @RequirePermissions('tender:close')
+  @ApiOperation({ operationId: 'reopenTender', summary: 'Re-open a Tender Closed tender back to Awarded' })
+  reopenTender(
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.reopenTender(id, body, userId);
   }
 
   @Post(':id/approve')
@@ -186,5 +279,38 @@ export class TendersController {
     @CurrentUser('id') userId: string,
   ) {
     return this.tendersService.reject(id, reason, userId);
+  }
+
+  // BUG-112 (2026-06-07) Piece 1: revert Published → earlier editable state.
+  @Post(':id/revert')
+  @RequirePermissions('tender:revert')
+  @ApiOperation({ operationId: 'revertTender', summary: 'Revert a Published tender back to an editable state (BUG-112)' })
+  revertTender(
+    @Param('id') id: string,
+    @Body() dto: RevertTenderDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.revert(id, dto, userId);
+  }
+}
+
+// BUG-110 (2026-06-05): public read of currently-open tenders for the
+// anonymous vendor portal landing page. Separate controller class so it
+// carries NO auth guards — anonymous callers OK. Service-level filtering
+// restricts results to status ∈ {Published, Clarification Period} +
+// visibility = PUBLIC (no invitation-only — anonymous can't be invited).
+@ApiTags('public')
+@Controller()
+export class PublicTendersController {
+  constructor(private readonly tendersService: TendersService) {}
+
+  @Public()
+  @Get('public/tenders')
+  @ApiOperation({
+    operationId: 'listPublicTenders',
+    summary: 'Anonymous list of currently-open public tenders for the vendor portal landing page',
+  })
+  listPublic(@Query() query: ListTendersDto) {
+    return this.tendersService.findAllPublic(query);
   }
 }

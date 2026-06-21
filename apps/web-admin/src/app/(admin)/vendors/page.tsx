@@ -4,8 +4,31 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { useConfirm } from '@/components/dialog/DialogProvider';
-import { RefreshCw, Store, Clock, BadgeCheck, Ban, Search, CheckCircle2, PauseCircle } from 'lucide-react';
+import { RefreshCw, Store, Clock, BadgeCheck, Ban, Search, CheckCircle2, PauseCircle, FileText, Eye, Download } from 'lucide-react';
 import type { LucideProps } from 'lucide-react';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+// BUG-137 (2026-06-19): vendor registration document type labels.
+// BUG-138 (2026-06-19): slot list trimmed to 3. Older rows with the
+// dropped codes still display via the label map for historical clarity.
+const DOC_TYPE_LABELS: Record<string, string> = {
+  COMMERCIAL_LICENSE: 'Commercial License',
+  AUTHORISATION_LETTER: 'Authorisation Letter',
+  OTHER: 'Other',
+  // Legacy codes — keep labels in case any vendor uploaded under the old
+  // BUG-137 catalogue before BUG-138 trimmed it.
+  AUTHORISED_REPRESENTATIVE_ID: 'Authorised Representative ID',
+  TAX_CERTIFICATE: 'Tax Certificate',
+};
+
+interface VendorDocumentRow {
+  id: string;
+  documentType: string;
+  filename: string;
+  fileSize: number;
+  uploadedAt: string;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +98,67 @@ export default function VendorsPage() {
   }, [selectedId]);
 
   useEffect(() => { fetchVendors(); }, [fetchVendors]);
+
+  // BUG-137 (2026-06-19): load registration documents for the selected vendor.
+  const [vendorDocs, setVendorDocs] = useState<VendorDocumentRow[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  useEffect(() => {
+    if (!selectedId) {
+      setVendorDocs([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setDocsLoading(true);
+      try {
+        const token = getAccessToken();
+        const res = await get<{ items: VendorDocumentRow[] }>(`/vendors/${selectedId}/documents`, token);
+        if (!cancelled) setVendorDocs(res.items ?? []);
+      } catch {
+        if (!cancelled) setVendorDocs([]);
+      } finally {
+        if (!cancelled) setDocsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId]);
+
+  async function viewVendorDoc(vendorId: string, docId: string, filename: string) {
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE}/api/v1/vendors/${vendorId}/documents/${docId}/view`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Open failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Open failed');
+    }
+  }
+
+  async function downloadVendorDoc(vendorId: string, docId: string, filename: string) {
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE}/api/v1/vendors/${vendorId}/documents/${docId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed');
+    }
+  }
 
   const filtered = vendors.filter(v => {
     if (statusFilter !== 'ALL' && v.registrationStatus !== statusFilter) return false;
@@ -295,6 +379,53 @@ export default function VendorsPage() {
                 {selected.approvedAt && <FieldRow label="Approved" value={formatDate(selected.approvedAt)} />}
                 {selected.lastLoginAt && <FieldRow label="Last Login" value={formatDate(selected.lastLoginAt)} />}
                 {typeof selected.documentCount === 'number' && <FieldRow label="Documents" value={String(selected.documentCount)} />}
+
+                {/* BUG-137 (2026-06-19): registration documents — list with
+                    View + Download. Approver should review before approving. */}
+                <div className="pt-2 border-t border-border">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-2">
+                    Registration Documents
+                  </p>
+                  {docsLoading ? (
+                    <p className="text-xs italic text-text-secondary">Loading documents…</p>
+                  ) : vendorDocs.length === 0 ? (
+                    <p className="text-xs italic text-text-secondary">No documents uploaded.</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {vendorDocs.map(d => (
+                        <li key={d.id} className="flex items-center justify-between text-xs bg-bg/40 border border-border rounded px-2.5 py-1.5">
+                          <span className="flex items-center gap-2 truncate min-w-0">
+                            <FileText className="w-3.5 h-3.5 text-text-secondary shrink-0" />
+                            <span className="truncate">
+                              <span className="font-semibold text-text-primary">
+                                {DOC_TYPE_LABELS[d.documentType] ?? d.documentType}
+                              </span>
+                              <span className="text-text-secondary ml-2 truncate">{d.filename}</span>
+                            </span>
+                          </span>
+                          <span className="flex items-center gap-1 shrink-0 ml-2">
+                            <button
+                              type="button"
+                              onClick={() => viewVendorDoc(selected.id, d.id, d.filename)}
+                              className="inline-flex items-center gap-1 text-accent hover:underline px-1"
+                              title="View in browser"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> View
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadVendorDoc(selected.id, d.id, d.filename)}
+                              className="inline-flex items-center gap-1 text-accent hover:underline px-1"
+                              title="Download"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Download
+                            </button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
 
               {/* Actions */}

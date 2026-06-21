@@ -53,10 +53,17 @@ function fmtCurrency(amount: number | null, currency: string) {
   }).format(amount);
 }
 
-function fmtScore(v: number | null, max: number | null) {
-  if (v == null) return '—';
-  const f = Number.isInteger(v) ? v.toFixed(0) : v.toFixed(1);
-  return max != null ? `${f} / ${max}` : f;
+// BUG-101 (2026-06-04): owner reported "Max 30, Score 93" — the backend
+// stores technicalScore as a percentage (0..100, clamped in
+// technical-evaluation.service). Previously we printed "93 / 30" which mixes
+// units. Mirror the BUG-061 toAbsolute() pattern already used in
+// TechnicalMatrix: scale percent back to absolute against the criteria max
+// before display. "93 / 30" → "28 / 30".
+function fmtScore(percent: number | null, max: number | null) {
+  if (percent == null) return '—';
+  if (max == null || max <= 0) return String(Math.round(percent));
+  const absolute = Math.round((percent / 100) * max);
+  return `${absolute} / ${max}`;
 }
 
 function resultBadge(result: 'PASS' | 'FAIL' | 'PENDING') {
@@ -136,19 +143,23 @@ export function CommercialMatrix({ vendors, lowestPassBidId, selectedBidId, onSe
         hasBoq ? (
           /* BUG-068 / Phase F BOQ: rows = template lines, columns = vendors.
              Cells show line total (unit_price * qty) when the vendor is
-             BIDDING that line; "—" when NOT_BIDDING or no row submitted. */
-          <div className="overflow-x-auto">
+             BIDDING that line; "—" when NOT_BIDDING or no row submitted.
+             BUG-104 (2026-06-05): scale to 5-6+ vendors. Item No + Description
+             columns are sticky-left so they stay visible while scrolling
+             horizontally through vendor columns; vendor columns get
+             min-w-[140px] so they don't squeeze below readable width. */
+          <div className="overflow-x-auto relative">
             <table className="w-full text-left text-sm">
               <thead className="bg-bg border-b border-border">
                 <tr>
-                  <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary w-20">Item</th>
-                  <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary">Description</th>
+                  <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary w-20 sticky left-0 z-10 bg-bg">Item</th>
+                  <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary w-64 sticky left-20 z-10 bg-bg border-r border-border">Description</th>
                   <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary text-right w-24">Qty</th>
                   <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary w-20">Unit</th>
                   {sortedVendors.map(v => (
                     <th
                       key={v.bidId}
-                      className={`px-3 py-2 text-xs font-bold uppercase tracking-wider text-right ${
+                      className={`px-3 py-2 text-xs font-bold uppercase tracking-wider text-right min-w-[140px] ${
                         v.bidId === lowestPassBidId ? 'text-success' : 'text-text-secondary'
                       }`}
                     >
@@ -159,22 +170,22 @@ export function CommercialMatrix({ vendors, lowestPassBidId, selectedBidId, onSe
               </thead>
               <tbody className="divide-y divide-border">
                 {(boqTemplate ?? []).map(row => (
-                  <tr key={row.id} className="hover:bg-bg/40">
-                    <td className="px-3 py-2 font-mono text-xs text-text-secondary">{row.itemNo}</td>
-                    <td className="px-3 py-2 text-text-primary">{row.description}</td>
+                  <tr key={row.id} className="group hover:bg-bg/40">
+                    <td className="px-3 py-2 font-mono text-xs text-text-secondary sticky left-0 z-10 bg-card group-hover:bg-bg/40">{row.itemNo}</td>
+                    <td className="px-3 py-2 text-text-primary w-64 sticky left-20 z-10 bg-card group-hover:bg-bg/40 border-r border-border">{row.description}</td>
                     <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">{row.qty}</td>
                     <td className="px-3 py-2 text-xs text-text-secondary">{row.unit}</td>
                     {sortedVendors.map(v => {
                       const line = (v.boqLines ?? []).find(l => l.tenderBoqItemId === row.id);
                       if (!line || line.status === 'NOT_BIDDING') {
                         return (
-                          <td key={v.bidId} className="px-3 py-2 text-right text-xs text-text-secondary/60 italic">
+                          <td key={v.bidId} className="px-3 py-2 text-right text-xs text-text-secondary/60 italic min-w-[140px]">
                             Not bidding
                           </td>
                         );
                       }
                       return (
-                        <td key={v.bidId} className="px-3 py-2 text-right font-mono text-sm text-text-primary">
+                        <td key={v.bidId} className="px-3 py-2 text-right font-mono text-sm text-text-primary min-w-[140px]">
                           {fmtCurrency(line.lineTotal, v.currency)}
                         </td>
                       );
@@ -182,11 +193,14 @@ export function CommercialMatrix({ vendors, lowestPassBidId, selectedBidId, onSe
                   </tr>
                 ))}
                 <tr className="bg-bg/60 font-semibold">
-                  <td className="px-3 py-2" colSpan={4}>Total</td>
+                  <td className="px-3 py-2 sticky left-0 z-10 bg-bg/60">Total</td>
+                  <td className="px-3 py-2 w-64 sticky left-20 z-10 bg-bg/60 border-r border-border"></td>
+                  <td className="px-3 py-2 w-24"></td>
+                  <td className="px-3 py-2 w-20"></td>
                   {sortedVendors.map(v => (
                     <td
                       key={v.bidId}
-                      className={`px-3 py-2 text-right font-mono text-sm ${
+                      className={`px-3 py-2 text-right font-mono text-sm min-w-[140px] ${
                         v.bidId === lowestPassBidId ? 'text-success' : 'text-text-primary'
                       }`}
                     >
@@ -269,8 +283,26 @@ export function CommercialMatrix({ vendors, lowestPassBidId, selectedBidId, onSe
                         fmtCurrency(v.commercialTotal, v.currency)
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-text-secondary">
-                      {v.commercialEnvelopeStatus ?? '—'}
+                    <td className="px-4 py-3 text-xs">
+                      {v.commercialEnvelopeStatus === 'LOCKED' ? (
+                        // BUG-095 (2026-06-02): explain WHY commercial is locked.
+                        // The Finalize Technical Results action auto-locks the
+                        // commercial envelope for FAIL bids (separation of
+                        // duties — fail vendors shouldn't have commercial info
+                        // exposed). Owner needed this visible without DB lookup.
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 text-amber-700 font-bold border border-amber-200"
+                          title="Auto-locked at Finalize Technical Results because the bid failed technical evaluation. Commercial envelope cannot be opened or its contents viewed."
+                        >
+                          LOCKED · Technical FAIL
+                        </span>
+                      ) : v.commercialEnvelopeStatus === 'OPENED' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-success/10 text-success font-bold border border-success/30">OPENED</span>
+                      ) : v.commercialEnvelopeStatus === 'SEALED' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg text-text-secondary font-semibold border border-border">SEALED</span>
+                      ) : (
+                        <span className="text-text-secondary">{v.commercialEnvelopeStatus ?? '—'}</span>
+                      )}
                     </td>
                   </tr>
                 );

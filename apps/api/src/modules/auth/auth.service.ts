@@ -7,6 +7,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../database/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { MfaVerifyDto } from './dto/mfa-verify.dto';
+import { SystemSettingsService } from '../system-settings/system-settings.service';
 
 @Injectable()
 export class AuthService {
@@ -16,6 +17,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly settings: SystemSettingsService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -83,12 +85,15 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('User not found');
     if (payload.version !== user.tokenVersion) throw new UnauthorizedException('Refresh token has been revoked');
 
-    const [permissions, departments] = await Promise.all([
+    const [permissions, departments, hiddenSidebarItems, sidebarLabelOverrides, idleTimeoutMinutes] = await Promise.all([
       this.loadPermissions(user.id),
       this.loadDepartments(user.id),
+      this.loadHiddenSidebarItems(user.id),
+      this.loadSidebarLabelOverrides(user.id),
+      this.loadIdleTimeoutMinutes(),
     ]);
     const accessToken = this.jwt.sign(
-      { sub: user.id, username: user.adUsername ?? user.email, permissions, departments, type: 'internal' },
+      { sub: user.id, username: user.adUsername ?? user.email, permissions, departments, hiddenSidebarItems, sidebarLabelOverrides, idleTimeoutMinutes, type: 'internal' },
       { secret: this.config.get<string>('jwt.secret'), expiresIn: this.config.get<string>('jwt.expiresIn') as never },
     );
     return { accessToken };
@@ -122,13 +127,16 @@ export class AuthService {
   }
 
   private async issueTokens(user: { id: string; adUsername: string | null; email: string; tokenVersion: number }) {
-    const [permissions, departments] = await Promise.all([
+    const [permissions, departments, hiddenSidebarItems, sidebarLabelOverrides, idleTimeoutMinutes] = await Promise.all([
       this.loadPermissions(user.id),
       this.loadDepartments(user.id),
+      this.loadHiddenSidebarItems(user.id),
+      this.loadSidebarLabelOverrides(user.id),
+      this.loadIdleTimeoutMinutes(),
     ]);
 
     const accessToken = this.jwt.sign(
-      { sub: user.id, username: user.adUsername ?? user.email, permissions, departments, type: 'internal' },
+      { sub: user.id, username: user.adUsername ?? user.email, permissions, departments, hiddenSidebarItems, sidebarLabelOverrides, idleTimeoutMinutes, type: 'internal' },
       { secret: this.config.get<string>('jwt.secret'), expiresIn: this.config.get<string>('jwt.expiresIn') as never },
     );
 
@@ -155,6 +163,61 @@ export class AuthService {
     return userRoles.flatMap((ur: any) =>
       ur.role.rolePermissions.map((rp: any) => rp.permission.code as string),
     );
+  }
+
+  // BUG-093 (2026-06-02): union of every role's `hiddenSidebarItems` for the
+  // user. Sidebar entries here are hidden in the UI regardless of permissions.
+  // If a user holds multiple roles, any single role saying "hide" hides the
+  // entry — owner's intent ("hide for executive users") matches union semantics.
+  private async loadHiddenSidebarItems(userId: string): Promise<string[]> {
+    const rows = await this.prisma.userRole.findMany({
+      where: { userId },
+      include: { role: { select: { hiddenSidebarItems: true } } },
+    });
+    const set = new Set<string>();
+    for (const r of rows) {
+      for (const h of r.role.hiddenSidebarItems ?? []) set.add(h);
+    }
+    return Array.from(set);
+  }
+
+  // BUG-107 Piece 4 (2026-06-05): merge sidebar label overrides across the
+  // user's roles. Key = sidebar href, value = custom label. First non-empty
+  // override per href wins (roles ordered by granted_at ascending). Sidebar
+  // applies overrides at render with fallback to the hardcoded label.
+  private async loadSidebarLabelOverrides(userId: string): Promise<Record<string, string>> {
+    const rows = await this.prisma.userRole.findMany({
+      where: { userId },
+      include: { role: { select: { sidebarLabelOverrides: true, code: true } } },
+      orderBy: { grantedAt: 'asc' },
+    });
+    const merged: Record<string, string> = {};
+    for (const r of rows) {
+      const overrides = r.role.sidebarLabelOverrides as Record<string, string> | null;
+      if (!overrides || typeof overrides !== 'object') continue;
+      for (const [href, label] of Object.entries(overrides)) {
+        if (typeof label !== 'string' || label.trim() === '') continue;
+        if (!(href in merged)) merged[href] = label.trim();
+      }
+    }
+    return merged;
+  }
+
+  // BUG-112 (2026-06-07) Piece 4: read configured idle timeout (in minutes)
+  // from system_settings. Frontend reads this off the JWT to drive its
+  // inactivity timer. Default 30 if unset or unparseable. Reads via prisma
+  // directly (the setting is plain, not encrypted, and SystemSettingsService
+  // doesn't expose a single-key getter).
+  private async loadIdleTimeoutMinutes(): Promise<number> {
+    try {
+      const row = await this.prisma.systemSetting.findUnique({
+        where: { key: 'session.idle_timeout_minutes' },
+      });
+      const n = row?.value ? Number(row.value) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : 30;
+    } catch {
+      return 30;
+    }
   }
 
   private async loadDepartments(userId: string): Promise<string[]> {
@@ -184,11 +247,12 @@ export class AuthService {
   }
 
   private async bindToAd(username: string, password: string): Promise<boolean> {
-    const url = this.config.get<string>('ad.url') ?? '';
-    const domain = this.config.get<string>('ad.domain') ?? '';
-    const client = new Client({ url });
+    // BUG-107 Piece 5: AD config from DB-first, env fallback.
+    const cfg = await this.settings.resolveAdConfig();
+    if (!cfg.url || !cfg.domain) return false;
+    const client = new Client({ url: cfg.url });
     try {
-      await client.bind(`${username}@${domain}`, password);
+      await client.bind(`${username}@${cfg.domain}`, password);
       await client.unbind();
       return true;
     } catch {

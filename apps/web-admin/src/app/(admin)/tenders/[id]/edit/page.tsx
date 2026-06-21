@@ -45,6 +45,12 @@ interface TenderData {
   departmentName?: string;
   departmentCode?: string | null;
   departmentId?: string;
+  // BUG-122 (2026-06-11): visibility editable in DRAFT / INTERNAL_REVIEW
+  // (pre-publish). Backend additionally rejects the change when any
+  // submitted bid exists.
+  visibility?: 'PUBLIC' | 'INVITATION_ONLY';
+  // BUG-137 (2026-06-19): require bidders to upload ≥1 supporting doc.
+  requiresSupportingDocuments?: boolean;
 }
 
 interface Department {
@@ -62,6 +68,10 @@ interface FormData {
   submissionDeadlineDate: string;
   submissionDeadlineTime: string;
   description: string;
+  // BUG-122 (2026-06-11): visibility editable pre-publish.
+  visibility: 'PUBLIC' | 'INVITATION_ONLY';
+  // BUG-137 (2026-06-19): require bidders to upload ≥1 supporting doc.
+  requiresSupportingDocuments: boolean;
 }
 
 function toFormData(tender: TenderData): FormData {
@@ -81,6 +91,10 @@ function toFormData(tender: TenderData): FormData {
     submissionDeadlineDate: deadlineDate,
     submissionDeadlineTime: deadlineTime,
     description: tender.description ?? '',
+    // BUG-122 (2026-06-11): preserve current visibility in the form.
+    visibility: tender.visibility ?? 'PUBLIC',
+    // BUG-137 (2026-06-19): preserve current flag.
+    requiresSupportingDocuments: tender.requiresSupportingDocuments ?? false,
   };
 }
 
@@ -184,20 +198,42 @@ export default function EditTenderPage() {
         const time = form.submissionDeadlineTime || '23:59';
         submissionDeadline = new Date(`${form.submissionDeadlineDate}T${time}:00`).toISOString();
       }
-      const payload: Record<string, unknown> = {
-        title: form.title.trim(),
-        category: form.category || null,
-        procurementType: form.procurementType || null,
-        submissionDeadline,
-        description: form.description.trim() || null,
-      };
-      // BUG-009: only send departmentId on Draft (backend rejects mid-flight).
-      if (tender.status === 'Draft' && form.departmentId) {
-        payload.departmentId = form.departmentId;
-      }
-      // BUG-010: only send estimatedBudget when editable.
-      if (BUDGET_EDITABLE_STATUSES.has(tender.status)) {
-        payload.estimatedBudget = form.estimatedBudget ? Number(form.estimatedBudget) : null;
+      // BUG-122b (2026-06-11): in APPROVED status the backend only accepts a
+      // visibility-only payload. Skip every other field. For Draft/IR the
+      // full payload goes as before.
+      const payload: Record<string, unknown> = {};
+      const visibilityChanged = form.visibility !== tender.visibility;
+
+      if (tender.status === 'Approved') {
+        if (visibilityChanged) {
+          payload.visibility = form.visibility;
+        } else {
+          // Nothing to send — bail without hitting the API.
+          router.push(`/tenders/${tenderId}`);
+          return;
+        }
+      } else {
+        payload.title = form.title.trim();
+        payload.category = form.category || null;
+        payload.procurementType = form.procurementType || null;
+        payload.submissionDeadline = submissionDeadline;
+        payload.description = form.description.trim() || null;
+        // BUG-009: only send departmentId on Draft (backend rejects mid-flight).
+        if (tender.status === 'Draft' && form.departmentId) {
+          payload.departmentId = form.departmentId;
+        }
+        // BUG-010: only send estimatedBudget when editable.
+        if (BUDGET_EDITABLE_STATUSES.has(tender.status)) {
+          payload.estimatedBudget = form.estimatedBudget ? Number(form.estimatedBudget) : null;
+        }
+        // BUG-122: visibility alongside everything else in Draft / Internal Review.
+        if (visibilityChanged) {
+          payload.visibility = form.visibility;
+        }
+        // BUG-137 (2026-06-19): allow flag edit pre-publish.
+        if (form.requiresSupportingDocuments !== (tender.requiresSupportingDocuments ?? false)) {
+          payload.requiresSupportingDocuments = form.requiresSupportingDocuments;
+        }
       }
       await patch(`/tenders/${tenderId}`, payload, token);
       router.push(`/tenders/${tenderId}`);
@@ -390,6 +426,74 @@ export default function EditTenderPage() {
               ))}
             </div>
           </div>
+
+          {/* BUG-122 + BUG-122b (2026-06-11): Visibility — editable while
+              tender is pre-publish (DRAFT, INTERNAL_REVIEW, or APPROVED).
+              Locked once Published. Backend rejects when any submitted bid
+              exists, regardless of state. */}
+          {(tender.status === 'Draft' || tender.status === 'Internal Review' || tender.status === 'Approved') ? (
+            <div>
+              <FieldLabel>Visibility</FieldLabel>
+              <div className="flex flex-wrap gap-6 mt-1">
+                {(['PUBLIC', 'INVITATION_ONLY'] as const).map(v => (
+                  <label key={v} className="flex items-center gap-2.5 cursor-pointer group">
+                    <input
+                      type="radio"
+                      name="visibility"
+                      value={v}
+                      checked={form.visibility === v}
+                      onChange={() => update('visibility', v)}
+                      className="w-4 h-4 accent-accent"
+                    />
+                    <span className="text-sm text-text-primary group-hover:text-accent transition-colors">
+                      {v === 'PUBLIC' ? 'Public — open to all approved vendors' : 'Invitation only — manage invited vendors after save'}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-text-secondary mt-1">
+                Editable while pre-publish. Switching to Invitation Only requires at least 3 invited vendors before you can Publish.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <FieldLabel>Visibility</FieldLabel>
+              <p className="text-sm text-text-primary">
+                {tender.visibility === 'INVITATION_ONLY' ? 'Invitation only' : 'Public'}
+                <span className="ml-2 text-xs text-text-secondary">(locked after Approval)</span>
+              </p>
+            </div>
+          )}
+
+          {/* BUG-137 (2026-06-19): Supporting documents requirement. Editable
+              pre-publish; informational badge after that. */}
+          {(tender.status === 'Draft' || tender.status === 'Internal Review' || tender.status === 'Approved') ? (
+            <div>
+              <FieldLabel>Supporting Documents</FieldLabel>
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.requiresSupportingDocuments}
+                  onChange={e => update('requiresSupportingDocuments', e.target.checked)}
+                  className="w-4 h-4 accent-accent mt-0.5"
+                />
+                <span className="text-sm text-text-primary">
+                  Require vendors to upload supporting documents (certificates, letters, etc.)
+                  <span className="block text-xs text-text-secondary mt-0.5">
+                    When enabled, vendors must attach at least one PDF before submitting their bid.
+                  </span>
+                </span>
+              </label>
+            </div>
+          ) : (
+            <div>
+              <FieldLabel>Supporting Documents</FieldLabel>
+              <p className="text-sm text-text-primary">
+                {tender.requiresSupportingDocuments ? 'Required (vendors must attach ≥1 PDF)' : 'Optional'}
+                <span className="ml-2 text-xs text-text-secondary">(locked after Publish)</span>
+              </p>
+            </div>
+          )}
 
           {/* Submission Deadline */}
           <div className="max-w-lg">

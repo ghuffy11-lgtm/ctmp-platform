@@ -134,6 +134,8 @@ function TechnicalComparisonContent() {
         maxScore: c.maxScore,
         weight: c.weight,
         mandatory: c.mandatory,
+        // BUG-111 (2026-06-06): per-criterion role chip on the matrix.
+        evaluatorRole: (c as any).evaluatorRole ?? 'EITHER',
       })) ?? [],
     [comparison],
   );
@@ -146,6 +148,9 @@ function TechnicalComparisonContent() {
         vendorName: v.vendorName,
         consensusResult: v.consensusResult,
         consensusScore: v.consensusScore,
+        // BUG-111: per-section subscores returned by the comparison service.
+        consensusScoreTechnical: (v as any).consensusScoreTechnical ?? null,
+        consensusScoreProcurement: (v as any).consensusScoreProcurement ?? null,
         consensusByCriterion: v.consensusByCriterion.map(c => ({
           criterionId: c.criterionId,
           consensusScore: c.consensusScore,
@@ -263,6 +268,10 @@ function TechnicalComparisonContent() {
             passThreshold={comparison.tender.technicalPassThreshold}
             selectedVendorId={selectedVendorId}
             onSelectVendor={handleSelectVendor}
+            // BUG-111 (2026-06-06): per-role weight totals for subscore display.
+            weightTechnical={(comparison as any).weightTechnical ?? 0}
+            weightProcurement={(comparison as any).weightProcurement ?? 0}
+            defaultLayout="criterion-rows"
           />
 
           {/* Vendor cards */}

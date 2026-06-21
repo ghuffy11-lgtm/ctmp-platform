@@ -55,6 +55,22 @@ body {
   color: var(--color-on-surface);
 }
 
+/* BUG-118 (2026-06-10): Chrome/Edge render native <select> popups using OS
+   dark-mode theming when the user's OS preference is dark — ignoring our
+   Tailwind classes — causing the dropdown text to render white on white.
+   Forcing color-scheme: light on every native select restores the light
+   popup chrome and dark text regardless of OS theme. Belt-and-braces
+   explicit colours on option elements as well. */
+select {
+  color-scheme: light;
+  color: #1a1c1e;
+  background-color: #ffffff;
+}
+select option {
+  color: #1a1c1e;
+  background-color: #ffffff;
+}
+
 .material-symbols-outlined {
   font-family: 'Material Symbols Outlined';
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;

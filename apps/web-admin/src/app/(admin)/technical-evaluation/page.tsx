@@ -41,6 +41,9 @@ interface TenderBidsResponse {
   total: number;
 }
 
+// BUG-111 (2026-06-06): per-criterion evaluator role.
+type EvaluatorRole = 'TECHNICAL' | 'PROCUREMENT' | 'EITHER';
+
 interface CriterionScore {
   criterion: string;
   description: string;
@@ -50,6 +53,7 @@ interface CriterionScore {
   weight: number;
   score: number | '';
   passed: boolean;
+  evaluatorRole: EvaluatorRole;
 }
 
 interface TechnicalEvaluation {
@@ -73,30 +77,35 @@ interface TechnicalEvaluation {
 
 // Fallback used when the tender has no per-tender criteria configured yet
 // (pre-Phase F tenders). New tenders should use the editor on /tenders/[id]/edit.
+// All default criteria are EITHER so they remain scorable by any evaluator.
 const DEFAULT_CRITERIA: Omit<CriterionScore, 'score' | 'passed'>[] = [
   {
     criterion: 'Compliance with Technical Specs',
     description: 'Full adherence to Appendix A equipment list and operational parameters.',
     maxScore: 30,
     weight: 30,
+    evaluatorRole: 'EITHER',
   },
   {
     criterion: 'Team Experience & Qualifications',
     description: 'Years of relevant experience for the assigned Project Manager and Senior Engineers.',
     maxScore: 25,
     weight: 25,
+    evaluatorRole: 'EITHER',
   },
   {
     criterion: 'Project Methodology & Timeline',
     description: 'Detailing project phase milestones and risk mitigation strategies.',
     maxScore: 25,
     weight: 25,
+    evaluatorRole: 'EITHER',
   },
   {
     criterion: 'Support & Maintenance SLA',
     description: 'Post-implementation technical support availability and response times.',
     maxScore: 20,
     weight: 20,
+    evaluatorRole: 'EITHER',
   },
 ];
 
@@ -108,6 +117,8 @@ interface TenderCriterion {
   maxScore: number;
   weight: number | null;
   mandatory: boolean;
+  // BUG-111 (2026-06-06): which evaluator role scores this criterion.
+  evaluatorRole?: EvaluatorRole;
 }
 
 const PASS_THRESHOLD = 70;
@@ -233,6 +244,8 @@ export default function TechnicalEvaluationPage() {
           // Fall back to maxScore if weight wasn't configured — keeps the
           // backend per-criterion weighted-average meaningful.
           weight: c.weight ?? c.maxScore,
+          // BUG-111: per-criterion evaluator role. EITHER by default.
+          evaluatorRole: (c.evaluatorRole ?? 'EITHER') as EvaluatorRole,
         })));
       } else {
         setTenderCriteria(DEFAULT_CRITERIA);
@@ -258,19 +271,35 @@ export default function TechnicalEvaluationPage() {
   // "Evaluating as: <name>" above the form. JWT payload puts adUsername (or
   // email fallback) in `username` — good-enough identity for the active form.
   const [currentUsername, setCurrentUsername] = useState<string | undefined>(undefined);
+  // BUG-111 (2026-06-06): which evaluator-role buckets the caller can score.
+  const [canScoreTechnical, setCanScoreTechnical] = useState(false);
+  const [canScoreProcurement, setCanScoreProcurement] = useState(false);
   useEffect(() => {
     const token = getAccessToken();
     if (!token) return;
     try {
       const [, payload] = token.split('.');
-      const decoded = JSON.parse(atob(payload)) as { sub?: string; username?: string };
+      const decoded = JSON.parse(atob(payload)) as { sub?: string; username?: string; permissions?: string[] };
       setCurrentUserId(decoded?.sub);
       setCurrentUsername(decoded?.username);
+      const perms = new Set(decoded?.permissions ?? []);
+      setCanScoreTechnical(perms.has('technical:evaluate'));
+      setCanScoreProcurement(perms.has('technical:evaluate:procurement'));
     } catch {
       setCurrentUserId(undefined);
       setCurrentUsername(undefined);
     }
   }, []);
+
+  // BUG-111: filter visible criteria by the caller's role permissions. Users
+  // with both perms see everything; single-role users see only their bucket
+  // plus EITHER. The submit payload also drops criteria the user can't score.
+  function canScoreCriterion(role: EvaluatorRole): boolean {
+    if (role === 'EITHER') return canScoreTechnical || canScoreProcurement;
+    if (role === 'TECHNICAL') return canScoreTechnical;
+    if (role === 'PROCUREMENT') return canScoreProcurement;
+    return false;
+  }
 
   // BUG-057 / WALK-025: lets us auto-flip the recommendation pill to PASS
   // when the overall score crosses ≥70 — but only until the evaluator has
@@ -281,11 +310,18 @@ export default function TechnicalEvaluationPage() {
     const own = currentUserId
       ? evaluations.find(e => e.bidId === selectedBidId && e.evaluatorUserId === currentUserId)
       : undefined;
+    // BUG-111 (2026-06-06): apply role filter so each evaluator only sees the
+    // criteria they're allowed to score. Pre-BUG-111 criteria are all EITHER
+    // so this is a no-op for legacy tenders. SYSTEM_ADMIN (both perms) sees
+    // everything.
+    const visibleTenderCriteria = tenderCriteria.filter(c =>
+      canScoreCriterion(c.evaluatorRole ?? 'EITHER'),
+    );
     if (own && own.criterionScores && own.criterionScores.length > 0) {
       // Hydrate criteria by matching saved rows to the current template by
       // criterion name. Saved scores are normalised 0–100; the form input is
       // an absolute number in 0..maxScore so convert back.
-      const tmpl = emptyCriteria(tenderCriteria);
+      const tmpl = emptyCriteria(visibleTenderCriteria);
       const hydrated = tmpl.map(c => {
         const saved = own.criterionScores!.find(s => s.criterion === c.criterion);
         if (!saved) return c;
@@ -302,7 +338,7 @@ export default function TechnicalEvaluationPage() {
       setNotes(stripped);
       setRecommendationDirty(true);
     } else {
-      setCriteria(emptyCriteria(tenderCriteria));
+      setCriteria(emptyCriteria(visibleTenderCriteria));
       setRecommendation('FAIL');
       setNotes('');
       setRecommendationDirty(false);
@@ -690,14 +726,36 @@ export default function TechnicalEvaluationPage() {
               )}
 
               {/* BUG-074: identify the active evaluator above the scorecard so
-                   committee/audit can see who's filling in scores at a glance. */}
+                   committee/audit can see who's filling in scores at a glance.
+                   BUG-111 (2026-06-06): tag the user's evaluator role so they
+                   know whether they're seeing the Technical or Procurement
+                   portion (or both, for admin users with both perms). */}
               {!PAST_SET.has(selectedTender.status) && currentUsername && (
-                <div className="mb-4 bg-accent/5 border border-accent/30 rounded-xl px-5 py-3 flex items-center gap-3">
+                <div className="mb-4 bg-accent/5 border border-accent/30 rounded-xl px-5 py-3 flex items-center gap-3 flex-wrap">
                   <PenLine className="w-4 h-4 text-accent" />
                   <p className="text-sm text-text-primary">
                     <span className="text-text-secondary">Evaluating as:</span>{' '}
                     <span className="font-bold">{currentUsername}</span>
                   </p>
+                  {(canScoreTechnical || canScoreProcurement) && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-accent/10 text-accent font-semibold">
+                      {canScoreTechnical && canScoreProcurement
+                        ? 'Technical + Procurement (all criteria)'
+                        : canScoreTechnical
+                          ? 'Technical portion'
+                          : 'Procurement portion'}
+                    </span>
+                  )}
+                  {!canScoreTechnical && canScoreProcurement && (
+                    <span className="text-[11px] text-text-secondary">
+                      Technical-only criteria are scored by Technical evaluators.
+                    </span>
+                  )}
+                  {canScoreTechnical && !canScoreProcurement && (
+                    <span className="text-[11px] text-text-secondary">
+                      Procurement-only criteria are scored by Procurement evaluators.
+                    </span>
+                  )}
                 </div>
               )}
 

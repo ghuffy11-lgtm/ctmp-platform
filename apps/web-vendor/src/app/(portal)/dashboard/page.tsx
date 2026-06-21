@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Gavel } from 'lucide-react';
+import { ArrowRight, Gavel, RefreshCw } from 'lucide-react';
 import { get } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { GlassCard } from '@/components/ui/GlassCard';
@@ -34,13 +34,15 @@ export default function VendorDashboardPage() {
   const [tenders, setTenders] = useState<TenderSummary[]>([]);
   const [bids, setBids] = useState<MyBidSummary[]>([]);
   const [vendorName, setVendorName] = useState<string>('there');
+  // BUG-127 (2026-06-11): count of open negotiation invitations.
+  const [pendingNegotiations, setPendingNegotiations] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       const token = getAccessToken();
       try {
-        const [tenderRes, bidRes, me] = await Promise.all([
+        const [tenderRes, bidRes, me, invRes] = await Promise.all([
           get<PaginatedTenders>('/tenders?pageSize=20', token).catch(
             () => ({ data: [], total: 0 } as PaginatedTenders),
           ),
@@ -48,10 +50,14 @@ export default function VendorDashboardPage() {
             () => ({ items: [], total: 0 }),
           ),
           get<{ vendor: { companyName: string } }>('/vendor-auth/me', token).catch(() => null),
+          // BUG-127: open negotiation invitations (non-fatal on failure).
+          get<{ invitations: Array<{ status: 'INVITED' | 'SUBMITTED' }> }>('/vendor/negotiation/invitations', token)
+            .catch(() => ({ invitations: [] })),
         ]);
         setTenders(tenderRes.data ?? []);
         setBids(bidRes.items ?? []);
         if (me?.vendor?.companyName) setVendorName(me.vendor.companyName);
+        setPendingNegotiations((invRes.invitations ?? []).filter(i => i.status === 'INVITED').length);
       } finally {
         setLoading(false);
       }
@@ -76,6 +82,28 @@ export default function VendorDashboardPage() {
         title={`${greeting}, ${vendorName}`}
         subtitle="Active tender opportunities and the status of your bids."
       />
+
+      {/* BUG-127 (2026-06-11): negotiation pending banner. */}
+      {pendingNegotiations > 0 && (
+        <Link
+          href="/bids"
+          className="block rounded-3xl bg-amber-50 border border-amber-200 px-6 py-4 hover:bg-amber-100/70 transition-colors"
+        >
+          <div className="flex items-start gap-4">
+            <div className="text-2xl">🤝</div>
+            <div className="flex-1">
+              <p className="text-base font-bold text-amber-900 flex items-center gap-2">
+                <RefreshCw className="w-4 h-4" />
+                {pendingNegotiations} negotiation invitation{pendingNegotiations === 1 ? '' : 's'} pending
+              </p>
+              <p className="text-sm text-amber-900/80 mt-1 leading-relaxed">
+                Procurement has invited you to revise your commercial proposal. Click here to open My Bids and submit a revised offer.
+              </p>
+            </div>
+            <ArrowRight className="w-5 h-5 text-amber-700 mt-1" />
+          </div>
+        </Link>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
         <Stat label="Active Bids"     value={activeBids}                                              href="/bids"    accent="text-emerald-600" loading={loading} />

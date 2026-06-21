@@ -49,6 +49,11 @@ export class RolesService {
       permissionCount: role._count.rolePermissions,
       userCount: role._count.userRoles,
       isSystem: role.isSystem,
+      // BUG-093 (2026-06-02): admin-configured sidebar entries to hide for
+      // this role. Separate from permissions — data access stays intact.
+      hiddenSidebarItems: role.hiddenSidebarItems ?? [],
+      // BUG-107 Piece 4 (2026-06-05): per-href custom labels for sidebar nav.
+      sidebarLabelOverrides: (role.sidebarLabelOverrides as Record<string, string> | null) ?? {},
       permissions: role.rolePermissions.map(rp => ({
         id: rp.permission.id,
         code: rp.permission.code,
@@ -57,6 +62,85 @@ export class RolesService {
         group: rp.permission.category,
       })),
     };
+  }
+
+  // BUG-093 (2026-06-02): edit a role's sidebar-hide list. Bumps token_version
+  // on every user holding the role so their JWTs refresh on next request and
+  // their sidebar updates immediately. Audited HIGH because it changes UX
+  // visibility (administrative configuration change).
+  async setHiddenSidebar(roleId: string, items: string[], actorUserId?: string) {
+    if (!Array.isArray(items)) {
+      throw new BadRequestException('items must be an array');
+    }
+    const cleanItems = Array.from(new Set(items.filter(s => typeof s === 'string' && s.trim().length > 0)));
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+      select: { id: true, code: true, hiddenSidebarItems: true },
+    });
+    if (!role) throw new NotFoundException('Role not found');
+    await this.prisma.$transaction([
+      this.prisma.role.update({
+        where: { id: roleId },
+        data: { hiddenSidebarItems: cleanItems },
+      }),
+      this.prisma.user.updateMany({
+        where: { userRoles: { some: { roleId } } },
+        data: { tokenVersion: { increment: 1 } },
+      }),
+    ]);
+    await this.audit.log({
+      eventType: 'ROLE_HIDDEN_SIDEBAR_UPDATED',
+      entityType: 'Role',
+      entityId: roleId,
+      actorUserId,
+      beforeValue: { items: role.hiddenSidebarItems ?? [] },
+      afterValue: { items: cleanItems },
+      riskLevel: AuditRiskLevel.HIGH,
+    });
+    return { hiddenSidebarItems: cleanItems };
+  }
+
+  // BUG-107 Piece 4 (2026-06-05): edit a role's per-href sidebar label
+  // overrides. Same audit + token-bump pattern as setHiddenSidebar so the
+  // change shows up immediately for affected users on next request.
+  async setSidebarLabelOverrides(roleId: string, overrides: Record<string, string>, actorUserId?: string) {
+    if (overrides == null || typeof overrides !== 'object' || Array.isArray(overrides)) {
+      throw new BadRequestException('overrides must be a non-array object');
+    }
+    const clean: Record<string, string> = {};
+    for (const [href, label] of Object.entries(overrides)) {
+      if (typeof href !== 'string' || typeof label !== 'string') continue;
+      const h = href.trim();
+      const l = label.trim();
+      if (!h || !l) continue;
+      // Cap label length to keep sidebar layout stable.
+      clean[h] = l.slice(0, 64);
+    }
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+      select: { id: true, code: true, sidebarLabelOverrides: true },
+    });
+    if (!role) throw new NotFoundException('Role not found');
+    await this.prisma.$transaction([
+      this.prisma.role.update({
+        where: { id: roleId },
+        data: { sidebarLabelOverrides: clean },
+      }),
+      this.prisma.user.updateMany({
+        where: { userRoles: { some: { roleId } } },
+        data: { tokenVersion: { increment: 1 } },
+      }),
+    ]);
+    await this.audit.log({
+      eventType: 'ROLE_SIDEBAR_LABELS_UPDATED',
+      entityType: 'Role',
+      entityId: roleId,
+      actorUserId,
+      beforeValue: { overrides: (role.sidebarLabelOverrides as Record<string, string> | null) ?? {} },
+      afterValue: { overrides: clean },
+      riskLevel: AuditRiskLevel.HIGH,
+    });
+    return { sidebarLabelOverrides: clean };
   }
 
   // WALK-035 / BUG-067: admin-driven role creation. Inserts a non-system

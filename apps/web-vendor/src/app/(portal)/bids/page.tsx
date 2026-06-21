@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Package } from 'lucide-react';
+import { Package, RefreshCw } from 'lucide-react';
 import { get } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { GlassCard } from '@/components/ui/GlassCard';
@@ -25,8 +25,19 @@ interface MyBidSummary {
   receiptNumber?: string;
 }
 
+// BUG-127 (2026-06-11): open negotiation invitations for this vendor user.
+interface NegotiationInvitation {
+  id: string;
+  status: 'INVITED' | 'SUBMITTED';
+  bidId: string;
+  tenderId: string;
+  roundNumber: number;
+}
+
 export default function VendorBidsPage() {
   const [bids, setBids] = useState<MyBidSummary[]>([]);
+  // BUG-127: map of bidId → open negotiation invitation (if any).
+  const [openInviteByBidId, setOpenInviteByBidId] = useState<Map<string, NegotiationInvitation>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,11 +47,21 @@ export default function VendorBidsPage() {
       setError(null);
       try {
         const token = getAccessToken();
-        const res = await get<{ items: MyBidSummary[]; total: number }>(
-          '/vendor-auth/me/bids?pageSize=100',
-          token,
-        );
-        setBids(res.items ?? []);
+        // BUG-127: fetch bids + open negotiation invitations in parallel so
+        // the page can surface a chip when the vendor is mid-negotiation on
+        // a bid. Failure on the invitations call is non-fatal (the bid list
+        // still renders without the chip).
+        const [bidRes, invRes] = await Promise.all([
+          get<{ items: MyBidSummary[]; total: number }>('/vendor-auth/me/bids?pageSize=100', token),
+          get<{ invitations: NegotiationInvitation[] }>('/vendor/negotiation/invitations', token)
+            .catch(() => ({ invitations: [] })),
+        ]);
+        setBids(bidRes.items ?? []);
+        const map = new Map<string, NegotiationInvitation>();
+        for (const inv of invRes.invitations ?? []) {
+          if (inv.status === 'INVITED') map.set(inv.bidId, inv);
+        }
+        setOpenInviteByBidId(map);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load bids');
       } finally {
@@ -70,6 +91,21 @@ export default function VendorBidsPage() {
       </div>
 
       {error && <ErrorBanner message={error} />}
+
+      {/* BUG-127 (2026-06-11): banner when any bid has an open negotiation invite. */}
+      {openInviteByBidId.size > 0 && (
+        <div className="rounded-3xl bg-amber-50 border border-amber-200 px-6 py-4 flex items-start gap-4">
+          <div className="text-2xl">🤝</div>
+          <div>
+            <p className="text-base font-bold text-amber-900">
+              Negotiation pending on {openInviteByBidId.size} bid{openInviteByBidId.size === 1 ? '' : 's'}
+            </p>
+            <p className="text-sm text-amber-900/80 mt-1 leading-relaxed">
+              Procurement has invited you to revise your commercial proposal. Open the affected bid below and use the Negotiation Rounds section to submit a new BoQ + commercial PDF.
+            </p>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <Loading />
@@ -111,6 +147,15 @@ export default function VendorBidsPage() {
                     </td>
                     <td className="py-5 px-8 align-top">
                       <StatusBadge status={b.status} />
+                      {/* BUG-127 (2026-06-11): negotiation chip when an open
+                          invitation exists for this bid. Distinct amber so it
+                          reads as "action needed". */}
+                      {openInviteByBidId.has(b.id) && (
+                        <div className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-900 text-[10px] font-bold uppercase tracking-wider">
+                          <RefreshCw className="w-3 h-3" />
+                          Negotiation R{openInviteByBidId.get(b.id)!.roundNumber}
+                        </div>
+                      )}
                       {b.receiptNumber && (
                         <div className="text-[10px] font-mono text-slate-900/50 mt-2">{b.receiptNumber}</div>
                       )}

@@ -92,7 +92,8 @@ export default function TendersPage() {
     try {
       const token = getAccessToken();
       const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-      if (debouncedSearch) params.set('q', debouncedSearch);
+      // BUG-112 (2026-06-07) Piece 2: backend DTO whitelists `search`, not `q`.
+      if (debouncedSearch) params.set('search', debouncedSearch);
       if (status) params.set('status', status);
       const result = await get<PaginatedTenders>(`/tenders?${params}`, token);
       setData(result);

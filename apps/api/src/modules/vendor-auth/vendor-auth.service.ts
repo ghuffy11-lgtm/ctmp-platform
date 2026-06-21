@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, randomUUID, createHash } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { TOTP } from 'otplib';
 import { AuditRiskLevel, EnvelopeType, Prisma } from '@prisma/client';
@@ -15,6 +15,9 @@ import { PrismaService } from '../../database/prisma.service';
 import { CaptchaService } from '../../common/services/captcha.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
+import { SystemSettingsService } from '../system-settings/system-settings.service';
+import { VendorDocumentStorageService } from '../vendors/vendor-document-storage.service';
+import { VENDOR_DOC_TYPES, vendorDocTypeByCode } from './vendor-document-types';
 import { VendorRegisterDto } from './dto/vendor-register.dto';
 import { VendorLoginDto } from './dto/vendor-login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
@@ -28,9 +31,37 @@ export interface RequestContext {
   userAgent?: string | null;
 }
 
+// BUG-137 (2026-06-19): pre-registration documents are uploaded anonymously
+// (the vendor isn't authenticated yet — they're filling out the form). The
+// upload endpoint stashes the raw bytes in storage + a pending entry in this
+// in-memory map keyed by documentId. The submit-register call references the
+// documentIds; the service moves the storage object into the vendor's tenant
+// path + creates a VendorDocument row, then drops the pending entry.
+// 15-minute TTL — abandoned uploads are GC'd by gcPending().
+//
+// Same pattern as BUG-129's NegotiationService.pendingPdfs.
+interface PendingVendorDoc {
+  documentId: string;
+  storageKey: string;       // pending/<docId>-<name>
+  originalFilename: string;
+  fileSize: number;
+  checksumSha256: string;
+  uploadedAt: number;       // epoch ms
+}
+const PENDING_TTL_MS = 15 * 60 * 1000;
+
 @Injectable()
 export class VendorAuthService {
   private readonly logger = new Logger(VendorAuthService.name);
+
+  private static readonly pendingDocs = new Map<string, PendingVendorDoc>();
+
+  private static gcPending(): void {
+    const cutoff = Date.now() - PENDING_TTL_MS;
+    for (const [id, doc] of VendorAuthService.pendingDocs) {
+      if (doc.uploadedAt < cutoff) VendorAuthService.pendingDocs.delete(id);
+    }
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -39,7 +70,70 @@ export class VendorAuthService {
     private readonly captcha: CaptchaService,
     private readonly notifications: NotificationsService,
     private readonly audit: AuditService,
+    private readonly settings: SystemSettingsService,
+    // BUG-137: anonymous registration document storage.
+    private readonly docStorage: VendorDocumentStorageService,
   ) {}
+
+  // ------------------------------------------------- BUG-137 doc upload
+  async uploadRegistrationDocument(file: {
+    originalname: string;
+    mimetype: string;
+    size: number;
+    buffer: Buffer;
+  }): Promise<{ documentId: string; filename: string; sha256: string; fileSize: number }> {
+    if (!file) throw new BadRequestException('File is required');
+    if (file.mimetype !== 'application/pdf') {
+      throw new BadRequestException('Only PDF files are accepted for vendor registration documents.');
+    }
+    const head = file.buffer?.subarray(0, 5).toString('ascii');
+    if (head !== '%PDF-') {
+      throw new BadRequestException('File does not appear to be a valid PDF.');
+    }
+    const MAX = 10 * 1024 * 1024;
+    if (file.size > MAX) {
+      throw new BadRequestException('File exceeds 10 MB limit.');
+    }
+    VendorAuthService.gcPending();
+    const documentId = randomUUID();
+    const result = await this.docStorage.write({
+      keyPrefix: 'pending',
+      docId: documentId,
+      originalFilename: file.originalname,
+      payload: file.buffer,
+      mimeType: file.mimetype,
+    });
+    VendorAuthService.pendingDocs.set(documentId, {
+      documentId,
+      storageKey: result.storageKey,
+      originalFilename: file.originalname,
+      fileSize: result.fileSize,
+      checksumSha256: result.checksumSha256,
+      uploadedAt: Date.now(),
+    });
+    return {
+      documentId,
+      filename: file.originalname,
+      sha256: result.checksumSha256,
+      fileSize: result.fileSize,
+    };
+  }
+
+  // BUG-112 (2026-06-07) Piece 4: mirror of admin auth helper. Read configured
+  // idle timeout from system_settings (default 30) so the vendor JWT carries
+  // the same `idleTimeoutMinutes` claim the admin JWT does. Reads via prisma
+  // directly since SystemSettingsService doesn't expose a single-key getter.
+  private async loadIdleTimeoutMinutes(): Promise<number> {
+    try {
+      const row = await this.prisma.systemSetting.findUnique({
+        where: { key: 'session.idle_timeout_minutes' },
+      });
+      const n = row?.value ? Number(row.value) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : 30;
+    } catch {
+      return 30;
+    }
+  }
 
   // ---------------------------------------------------------------- register
   async register(dto: VendorRegisterDto, ctx: RequestContext = {}) {
@@ -54,6 +148,33 @@ export class VendorAuthService {
     const existing = await this.prisma.vendorUser.findUnique({ where: { email: dto.email } });
     if (existing) throw new BadRequestException('Email already registered');
 
+    // BUG-137 (2026-06-19): validate that every REQUIRED registration document
+    // type is present + every referenced documentId resolves to a pending
+    // upload. Multi-type ("OTHER") may appear multiple times.
+    VendorAuthService.gcPending();
+    const docs = dto.documents ?? [];
+    const typesPresent = new Set(docs.map(d => d.type));
+    for (const t of VENDOR_DOC_TYPES) {
+      if (t.required && !typesPresent.has(t.code)) {
+        throw new BadRequestException(`Missing required registration document: ${t.label}`);
+      }
+    }
+    const resolvedDocs: Array<{
+      type: string;
+      pending: PendingVendorDoc;
+    }> = [];
+    for (const d of docs) {
+      const typeDef = vendorDocTypeByCode(d.type);
+      if (!typeDef) throw new BadRequestException(`Unknown document type: ${d.type}`);
+      const pending = VendorAuthService.pendingDocs.get(d.documentId);
+      if (!pending) {
+        throw new BadRequestException(
+          `Document reference is invalid or expired: re-upload "${typeDef.label}" and try again.`,
+        );
+      }
+      resolvedDocs.push({ type: d.type, pending });
+    }
+
     const rounds = this.bcryptRounds();
     const passwordHash = await bcrypt.hash(dto.password, rounds);
 
@@ -65,9 +186,9 @@ export class VendorAuthService {
       const vendor = await tx.vendor.create({
         data: {
           companyName: dto.companyName,
-          registrationNumber: dto.registrationNumber ?? null,
-          taxNumber: dto.taxNumber ?? null,
-          country: dto.country ?? null,
+          // BUG-101 (2026-06-04): registrationNumber / taxNumber / country no
+          // longer collected at registration intake — set later if needed.
+          website: dto.website ?? null,
           address: dto.address ?? null,
           phone: dto.phone ?? null,
           status: 'PENDING',
@@ -83,6 +204,25 @@ export class VendorAuthService {
           isPrimaryContact: true,
         },
       });
+
+      // BUG-137 (2026-06-19): persist VendorDocument rows. The pending
+      // storage key (under `pending/...`) is reused as-is; the file content
+      // is the same. We just record the row with vendor + type. No move
+      // between namespaces needed.
+      for (const r of resolvedDocs) {
+        await tx.vendorDocument.create({
+          data: {
+            vendorId: vendor.id,
+            documentType: r.type,
+            originalFilename: r.pending.originalFilename,
+            storageKey: r.pending.storageKey,
+            mimeType: 'application/pdf',
+            fileSize: BigInt(r.pending.fileSize),
+            checksumSha256: r.pending.checksumSha256,
+            uploadedByVendorUserId: vendorUser.id,
+          },
+        });
+      }
 
       const req = await tx.vendorRegistrationRequest.create({
         data: {
@@ -103,7 +243,21 @@ export class VendorAuthService {
       return req;
     });
 
-    await this.notifications.sendEmail(dto.email, 'vendor-verify-email', { token: rawToken });
+    // BUG-137: drop pending references so the in-memory map doesn't grow.
+    // The storage objects themselves are now owned by the persisted rows.
+    for (const r of resolvedDocs) {
+      VendorAuthService.pendingDocs.delete(r.pending.documentId);
+    }
+
+    // BUG-144 (2026-06-19): template body references {{verifyUrl}} — compute
+    // it server-side from the registered config so the email always carries an
+    // absolute link the vendor can click.
+    const portalUrl = this.config.get<string>('app.vendorPortalUrl') ?? '';
+    const verifyUrl = `${portalUrl}/verify-email?token=${rawToken}`;
+    await this.notifications.sendEmail(dto.email, 'vendor-verify-email', {
+      token: rawToken,
+      verifyUrl,
+    });
 
     return { registrationId: registration.id, status: 'PENDING_VERIFICATION' };
   }
@@ -113,9 +267,22 @@ export class VendorAuthService {
     const tokenHash = this.hashToken(dto.token);
     const record = await this.prisma.vendorEmailVerificationToken.findUnique({ where: { tokenHash } });
 
-    if (!record) throw new BadRequestException('Invalid verification token');
-    if (record.usedAt) throw new BadRequestException('Verification token already used');
-    if (record.expiresAt < new Date()) throw new BadRequestException('Verification token expired');
+    // BUG-151 (2026-06-22): collapse 3 distinct rejection messages into 1
+    // generic message so an attacker can't use error-type to fingerprint a
+    // captured token's state (invalid vs used vs expired). Detailed reason
+    // kept in server log for support diagnostics.
+    if (!record) {
+      this.logger.warn('verifyEmail: token not found');
+      throw new BadRequestException('Invalid or expired verification token');
+    }
+    if (record.usedAt) {
+      this.logger.warn(`verifyEmail: token already used (id=${record.id})`);
+      throw new BadRequestException('Invalid or expired verification token');
+    }
+    if (record.expiresAt < new Date()) {
+      this.logger.warn(`verifyEmail: token expired (id=${record.id})`);
+      throw new BadRequestException('Invalid or expired verification token');
+    }
 
     await this.prisma.vendorEmailVerificationToken.update({
       where: { id: record.id },
@@ -193,8 +360,9 @@ export class VendorAuthService {
     if (!user) throw new UnauthorizedException('Vendor user not found');
     if (payload.version !== user.tokenVersion) throw new UnauthorizedException('Refresh token revoked');
 
+    const idleTimeoutMinutes = await this.loadIdleTimeoutMinutes();
     const accessToken = this.jwt.sign(
-      { sub: user.id, email: user.email, vendorId: user.vendorId, type: 'vendor' },
+      { sub: user.id, email: user.email, vendorId: user.vendorId, idleTimeoutMinutes, type: 'vendor' },
       {
         secret: this.config.get<string>('jwt.vendorSecret'),
         expiresIn: this.config.get<string>('jwt.vendorExpiresIn') as never,
@@ -204,9 +372,58 @@ export class VendorAuthService {
   }
 
   // --------------------------------------------------------- forgotPassword
+  // BUG-151 (2026-06-22): bot-flood + abuse hardening pack:
+  //   (a) CAPTCHA validated at the top — refuses anonymous bot traffic
+  //       cheaply before any DB / SMTP work.
+  //   (b) Per-email cooldown — if a real reset was issued for this email in
+  //       the last 60s, the request returns 204 without touching DB or SMTP.
+  //       Anti-flood for vendors who already have a fresh token.
+  //   (c) Audit log every attempt with sha256(email) (not the raw email) so
+  //       the audit trail is searchable but isn't itself an enumeration
+  //       oracle.
+  //   (d) SMTP send is fire-and-forget via setImmediate so the response time
+  //       is identical for hit vs miss — kills the timing-based enumeration
+  //       oracle the synchronous await previously created.
+  //   (e) Controller-level @Throttle({ 3/60s, 10/h }) caps per-IP volume.
+  // Response remains 204 in both branches — no body-level enumeration.
   async forgotPassword(dto: ForgotPasswordDto, ctx: RequestContext = {}) {
+    // (a) CAPTCHA first — anonymous endpoint.
+    const captcha = await this.captcha.validate({
+      token: dto.captchaToken,
+      action: 'vendor_forgot_password',
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
+    if (!captcha.verified) {
+      throw new BadRequestException('CAPTCHA verification failed');
+    }
+
+    // (c) Audit attempt — email hashed so audit table isn't an enumeration
+    // oracle. Email lowercased before hash so casing doesn't fragment.
+    const emailHashFull = createHash('sha256').update(dto.email.toLowerCase()).digest('hex');
+    const emailHash = emailHashFull.slice(0, 16);
+    await this.audit.log({
+      eventType: 'VENDOR_PASSWORD_RESET_REQUESTED',
+      entityType: 'VendorUser',
+      // entityId intentionally omitted — we audit the request itself, not
+      // any specific vendor user (the email hash carries the identifier).
+      metadata: { emailHash, captchaLogId: String(captcha.logId ?? '') },
+      riskLevel: AuditRiskLevel.LOW,
+    });
+
     const user = await this.prisma.vendorUser.findUnique({ where: { email: dto.email } });
     if (!user) return;
+
+    // (b) Per-email cooldown: if a real token was issued in the last 60s,
+    // suppress send + DB write but still return 204 so the response shape
+    // is identical (no enumeration channel via "we just sent one").
+    const recentToken = await this.prisma.vendorPasswordResetToken.findFirst({
+      where: { vendorUserId: user.id, usedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (recentToken && Date.now() - recentToken.createdAt.getTime() < 60_000) {
+      return;
+    }
 
     const { rawToken, tokenHash } = this.newToken();
     const ttlMin = Number(this.config.get<string>('auth.resetPasswordTtlMinutes') ?? 60);
@@ -223,9 +440,18 @@ export class VendorAuthService {
     });
 
     // BUG-030: pass the full reset URL so templates can render a clickable link.
-    const portalUrl = this.config.get<string>('vendor.portalUrl') ?? 'https://vn.hadiclinic.com.kw:4201';
-    const resetUrl = `${portalUrl.replace(/\/$/, '')}/reset-password?token=${rawToken}`;
-    await this.notifications.sendEmail(user.email, 'vendor-reset-password', { token: rawToken, resetUrl });
+    // BUG-144 (2026-06-19): use the registered app.vendorPortalUrl (always
+    // present with a hardcoded staging default) so the link is always absolute.
+    const portalUrl = this.config.get<string>('app.vendorPortalUrl') ?? '';
+    const resetUrl = `${portalUrl}/reset-password?token=${rawToken}`;
+    // (d) Fire-and-forget so response time is independent of SMTP latency
+    // — kills the wall-clock timing oracle (~5ms miss vs ~200ms hit).
+    const userEmail = user.email;
+    setImmediate(() => {
+      this.notifications
+        .sendEmail(userEmail, 'vendor-reset-password', { token: rawToken, resetUrl })
+        .catch(err => this.logger.warn(`vendor-reset-password send failed for ${emailHash}: ${(err as Error).message}`));
+    });
   }
 
   // ---------------------------------------------------------- resetPassword
@@ -233,9 +459,19 @@ export class VendorAuthService {
     const tokenHash = this.hashToken(dto.token);
     const record = await this.prisma.vendorPasswordResetToken.findUnique({ where: { tokenHash } });
 
-    if (!record) throw new BadRequestException('Invalid reset token');
-    if (record.usedAt) throw new BadRequestException('Reset token already used');
-    if (record.expiresAt < new Date()) throw new BadRequestException('Reset token expired');
+    // BUG-151 (2026-06-22): same generic-message treatment as verifyEmail.
+    if (!record) {
+      this.logger.warn('resetPassword: token not found');
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+    if (record.usedAt) {
+      this.logger.warn(`resetPassword: token already used (id=${record.id})`);
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+    if (record.expiresAt < new Date()) {
+      this.logger.warn(`resetPassword: token expired (id=${record.id})`);
+      throw new BadRequestException('Invalid or expired reset token');
+    }
 
     const passwordHash = await bcrypt.hash(dto.newPassword, this.bcryptRounds());
 
@@ -292,9 +528,10 @@ export class VendorAuthService {
     });
   }
 
-  private issueTokens(user: { id: string; email: string; vendorId: string; tokenVersion: number }) {
+  private async issueTokens(user: { id: string; email: string; vendorId: string; tokenVersion: number }) {
+    const idleTimeoutMinutes = await this.loadIdleTimeoutMinutes();
     const accessToken = this.jwt.sign(
-      { sub: user.id, email: user.email, vendorId: user.vendorId, type: 'vendor' },
+      { sub: user.id, email: user.email, vendorId: user.vendorId, idleTimeoutMinutes, type: 'vendor' },
       {
         secret: this.config.get<string>('jwt.vendorSecret'),
         expiresIn: this.config.get<string>('jwt.vendorExpiresIn') as never,

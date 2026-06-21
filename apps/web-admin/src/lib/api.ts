@@ -1,5 +1,11 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
+// BUG-107 Piece 3 (2026-06-05): full URL for asset paths (logos, etc) so
+// <img src> can resolve regardless of the page's own origin.
+export function assetUrl(path: string): string {
+  return `${API_BASE}/api/v1${path.startsWith('/') ? path : '/' + path}`;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -18,6 +24,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
     credentials: 'include',
   });
+
+  // BUG-112 (2026-06-07) Piece 4: when the server reports the JWT is no
+  // longer valid (expired / revoked / token-version bump), clear the
+  // client tokens and bounce to login so the user isn't stranded in a
+  // half-broken UI. Skip on the /login endpoint itself so a bad password
+  // surfaces as a 401 message instead of a redirect loop.
+  if (res.status === 401 && typeof window !== 'undefined' && !path.startsWith('/auth/login')) {
+    const { clearTokens } = await import('./auth');
+    clearTokens();
+    if (!window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login?reason=expired';
+    }
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: res.statusText }));

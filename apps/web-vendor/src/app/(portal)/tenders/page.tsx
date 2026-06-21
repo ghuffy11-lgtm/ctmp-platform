@@ -26,10 +26,20 @@ interface PaginatedTenders {
   total: number;
 }
 
+// BUG-110 (2026-06-05): owner replaced BUG-109's left side panel with a
+// single-select dropdown beside the search bar.
+const UNCATEGORISED = 'Uncategorised';
+
+function categoryOf(t: TenderSummary): string {
+  return t.category && t.category.trim() !== '' ? t.category : UNCATEGORISED;
+}
+
 export default function VendorTendersPage() {
   const [tenders, setTenders] = useState<TenderSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  // BUG-110: single category, empty string = "All categories".
+  const [category, setCategory] = useState<string>('');
 
   useEffect(() => {
     async function load() {
@@ -46,15 +56,37 @@ export default function VendorTendersPage() {
     load();
   }, []);
 
+  // BUG-110: derive available categories + counts. Sorted alphabetically,
+  // "Uncategorised" pinned last when present.
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of tenders) {
+      const c = categoryOf(t);
+      counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    const list = Array.from(counts.entries()).map(([cat, count]) => ({ cat, count }));
+    list.sort((a, b) => {
+      if (a.cat === UNCATEGORISED) return 1;
+      if (b.cat === UNCATEGORISED) return -1;
+      return a.cat.localeCompare(b.cat);
+    });
+    return list;
+  }, [tenders]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return tenders;
-    return tenders.filter(t =>
-      t.title.toLowerCase().includes(q) ||
-      t.referenceNumber.toLowerCase().includes(q) ||
-      (t.departmentName?.toLowerCase().includes(q) ?? false),
-    );
-  }, [tenders, search]);
+    return tenders.filter(t => {
+      if (q) {
+        const matchesSearch =
+          t.title.toLowerCase().includes(q) ||
+          t.referenceNumber.toLowerCase().includes(q) ||
+          (t.departmentName?.toLowerCase().includes(q) ?? false);
+        if (!matchesSearch) return false;
+      }
+      if (category && categoryOf(t) !== category) return false;
+      return true;
+    });
+  }, [tenders, search, category]);
 
   return (
     <div className="space-y-10">
@@ -62,15 +94,31 @@ export default function VendorTendersPage() {
         title="Public Tenders"
         subtitle={`${tenders.length} ${tenders.length === 1 ? 'opportunity' : 'opportunities'} available`}
         actions={
-          <div className="relative w-full md:w-96">
-            <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-900/50 pointer-events-none" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search tenders..."
-              className="input-field w-full rounded-3xl pl-12 pr-6 py-4 text-sm"
-            />
+          <div className="flex items-stretch gap-3 w-full md:w-auto">
+            <div className="relative flex-1 md:w-80">
+              <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-900/50 pointer-events-none" />
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search tenders..."
+                className="input-field w-full rounded-3xl pl-12 pr-6 py-4 text-sm"
+              />
+            </div>
+            {/* BUG-110: single-select category dropdown beside the search input. */}
+            <select
+              value={category}
+              onChange={e => setCategory(e.target.value)}
+              className="input-field rounded-3xl px-5 py-4 text-sm shrink-0 w-full md:w-56"
+              aria-label="Filter by category"
+            >
+              <option value="">All categories</option>
+              {categoryOptions.map(({ cat, count }) => (
+                <option key={cat} value={cat}>
+                  {cat} ({count})
+                </option>
+              ))}
+            </select>
           </div>
         }
       />
@@ -80,10 +128,10 @@ export default function VendorTendersPage() {
       ) : filtered.length === 0 ? (
         <Empty
           icon={Gavel}
-          title={search ? 'No matching tenders' : 'No tenders available'}
+          title={search || category ? 'No matching tenders' : 'No tenders available'}
           description={
-            search
-              ? 'Try a different search term or clear the filter.'
+            search || category
+              ? 'Try a different search term or category.'
               : 'There are no open tenders right now. Check back soon.'
           }
         />

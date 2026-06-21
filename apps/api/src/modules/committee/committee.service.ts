@@ -5,6 +5,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { RecordAttendanceDto } from './dto/record-attendance.dto';
+import { AmendSessionDto } from './dto/amend-session.dto';
 
 @Injectable()
 export class CommitteeService {
@@ -104,6 +105,160 @@ export class CommitteeService {
     }
   }
 
+  // BUG-097 (2026-06-03): allow rescheduling a session before it's been
+  // completed (i.e. commercial envelopes opened). Date / time / location are
+  // editable; member list stays untouched.
+  async reschedule(
+    sessionId: string,
+    body: { scheduledAt?: string; location?: string },
+    userId: string,
+  ) {
+    const session = await this.prisma.committeeSession.findUnique({
+      where: { id: sessionId },
+      select: { id: true, status: true, scheduledAt: true, location: true },
+    });
+    if (!session) throw new NotFoundException('Committee session not found');
+    if (session.status === CommitteeSessionStatus.COMPLETED) {
+      throw new BadRequestException('Session is already completed — cannot reschedule.');
+    }
+    const data: { scheduledAt?: Date; location?: string | null } = {};
+    if (body.scheduledAt) {
+      const d = new Date(body.scheduledAt);
+      if (Number.isNaN(d.getTime())) {
+        throw new BadRequestException('Invalid scheduledAt — expected ISO 8601 timestamp.');
+      }
+      data.scheduledAt = d;
+    }
+    if (body.location !== undefined) {
+      data.location = body.location?.trim() ? body.location.trim() : null;
+    }
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException('Nothing to update — provide scheduledAt and/or location.');
+    }
+    const updated = await this.prisma.committeeSession.update({
+      where: { id: sessionId },
+      data,
+    });
+    await this.audit.log({
+      eventType: 'COMMITTEE_SESSION_RESCHEDULED',
+      entityType: 'CommitteeSession',
+      entityId: sessionId,
+      actorUserId: userId,
+      beforeValue: { scheduledAt: session.scheduledAt?.toISOString(), location: session.location },
+      afterValue: { scheduledAt: updated.scheduledAt?.toISOString(), location: updated.location },
+      riskLevel: AuditRiskLevel.MEDIUM,
+    });
+    return this.findOne(sessionId);
+  }
+
+  // BUG-148 (2026-06-21): post-hoc session amendment for the case where
+  // commercial envelopes have already opened with imperfect attendance /
+  // quorum config and the award stage is now blocked. Authorised admin can
+  // (a) lower required_quorum_count, (b) change required_role_code, or
+  // (c) toggle attendance. Reason text mandatory; HIGH audit row carries
+  // before+after snapshot. Same permission as createSession.
+  async amendSession(sessionId: string, dto: AmendSessionDto, userId: string) {
+    const session = await this.prisma.committeeSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        committeeMembers: {
+          include: {
+            user: { select: { displayName: true } },
+            attendances: { select: { present: true } },
+          },
+        },
+      },
+    });
+    if (!session) throw new NotFoundException('Committee session not found');
+
+    // Capture before-state for the audit row.
+    const beforeAttendance = session.committeeMembers.map(m => ({
+      memberId: m.id,
+      userId: m.userId,
+      displayName: m.user?.displayName ?? null,
+      present: m.attendances[0]?.present === true,
+    }));
+    const beforeValue = {
+      requiredQuorumCount: session.requiredQuorumCount,
+      requiredRoleCode: session.requiredRoleCode,
+      attendance: beforeAttendance,
+    };
+
+    const updates: Array<Promise<any>> = [];
+
+    // Session config updates (quorum count / role code).
+    const sessionPatch: Record<string, any> = {};
+    if (dto.requiredQuorumCount !== undefined) {
+      sessionPatch.requiredQuorumCount = dto.requiredQuorumCount;
+    }
+    if (dto.requiredRoleCode !== undefined) {
+      sessionPatch.requiredRoleCode = dto.requiredRoleCode;
+    }
+
+    // Attendance replace (mark listed user-ids present, others absent).
+    let attendanceUpdated = false;
+    let newAttendanceRows: Array<{ sessionId: string; memberId: string; present: boolean; recordedBy: string }> = [];
+    if (dto.attendeeIds) {
+      const attendeeSet = new Set(dto.attendeeIds);
+      newAttendanceRows = session.committeeMembers.map(m => ({
+        sessionId,
+        memberId: m.id,
+        present: attendeeSet.has(m.userId),
+        recordedBy: userId,
+      }));
+      attendanceUpdated = true;
+    }
+
+    await this.prisma.$transaction([
+      ...(Object.keys(sessionPatch).length > 0
+        ? [this.prisma.committeeSession.update({ where: { id: sessionId }, data: sessionPatch })]
+        : []),
+      ...(attendanceUpdated
+        ? [
+            this.prisma.committeeAttendance.deleteMany({ where: { sessionId } }),
+            this.prisma.committeeAttendance.createMany({ data: newAttendanceRows }),
+          ]
+        : []),
+    ]);
+
+    // Re-read for the after-state snapshot.
+    const after = await this.prisma.committeeSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        committeeMembers: {
+          include: {
+            user: { select: { displayName: true } },
+            attendances: { select: { present: true } },
+          },
+        },
+      },
+    });
+    const afterAttendance = (after?.committeeMembers ?? []).map(m => ({
+      memberId: m.id,
+      userId: m.userId,
+      displayName: m.user?.displayName ?? null,
+      present: m.attendances[0]?.present === true,
+    }));
+    const afterValue = {
+      requiredQuorumCount: after?.requiredQuorumCount,
+      requiredRoleCode: after?.requiredRoleCode,
+      attendance: afterAttendance,
+    };
+
+    await this.audit.log({
+      eventType: 'COMMITTEE_SESSION_AMENDED',
+      entityType: 'CommitteeSession',
+      entityId: sessionId,
+      tenderId: session.tenderId,
+      actorUserId: userId,
+      beforeValue,
+      afterValue: { ...afterValue, reason: dto.reason },
+      riskLevel: AuditRiskLevel.HIGH,
+    });
+
+    return this.findOne(sessionId);
+  }
+
   async recordAttendance(sessionId: string, dto: RecordAttendanceDto, userId: string) {
     const session = await this.prisma.committeeSession.findUnique({
       where: { id: sessionId },
@@ -172,10 +327,30 @@ export class CommitteeService {
       });
     }
 
-    // Quorum: majority of committee members marked present.
-    const present = session.committeeMembers.filter(m => m.attendances[0]?.present === true).length;
-    if (present * 2 < session.committeeMembers.length) {
-      throw new BadRequestException(`Quorum not met (${present}/${session.committeeMembers.length})`);
+    // BUG-148 (2026-06-21): unified quorum rule. The pre-BUG-148 majority
+    // rule (`present * 2 >= members.length`) would let opening succeed with
+    // 3 of 4 members present even when the session was configured with
+    // `required_quorum_count = 4`, and the award stage would then block
+    // with "Need 1 more member(s) present". Both gates now consult the
+    // same `required_quorum_count` + `required_role_code` fields so they
+    // never disagree. Falls back to majority when required_quorum_count is
+    // unset (legacy sessions).
+    const presentCount = session.committeeMembers.filter(m => m.attendances[0]?.present === true).length;
+    const requiredCount = session.requiredQuorumCount ?? Math.ceil(session.committeeMembers.length / 2);
+    const requiredRoleCode = session.requiredRoleCode ?? 'CHAIR';
+    const quorumReasons: string[] = [];
+    if (presentCount < requiredCount) {
+      quorumReasons.push(`Need ${requiredCount - presentCount} more member(s) present (${presentCount}/${requiredCount})`);
+    }
+    const chairMember = session.committeeMembers.find(m => m.isChair);
+    const requiredRolePresent = requiredRoleCode === 'CHAIR'
+      ? !!chairMember && chairMember.attendances[0]?.present === true
+      : session.committeeMembers.some(m => m.roleInCommittee === requiredRoleCode && m.attendances[0]?.present === true);
+    if (!requiredRolePresent) {
+      quorumReasons.push(`${requiredRoleCode} must be present`);
+    }
+    if (quorumReasons.length > 0) {
+      throw new BadRequestException(`Quorum not met: ${quorumReasons.join(' + ')}`);
     }
 
     const now = new Date();

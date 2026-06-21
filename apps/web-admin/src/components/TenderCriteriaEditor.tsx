@@ -14,6 +14,10 @@ interface LibraryEntry {
   defaultIsGate: boolean;
 }
 
+// BUG-111 (2026-06-06): per-criterion evaluator role. EITHER preserves
+// back-compat for any criterion that pre-dates this feature.
+type EvaluatorRole = 'TECHNICAL' | 'PROCUREMENT' | 'EITHER';
+
 interface CriterionRow {
   id?: string; // existing criteria carry their server id
   code: string;
@@ -22,6 +26,7 @@ interface CriterionRow {
   maxScore: string;
   weight: string;
   mandatory: boolean;
+  evaluatorRole: EvaluatorRole;
 }
 
 interface Props {
@@ -61,7 +66,7 @@ export function TenderCriteriaEditor({ tenderId, editable }: Props) {
     try {
       const token = getAccessToken();
       const [crits, lib] = await Promise.all([
-        get<Array<{ id: string; code: string; name: string; description: string | null; maxScore: number; weight: number | null; mandatory: boolean }>>(`/tenders/${tenderId}/criteria`, token),
+        get<Array<{ id: string; code: string; name: string; description: string | null; maxScore: number; weight: number | null; mandatory: boolean; evaluatorRole?: EvaluatorRole }>>(`/tenders/${tenderId}/criteria`, token),
         get<LibraryEntry[]>(`/evaluation-criteria/library`, token).catch(() => []),
       ]);
       setRows(crits.map(c => ({
@@ -72,6 +77,7 @@ export function TenderCriteriaEditor({ tenderId, editable }: Props) {
         maxScore: String(c.maxScore),
         weight: c.weight != null ? String(c.weight) : '0',
         mandatory: c.mandatory,
+        evaluatorRole: (c.evaluatorRole ?? 'EITHER') as EvaluatorRole,
       })));
       setLibrary(lib);
     } catch (err) {
@@ -100,6 +106,7 @@ export function TenderCriteriaEditor({ tenderId, editable }: Props) {
         maxScore: String(entry.defaultMaxScore),
         weight: entry.defaultWeight != null ? String(entry.defaultWeight) : '0',
         mandatory: entry.defaultIsGate,
+        evaluatorRole: 'EITHER',
       },
     ]);
     setPicker('');
@@ -117,6 +124,7 @@ export function TenderCriteriaEditor({ tenderId, editable }: Props) {
         maxScore: '100',
         weight: '0',
         mandatory: false,
+        evaluatorRole: 'EITHER',
       },
     ]);
   }
@@ -156,6 +164,7 @@ export function TenderCriteriaEditor({ tenderId, editable }: Props) {
           weight: Number(r.weight),
           mandatory: r.mandatory,
           sortOrder: i,
+          evaluatorRole: r.evaluatorRole,
         })),
       }, token);
       setSuccessAt(Date.now());
@@ -242,6 +251,8 @@ export function TenderCriteriaEditor({ tenderId, editable }: Props) {
               <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary w-24">Code</th>
               <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary text-right w-24">Max</th>
               <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary text-right w-24">Weight%</th>
+              {/* BUG-111: which evaluator role scores this criterion. */}
+              <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary w-36">Scored by</th>
               <th className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-text-secondary text-center w-20">Gate</th>
               {editable && <th className="px-3 py-2 w-10"></th>}
             </tr>
@@ -296,6 +307,19 @@ export function TenderCriteriaEditor({ tenderId, editable }: Props) {
                     disabled={!editable}
                     className="w-20 px-2 py-1.5 text-sm font-mono text-right border border-border rounded bg-bg focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-60"
                   />
+                </td>
+                <td className="px-3 py-2">
+                  {/* BUG-111: per-criterion evaluator role selector. */}
+                  <select
+                    value={r.evaluatorRole}
+                    onChange={e => updateRow(i, { evaluatorRole: e.target.value as EvaluatorRole })}
+                    disabled={!editable}
+                    className="w-full px-2 py-1.5 text-xs border border-border rounded bg-bg focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-60"
+                  >
+                    <option value="EITHER">Either</option>
+                    <option value="TECHNICAL">Technical only</option>
+                    <option value="PROCUREMENT">Procurement only</option>
+                  </select>
                 </td>
                 <td className="px-3 py-2 text-center">
                   <label className={`inline-flex items-center justify-center gap-1 ${editable ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { get, post, del } from '@/lib/api';
@@ -9,6 +9,12 @@ import { useConfirm } from '@/components/dialog/DialogProvider';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { ManageInvitedVendors } from '@/components/ManageInvitedVendors';
 import { AmendAwardDialog } from '@/components/comparison/AmendAwardDialog';
+import { RevertTenderDialog } from '@/components/dialog/RevertTenderDialog';
+import { CancelTenderDialog } from '@/components/dialog/CancelTenderDialog';
+import { HoldTenderDialog } from '@/components/dialog/HoldTenderDialog';
+import { ResumeTenderDialog } from '@/components/dialog/ResumeTenderDialog';
+import { ReopenTenderDialog } from '@/components/dialog/ReopenTenderDialog';
+import { ExtendSubmissionDialog } from '@/components/dialog/ExtendSubmissionDialog';
 import {
   AlertCircle,
   ChevronRight,
@@ -30,6 +36,9 @@ import {
   Shield,
   ClipboardList,
   Package,
+  RefreshCw,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { TenderCriteriaEditor } from '@/components/TenderCriteriaEditor';
 import { TenderBoqEditor } from '@/components/TenderBoqEditor';
@@ -50,6 +59,9 @@ interface TenderDetail {
   description: string;
   category: string;
   status: string;
+  // BUG-132 (2026-06-14): set when status === 'Suspended'; Resume returns
+  // the tender to this state.
+  previousStatus?: string | null;
   procurementType: string | null;
   estimatedBudget: number | null;
   submissionDeadline: string | null;
@@ -111,7 +123,8 @@ function getFileIcon(mimeType: string): React.ReactNode {
 const TENDER_DOC_ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 const EDITABLE_STATUSES = ['Draft', 'Internal Review', 'Approved'];
-const CANCELLABLE_STATUSES = ['Draft', 'Internal Review', 'Approved', 'Published', 'Clarification Period'];
+// BUG-132 (2026-06-14): Cancel allowed from every state except already-Cancelled.
+// Hold/Resume superseded the old per-state allowlist on Cancel.
 
 export default function TenderDetailPage() {
   const params = useParams();
@@ -125,6 +138,13 @@ export default function TenderDetailPage() {
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
   const [amendOpen, setAmendOpen] = useState(false);
+  const [revertOpen, setRevertOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [holdOpen, setHoldOpen] = useState(false);
+  const [resumeOpen, setResumeOpen] = useState(false);
+  const [reopenOpen, setReopenOpen] = useState(false);
+  // BUG-141 (2026-06-19): extend a Submission Closed tender.
+  const [extendSubOpen, setExtendSubOpen] = useState(false);
   const [generatingMinutes, setGeneratingMinutes] = useState(false);
   const docInputRef = useRef<HTMLInputElement>(null);
 
@@ -138,11 +158,13 @@ export default function TenderDetailPage() {
     techOpen: false,  // technical:open
     approve: false,   // tender:approve
     cancel: false,    // tender:cancel
+    suspend: false,   // tender:suspend (BUG-132 — covers Hold AND Resume)
     edit: false,      // tender:edit
     award: false,     // award:finalize (legacy Issue Award action)
     amend: false,     // award:amend
     minutes: false,   // award:minutes:generate
     close: false,     // tender:close (WALK-052)
+    revert: false,    // tender:revert (BUG-112)
   });
   useEffect(() => {
     const t = getAccessToken();
@@ -154,11 +176,13 @@ export default function TenderDetailPage() {
       techOpen: hasPermission(t, 'technical:open'),
       approve:  hasPermission(t, 'tender:approve'),
       cancel:   hasPermission(t, 'tender:cancel'),
+      suspend:  hasPermission(t, 'tender:suspend'),
       edit:     hasPermission(t, 'tender:edit'),
       award:    hasPermission(t, 'award:finalize'),
       amend:    hasPermission(t, 'award:amend'),
       minutes:  hasPermission(t, 'award:minutes:generate'),
       close:    hasPermission(t, 'tender:close'),
+      revert:   hasPermission(t, 'tender:revert'),
     });
   }, []);
 
@@ -337,6 +361,9 @@ export default function TenderDetailPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 flex-shrink-0">
+          {/* BUG-132 (2026-06-14): workflow buttons hidden while held or cancelled.
+              Only Hold/Resume + Cancel are exposed in those states. */}
+          {tender.status !== 'Suspended' && tender.status !== 'Cancelled' && (<>
           {tender.status === 'Draft' && perms.submit && (
             <button
               onClick={() => handleAction('submit-for-approval')}
@@ -383,6 +410,19 @@ export default function TenderDetailPage() {
             >
               <FolderOpen className="w-4 h-4" />
               {actionLoading === 'technical-opening' ? 'Opening…' : 'Open Technical Envelopes'}
+            </button>
+          )}
+          {/* BUG-141 (2026-06-19): re-open a Submission Closed tender with a
+              new future deadline. Same permission as Close Submissions. */}
+          {tender.status === 'Submission Closed' && perms.closeSub && (
+            <button
+              onClick={() => setExtendSubOpen(true)}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 border border-amber-500/40 text-amber-700 text-sm font-semibold rounded-lg hover:bg-amber-500/5 transition-colors disabled:opacity-60 flex items-center gap-1.5"
+              title="Re-open this tender with a new submission deadline so additional vendors can submit."
+            >
+              <RefreshCw className="w-4 h-4" />
+              Extend Submission
             </button>
           )}
           {tender.status === 'Awarded' && (
@@ -448,6 +488,18 @@ export default function TenderDetailPage() {
               )}
             </>
           )}
+          {/* BUG-125 (2026-06-11): Reopen from Tender Closed back to Awarded. */}
+          {tender.status === 'Tender Closed' && perms.close && (
+            <button
+              onClick={() => setReopenOpen(true)}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 border border-amber-500/30 text-amber-700 text-sm font-semibold rounded-lg hover:bg-amber-500/5 transition-colors disabled:opacity-60 flex items-center gap-1.5"
+              title="Reopen this tender back to Awarded so the award can be amended or further actions taken."
+            >
+              <RefreshCw className="w-4 h-4" />
+              Reopen Tender
+            </button>
+          )}
           {EDITABLE_STATUSES.includes(tender.status) && perms.edit && (
             <Link
               href={`/tenders/${tender.id}/edit`}
@@ -457,17 +509,45 @@ export default function TenderDetailPage() {
               Edit
             </Link>
           )}
-          {CANCELLABLE_STATUSES.includes(tender.status) && perms.cancel && (
+          {tender.status === 'Published' && perms.revert && (
             <button
-              onClick={async () => {
-                const ok = await confirm({
-                  title: 'Cancel tender',
-                  body: 'Cancel this tender? This action cannot be undone.',
-                  destructive: true,
-                  confirmLabel: 'Cancel tender',
-                });
-                if (ok) handleAction('cancel');
-              }}
+              onClick={() => setRevertOpen(true)}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 border border-amber-500/40 text-amber-700 text-sm font-semibold rounded-lg hover:bg-amber-500/5 transition-colors disabled:opacity-60"
+              title="Roll a Published tender back to Approved/Internal Review/Draft so you can fix mistakes. Blocked once vendors have submitted bids."
+            >
+              Revert
+            </button>
+          )}
+          </>)}
+          {/* BUG-132: Hold (available from every state except Suspended/Cancelled). */}
+          {tender.status !== 'Suspended' && tender.status !== 'Cancelled' && perms.suspend && (
+            <button
+              onClick={() => setHoldOpen(true)}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 border border-amber-500/40 text-amber-700 text-sm font-semibold rounded-lg hover:bg-amber-500/5 transition-colors disabled:opacity-60 flex items-center gap-1.5"
+              title="Put this tender on hold. Resume returns it to the same state."
+            >
+              <Pause className="w-4 h-4" />
+              Hold
+            </button>
+          )}
+          {/* BUG-132: Resume (only from Suspended). */}
+          {tender.status === 'Suspended' && perms.suspend && (
+            <button
+              onClick={() => setResumeOpen(true)}
+              disabled={actionLoading !== null}
+              className="px-4 py-2 bg-amber-600 hover:opacity-90 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-1.5"
+              title="Resume this tender to its previous state."
+            >
+              <Play className="w-4 h-4" />
+              Resume
+            </button>
+          )}
+          {/* BUG-132: Cancel allowed from every state except already-Cancelled. */}
+          {tender.status !== 'Cancelled' && perms.cancel && (
+            <button
+              onClick={() => setCancelOpen(true)}
               disabled={actionLoading !== null}
               className="px-4 py-2 border border-danger/30 text-danger text-sm font-semibold rounded-lg hover:bg-danger/5 transition-colors disabled:opacity-60"
             >
@@ -746,6 +826,60 @@ export default function TenderDetailPage() {
         onAmended={() => { setAmendOpen(false); loadTender(); }}
       />
 
+      <RevertTenderDialog
+        open={revertOpen}
+        tenderId={tender.id}
+        tenderReference={tender.referenceNumber}
+        onClose={() => setRevertOpen(false)}
+        onReverted={() => { setRevertOpen(false); loadTender(); }}
+      />
+
+      <CancelTenderDialog
+        open={cancelOpen}
+        tenderId={tender.id}
+        tenderReference={tender.referenceNumber}
+        tenderStatus={tender.status}
+        onClose={() => setCancelOpen(false)}
+        onCancelled={() => { setCancelOpen(false); loadTender(); }}
+      />
+
+      <ReopenTenderDialog
+        open={reopenOpen}
+        tenderId={tender.id}
+        tenderReference={tender.referenceNumber}
+        onClose={() => setReopenOpen(false)}
+        onReopened={() => { setReopenOpen(false); loadTender(); }}
+      />
+
+      {/* BUG-141 (2026-06-19): Extend Submission dialog. */}
+      <ExtendSubmissionDialog
+        open={extendSubOpen}
+        tenderId={tender.id}
+        tenderReference={tender.referenceNumber}
+        currentSubmissionDeadline={tender.submissionDeadline}
+        onClose={() => setExtendSubOpen(false)}
+        onExtended={() => { setExtendSubOpen(false); loadTender(); }}
+      />
+
+      {/* BUG-132 (2026-06-14): Hold + Resume dialogs. */}
+      <HoldTenderDialog
+        open={holdOpen}
+        tenderId={tender.id}
+        tenderReference={tender.referenceNumber}
+        tenderStatus={tender.status}
+        onClose={() => setHoldOpen(false)}
+        onHeld={() => { setHoldOpen(false); loadTender(); }}
+      />
+
+      <ResumeTenderDialog
+        open={resumeOpen}
+        tenderId={tender.id}
+        tenderReference={tender.referenceNumber}
+        previousStatus={tender.previousStatus ?? null}
+        onClose={() => setResumeOpen(false)}
+        onResumed={() => { setResumeOpen(false); loadTender(); }}
+      />
+
       {/* BUG-056 / WALK-009..022: real tab views (previously stubs). */}
       {tab === 'criteria' && (
         <div className="space-y-3">
@@ -813,9 +947,12 @@ function ClarificationsTabPanel({ tenderId }: { tenderId: string }) {
   const [items, setItems] = useState<Clarification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // BUG-147 (2026-06-21): admin "Ask vendor a question" dialog state.
+  const [askOpen, setAskOpen] = useState(false);
   // WALK-009/013/020 / BUG-067: caller can reply inline when they hold
   // `clarification:reply` (TECHNICAL_EVALUATOR + PROCUREMENT_ADMIN +
-  // PROCUREMENT_OFFICER all carry it).
+  // PROCUREMENT_OFFICER all carry it). BUG-147: same permission also gates
+  // the new "Ask vendor a question" button.
   const [canReply, setCanReply] = useState(false);
   useEffect(() => {
     const t = getAccessToken();
@@ -842,20 +979,63 @@ function ClarificationsTabPanel({ tenderId }: { tenderId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenderId]);
 
-  if (loading) return <TabSkeleton icon={<MessageSquare className="w-12 h-12 text-text-secondary/20" />} label="Loading clarifications…" />;
-  if (error) return <TabError icon={<MessageSquare className="w-12 h-12 text-danger/40" />} message={error} />;
+  // BUG-147 (2026-06-21): "+ Ask vendor a question" header strip — always
+  // rendered when admin has clarification:reply, even when the list is
+  // empty (so admin can initiate the first thread).
+  const askHeader = canReply ? (
+    <div className="flex justify-end">
+      <button
+        type="button"
+        onClick={() => setAskOpen(true)}
+        className="px-3 py-1.5 bg-accent text-white rounded-md text-xs font-bold hover:opacity-90 flex items-center gap-1.5"
+      >
+        <MessageSquare className="w-3.5 h-3.5" /> Ask vendor a question
+      </button>
+    </div>
+  ) : null;
+
+  if (loading) return (
+    <div className="space-y-3">
+      {askHeader}
+      <TabSkeleton icon={<MessageSquare className="w-12 h-12 text-text-secondary/20" />} label="Loading clarifications…" />
+    </div>
+  );
+  if (error) return (
+    <div className="space-y-3">
+      {askHeader}
+      <TabError icon={<MessageSquare className="w-12 h-12 text-danger/40" />} message={error} />
+    </div>
+  );
   if (items.length === 0) {
     return (
-      <TabEmpty
-        icon={<MessageSquare className="w-12 h-12 text-text-secondary/20" />}
-        title="No clarifications yet"
-        body="Vendor questions and procurement replies will appear here once the clarification period opens."
-      />
+      <div className="space-y-3">
+        {askHeader}
+        <TabEmpty
+          icon={<MessageSquare className="w-12 h-12 text-text-secondary/20" />}
+          title="No clarifications yet"
+          body="Vendor questions and procurement replies will appear here. Click 'Ask vendor a question' to initiate the first thread."
+        />
+        {askOpen && (
+          <AskVendorDialog
+            tenderId={tenderId}
+            onClose={() => setAskOpen(false)}
+            onAsked={() => { setAskOpen(false); fetchItems(); }}
+          />
+        )}
+      </div>
     );
   }
 
   return (
     <div className="space-y-3">
+      {askHeader}
+      {askOpen && (
+        <AskVendorDialog
+          tenderId={tenderId}
+          onClose={() => setAskOpen(false)}
+          onAsked={() => { setAskOpen(false); fetchItems(); }}
+        />
+      )}
       {items.map(c => (
         <div key={c.id} className="bg-card border border-border rounded-xl p-5">
           <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
@@ -880,10 +1060,9 @@ function ClarificationsTabPanel({ tenderId }: { tenderId: string }) {
                     <p className="text-[11px] font-semibold text-text-secondary">
                       {r.repliedByName} · {new Date(r.repliedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </p>
-                    <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                      r.visibility === 'GENERAL_PUBLIC' ? 'bg-success/10 text-success' : 'bg-slate-100 text-slate-700'
-                    }`}>
-                      {r.visibility === 'GENERAL_PUBLIC' ? 'Public' : 'Private to vendor'}
+                    {/* BUG-145 (2026-06-19): every reply is private to the asking vendor. */}
+                    <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                      Private to vendor
                     </span>
                   </div>
                   <p className="text-sm text-text-primary whitespace-pre-wrap">{r.reply}</p>
@@ -902,7 +1081,6 @@ function ClarificationsTabPanel({ tenderId }: { tenderId: string }) {
 
 function ClarificationReplyForm({ clarificationId, onReplied }: { clarificationId: string; onReplied: () => void }) {
   const [reply, setReply] = useState('');
-  const [isPublic, setIsPublic] = useState(true);
   const [posting, setPosting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -914,9 +1092,10 @@ function ClarificationReplyForm({ clarificationId, onReplied }: { clarificationI
     setErr(null);
     try {
       const token = getAccessToken();
-      await post(`/clarifications/${clarificationId}/reply`, { reply: trimmed, isPublic }, token);
+      // BUG-145 (2026-06-19): every reply is private to the asking vendor.
+      // BUG-147 (2026-06-21): isPublic field removed; backend ignores it.
+      await post(`/clarifications/${clarificationId}/reply`, { reply: trimmed }, token);
       setReply('');
-      setIsPublic(true);
       onReplied();
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : 'Reply failed');
@@ -930,20 +1109,11 @@ function ClarificationReplyForm({ clarificationId, onReplied }: { clarificationI
       <textarea
         value={reply}
         onChange={e => setReply(e.target.value)}
-        placeholder="Write a reply…"
+        placeholder="Write a reply (private to the asking vendor)…"
         rows={2}
         className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-bg focus:outline-none focus:ring-1 focus:ring-accent resize-none"
       />
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isPublic}
-            onChange={e => setIsPublic(e.target.checked)}
-            className="w-3.5 h-3.5 rounded text-accent border-border focus:ring-1 focus:ring-accent"
-          />
-          Public (visible to all vendors). Uncheck for a reply private to the asking vendor only.
-        </label>
+      <div className="flex justify-end">
         <button
           type="submit"
           disabled={posting || !reply.trim()}
@@ -957,8 +1127,118 @@ function ClarificationReplyForm({ clarificationId, onReplied }: { clarificationI
   );
 }
 
+// BUG-147 (2026-06-21): admin-side "Ask vendor a question" dialog. Picks
+// a vendor from the bidders on this tender + posts a clarification with
+// targetVendorId so the vendor sees it on their portal and can reply back.
+function AskVendorDialog({ tenderId, onClose, onAsked }: { tenderId: string; onClose: () => void; onAsked: () => void }) {
+  const [vendorOptions, setVendorOptions] = useState<Array<{ vendorId: string; vendorCompany: string }>>([]);
+  const [vendorId, setVendorId] = useState('');
+  const [question, setQuestion] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [posting, setPosting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = getAccessToken();
+        const res = await get<{ items: Array<{ id: string; vendorId?: string; vendorCompany: string }> }>(
+          `/tenders/${tenderId}/bids?pageSize=100`,
+          token,
+        );
+        // Dedupe by vendor id (one tender can have one bid per vendor today,
+        // but defence in depth never hurt).
+        const seen = new Map<string, string>();
+        for (const b of res.items ?? []) {
+          if (b.vendorId && !seen.has(b.vendorId)) seen.set(b.vendorId, b.vendorCompany);
+        }
+        const opts = Array.from(seen.entries()).map(([id, name]) => ({ vendorId: id, vendorCompany: name }));
+        setVendorOptions(opts);
+        if (opts.length > 0) setVendorId(opts[0].vendorId);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : 'Failed to load vendors');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [tenderId]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = question.trim();
+    if (!vendorId || trimmed.length < 10) return;
+    setPosting(true);
+    setErr(null);
+    try {
+      const token = getAccessToken();
+      await post(`/tenders/${tenderId}/clarifications`, { question: trimmed, targetVendorId: vendorId }, token);
+      onAsked();
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : 'Failed to send clarification');
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
+        <div className="p-5 border-b border-border">
+          <h3 className="text-base font-bold text-text-primary">Ask a vendor a clarification</h3>
+          <p className="text-xs text-text-secondary mt-1">Private to the chosen vendor. They will see this on their portal and can reply back.</p>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-text-secondary uppercase tracking-wide mb-1.5">Vendor</label>
+            {loading ? (
+              <p className="text-sm text-text-secondary italic">Loading bidders…</p>
+            ) : vendorOptions.length === 0 ? (
+              <p className="text-sm text-text-secondary italic">No vendors have submitted bids on this tender yet.</p>
+            ) : (
+              <select
+                value={vendorId}
+                onChange={e => setVendorId(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+              >
+                {vendorOptions.map(o => (
+                  <option key={o.vendorId} value={o.vendorId}>{o.vendorCompany}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-text-secondary uppercase tracking-wide mb-1.5">Question</label>
+            <textarea
+              value={question}
+              onChange={e => setQuestion(e.target.value)}
+              placeholder="Type your clarification question (minimum 10 characters)…"
+              rows={5}
+              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-bg focus:outline-none focus:ring-1 focus:ring-accent resize-none"
+              required
+            />
+          </div>
+          {err && <p className="text-xs text-danger">{err}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 border border-border rounded-md text-xs font-semibold text-text-secondary hover:bg-bg"
+            >Cancel</button>
+            <button
+              type="submit"
+              disabled={posting || !vendorId || question.trim().length < 10 || vendorOptions.length === 0}
+              className="px-3 py-1.5 bg-accent text-white rounded-md text-xs font-bold hover:opacity-90 disabled:opacity-50"
+            >{posting ? 'Sending…' : 'Send question'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 interface BidRow {
   id: string;
+  vendorId?: string;
   vendorCompany: string;
   submittedAt: string | null;
   technicalEnvelopeStatus: string;
@@ -966,8 +1246,52 @@ interface BidRow {
   technicalResult?: string;
 }
 
+// BUG-131 (2026-06-13): negotiation submissions are now folded into the
+// /tenders/:id Bids tab so the owner can see the full bid history (initial
+// + every negotiated round) without having to bounce to /commercial-comparison.
+interface NegotiationInvitationApi {
+  id: string;
+  bidId: string;
+  vendorId: string;
+  vendorName: string;
+  status: string;
+  submission: {
+    id: string;
+    submittedAt: string;
+    totalPrice: number | null;
+    currency: string;
+    commercialPdfFilename: string | null;
+  } | null;
+}
+interface NegotiationRoundApi {
+  id: string;
+  roundNumber: number;
+  launchedAt: string;
+  closedAt: string | null;
+  invitations: NegotiationInvitationApi[];
+}
+interface NegotiationListResponse {
+  tenderId: string;
+  rounds: NegotiationRoundApi[];
+}
+
+interface NegSubmissionRow {
+  submissionId: string;
+  roundNumber: number;
+  submittedAt: string;
+  totalPrice: number | null;
+  currency: string;
+  filename: string | null;
+}
+
+// BUG-142 (2026-06-19): supporting documents moved out of the Bids tab and
+// into the Commercial Comparison per-vendor card. The Bids tab now only
+// carries status info (initial bid + negotiation submissions).
+
 function BidsTabPanel({ tenderId }: { tenderId: string }) {
   const [items, setItems] = useState<BidRow[]>([]);
+  // Map bidId → ordered list of negotiation submissions (oldest round first).
+  const [negByBid, setNegByBid] = useState<Map<string, NegSubmissionRow[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -978,8 +1302,39 @@ function BidsTabPanel({ tenderId }: { tenderId: string }) {
       setError(null);
       try {
         const token = getAccessToken();
-        const res = await get<{ items: BidRow[] }>(`/tenders/${tenderId}/bids?pageSize=100`, token);
-        if (!cancelled) setItems(res.items ?? []);
+        // Fetch bids + negotiation rounds in parallel. Negotiation fetch is
+        // best-effort — viewers without negotiation:view perm just see the
+        // initial bid rows (no nested submissions), they don't see an error.
+        const [bidsRes, negRes] = await Promise.all([
+          get<{ items: BidRow[] }>(`/tenders/${tenderId}/bids?pageSize=100`, token),
+          get<NegotiationListResponse>(`/tenders/${tenderId}/negotiation`, token).catch(() => null),
+        ]);
+        if (cancelled) return;
+        setItems(bidsRes.items ?? []);
+        if (negRes && negRes.rounds) {
+          const map = new Map<string, NegSubmissionRow[]>();
+          for (const round of negRes.rounds) {
+            for (const inv of round.invitations) {
+              if (!inv.submission) continue;
+              const existing = map.get(inv.bidId) ?? [];
+              existing.push({
+                submissionId: inv.submission.id,
+                roundNumber: round.roundNumber,
+                submittedAt: inv.submission.submittedAt,
+                totalPrice: inv.submission.totalPrice,
+                currency: inv.submission.currency,
+                filename: inv.submission.commercialPdfFilename,
+              });
+              map.set(inv.bidId, existing);
+            }
+          }
+          for (const subs of map.values()) {
+            subs.sort((a, b) => a.roundNumber - b.roundNumber);
+          }
+          setNegByBid(map);
+        } else {
+          setNegByBid(new Map());
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load bids');
       } finally {
@@ -1001,6 +1356,23 @@ function BidsTabPanel({ tenderId }: { tenderId: string }) {
     );
   }
 
+  // BUG-131-fix (2026-06-13): pin display to Asia/Kuwait so the time shown
+  // matches what the user actually saw in the portal regardless of the
+  // browser host's timezone (workstation may be set to UTC).
+  function fmtSubmittedAt(iso: string | null | undefined): string {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Asia/Kuwait',
+    });
+  }
+
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
       <table className="w-full text-sm">
@@ -1014,19 +1386,37 @@ function BidsTabPanel({ tenderId }: { tenderId: string }) {
           </tr>
         </thead>
         <tbody>
-          {items.map(b => (
-            <tr key={b.id} className="border-b border-border last:border-0">
-              <td className="px-4 py-3 font-semibold text-text-primary">{b.vendorCompany}</td>
-              <td className="px-4 py-3 text-text-secondary text-xs">
-                {b.submittedAt
-                  ? new Date(b.submittedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-                  : '—'}
-              </td>
-              <td className="px-4 py-3"><EnvelopePill status={b.technicalEnvelopeStatus} /></td>
-              <td className="px-4 py-3"><EnvelopePill status={b.commercialEnvelopeStatus} /></td>
-              <td className="px-4 py-3"><TechnicalResultPill result={b.technicalResult} /></td>
-            </tr>
-          ))}
+          {items.map(b => {
+            const negs = negByBid.get(b.id) ?? [];
+            return (
+              <React.Fragment key={b.id}>
+                <tr className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 font-semibold text-text-primary">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-800">Initial</span>
+                      <span>{b.vendorCompany}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-text-secondary text-xs">{fmtSubmittedAt(b.submittedAt)}</td>
+                  <td className="px-4 py-3"><EnvelopePill status={b.technicalEnvelopeStatus} /></td>
+                  <td className="px-4 py-3"><EnvelopePill status={b.commercialEnvelopeStatus} /></td>
+                  <td className="px-4 py-3"><TechnicalResultPill result={b.technicalResult} /></td>
+                </tr>
+                {negs.map(n => (
+                  <tr key={n.submissionId} className="border-b border-border last:border-0 bg-amber-50/30">
+                    <td className="px-4 py-3 text-text-primary">
+                      <div className="flex items-center gap-2 pl-6">
+                        <span className="inline-block text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-200 text-amber-900">Round {n.roundNumber}</span>
+                        <span className="text-text-secondary text-xs">↳ {b.vendorCompany}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-text-secondary text-xs">{fmtSubmittedAt(n.submittedAt)}</td>
+                    <td className="px-4 py-3 text-text-secondary text-xs" colSpan={3}>Negotiated commercial submission</td>
+                  </tr>
+                ))}
+              </React.Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>

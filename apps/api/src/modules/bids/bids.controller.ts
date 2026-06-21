@@ -157,4 +157,73 @@ export class BidsController {
     res.setHeader('Content-Disposition', `attachment; filename="${result.filename.replace(/"/g, '')}"`);
     result.stream.pipe(res);
   }
+
+  // ----------------------------------------------------------------
+  // BUG-137 (2026-06-19): bid supporting documents
+  // ----------------------------------------------------------------
+
+  @UseGuards(OptionalVendorOrUserGuard)
+  @Get('bids/:bidId/supporting-documents')
+  @ApiOperation({ operationId: 'listBidSupportingDocuments', summary: 'List supporting documents on a bid' })
+  listSupportingDocuments(@Param('bidId') bidId: string, @CurrentUser() user: any) {
+    return this.bidsService.listSupportingDocuments(bidId, user);
+  }
+
+  @UseGuards(VendorJwtAuthGuard)
+  @Post('bids/:bidId/supporting-documents')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_DOC_BYTES } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ operationId: 'uploadBidSupportingDocument', summary: 'Upload a supporting document PDF (DRAFT bids only)' })
+  uploadSupportingDocument(
+    @Param('bidId') bidId: string,
+    @UploadedFile() file: any,
+    @CurrentUser() vendor: any,
+  ) {
+    return this.bidsService.uploadSupportingDocument(bidId, file, vendor);
+  }
+
+  @UseGuards(VendorJwtAuthGuard)
+  @Delete('bids/:bidId/supporting-documents/:documentId')
+  @ApiOperation({ operationId: 'deleteBidSupportingDocument', summary: 'Remove a supporting document (DRAFT bids only)' })
+  async deleteSupportingDocument(
+    @Param('bidId') bidId: string,
+    @Param('documentId') documentId: string,
+    @CurrentUser() vendor: any,
+  ) {
+    await this.bidsService.deleteSupportingDocument(bidId, documentId, vendor);
+    return { ok: true };
+  }
+
+  @UseGuards(OptionalVendorOrUserGuard)
+  @Get('bids/:bidId/supporting-documents/:documentId/view')
+  @ApiOperation({ operationId: 'viewBidSupportingDocument', summary: 'Stream a supporting document PDF inline' })
+  async viewSupportingDocument(
+    @Param('bidId') bidId: string,
+    @Param('documentId') documentId: string,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    const result = await this.bidsService.streamSupportingDocument(bidId, documentId, user, 'view');
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', String(result.fileSize ?? 0));
+    res.setHeader('Content-Disposition', `inline; filename="${result.filename.replace(/"/g, '')}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    result.stream.pipe(res);
+  }
+
+  @UseGuards(OptionalVendorOrUserGuard)
+  @Get('bids/:bidId/supporting-documents/:documentId')
+  @ApiOperation({ operationId: 'downloadBidSupportingDocument', summary: 'Download a supporting document PDF as an attachment' })
+  async downloadSupportingDocument(
+    @Param('bidId') bidId: string,
+    @Param('documentId') documentId: string,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    const result = await this.bidsService.streamSupportingDocument(bidId, documentId, user, 'download');
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Length', String(result.fileSize ?? 0));
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename.replace(/"/g, '')}"`);
+    result.stream.pipe(res);
+  }
 }

@@ -20,7 +20,29 @@ async function bootstrap() {
   // ever introduced.
   app.set('trust proxy', 1);
 
-  app.use(helmet());
+  // BUG-151 (2026-06-22): explicit helmet config. Bare `helmet()` does not
+  // emit Content-Security-Policy in v6+; before public launch we want
+  // defence-in-depth headers on every API response (PDF streams + JSON):
+  //   • CSP: API never serves HTML to a browser, so a tight default-src
+  //     'self' + frame-ancestors 'none' + object-src 'none' blocks any
+  //     future attempt to frame our PDF endpoints into a hostile origin.
+  //   • HSTS: 1-year max-age + includeSubDomains. (No `preload` to avoid
+  //     committing the apex domain to the HSTS preload list without sign-off.)
+  app.use(helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        'default-src': ["'self'"],
+        'frame-ancestors': ["'none'"],
+        'object-src': ["'none'"],
+        'base-uri': ["'self'"],
+        'form-action': ["'self'"],
+      },
+    },
+    hsts: { maxAge: 31_536_000, includeSubDomains: true, preload: false },
+    referrerPolicy: { policy: 'no-referrer' },
+    crossOriginResourcePolicy: { policy: 'same-site' },
+  }));
   app.enableCors({
     origin: config.get<string[]>('app.corsOrigins', []),
     credentials: true,

@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsDateString, IsOptional, IsUUID, IsNumber, IsIn, Min } from 'class-validator';
+import { IsString, IsNotEmpty, IsDateString, IsOptional, IsUUID, IsNumber, IsIn, Min, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateTenderDto {
@@ -46,5 +46,12 @@ export class CreateTenderDto {
   @IsIn(['PUBLIC', 'INVITATION_ONLY'])
   @IsOptional()
   visibility?: 'PUBLIC' | 'INVITATION_ONLY';
+
+  // BUG-137 (2026-06-19): when true, bidders must attach ≥1 supporting
+  // document PDF (certificates, letters, etc.) before submitting.
+  @ApiPropertyOptional({ description: 'When true, require vendors to upload ≥1 supporting document with their bid.' })
+  @IsBoolean()
+  @IsOptional()
+  requiresSupportingDocuments?: boolean;
 }
 

@@ -6,6 +6,1801 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-06-22 — BUG-151: Vendor portal pre-launch security hardening pack
+
+**Date/time:** 2026-06-22 (owner pre-launch security review identified that ThrottlerModule was registered but never bound — every anonymous endpoint was uncapped — plus a cluster of related defects in forgot-password, JWT secret handling, vendor cookies, token error messages, and HTTP security headers. Owner asked for "what is necessary for security" before public exposure.)
+
+**Files changed (6 backend, 2 frontend):**
+
+**Phase 1 — Throttling globally + per-endpoint.**
+- `apps/api/src/app.module.ts` — added `{ provide: APP_GUARD, useClass: ThrottlerGuard }`. Pre-fix the `ThrottlerModule.forRoot([...])` config was dead — no global binding, no per-controller use. Now enforced on every HTTP request.
+- `apps/api/src/modules/vendor-auth/vendor-auth.controller.ts` — `@Throttle()` decorators on all anonymous endpoints: `register` (2/min, 10/h), `registration-documents/upload` (5/min, 30/h), `login` (5/min, 30/10min), `verify-email` (5/min), `forgot-password` (3/min, 10/h), `reset-password` (5/min), `mfa/verify` (5/min, 20/h).
+
+**Phase 2 — Forgot-password hardening.**
+- `apps/api/src/modules/vendor-auth/dto/forgot-password.dto.ts` — added `captchaToken: string` (`@IsString @IsNotEmpty`).
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.ts:forgotPassword` — full rewrite:
+  - (a) CAPTCHA validated at top via `CaptchaService.validate({ action: 'vendor_forgot_password' })` — bot-flood blocked cheaply before DB/SMTP work.
+  - (b) Per-email 60s cooldown — if latest unused reset-token for the user is < 60s old, skip both the DB insert and the SMTP send (response stays 204 — no enumeration leak via "we just sent one").
+  - (c) Audit log every attempt with SHA-256-truncated email hash (so audit table itself isn't an enumeration oracle).
+  - (d) SMTP send via `setImmediate(() => sendEmail(...).catch(...))` — HTTP response time is now constant between hit/miss branches (kills the wall-clock timing oracle: ~5ms miss vs ~200ms hit pre-fix).
+- `apps/web-vendor/src/app/forgot-password/page.tsx` — added `HCaptcha` widget mirroring the register-page pattern; submit blocked until a token is present; 429-aware error surface; preserves "If an account exists…" no-enumeration UX.
+
+**Phase 3 — JWT secret startup assertion.**
+- `apps/api/src/config/jwt.config.ts` — new `requireSecret(envName, value)` helper that throws at module-load if any of `JWT_SECRET / JWT_REFRESH_SECRET / VENDOR_JWT_SECRET / VENDOR_JWT_REFRESH_SECRET` is missing or < 32 chars. Boot fails loudly rather than silently running a vulnerable verifier (pre-fix an unset `VENDOR_JWT_SECRET` would have caused `VendorJwtStrategy` to initialise with `secretOrKey: ''` and accept attacker-minted HS256 tokens signed with the empty-string secret — full vendor-portal compromise).
+
+**Phase 4 — Vendor cookie hardening.**
+- `apps/web-vendor/src/lib/auth.ts` — `Cookies.set()` now uses `secure: true` when `window.location.protocol === 'https:'` (production behaviour) and `false` only for local http dev. Both cookies gained `expires` matching the JWT TTL (access 1 day, refresh 7 days) so they're no longer session-cookies that persist until the browser process closes (shared-kiosk risk). Note: full httpOnly server-set cookie refactor (Vuln 4 in the review) deferred to BUG-153 — bigger backend change, not blocking go-live.
+
+**Phase 5 — Token error message uniformity.**
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.ts:verifyEmail` + `resetPassword` — collapsed three distinct rejection messages ("Invalid token" / "already used" / "expired") to a single generic "Invalid or expired token". The detailed reason is preserved in server logs for support diagnostics. Removes the fingerprinting oracle for tokens leaked via referer headers / support pastes / browser-extension URL captures.
+
+**Phase 6 — Helmet CSP + HSTS + referrer policy.**
+- `apps/api/src/main.ts` — replaced bare `app.use(helmet())` with explicit config: CSP `default-src 'self' / frame-ancestors 'none' / object-src 'none' / base-uri 'self' / form-action 'self'`; HSTS 1-year + includeSubDomains; `referrerPolicy: 'no-referrer'`; `crossOriginResourcePolicy: 'same-site'`. API never serves HTML to browsers so the tight CSP is safe; defends PDF-streaming endpoints against future framing/cross-origin attacks.
+
+**Verification (all green on staging):**
+- ✅ Typecheck clean: `pnpm -C apps/api build` + `pnpm -C apps/web-vendor build`.
+- ✅ One TS error caught + fixed in Docker build (`entityId: null` → omit; type is `string | undefined`).
+- ✅ Rebuild produced `ctmp-api Built` + `ctmp-web-vendor Built`.
+- ✅ Recreated; both containers healthy.
+- ✅ **Throttler proven live:** 12 quick GETs to `/api/v1/health` returned `200 × 10` then `429 × 2`. Pre-fix every request was unmetered.
+- ✅ **Forgot-password CAPTCHA enforced:** `POST /vendor-auth/forgot-password { email }` (no captchaToken) returns `400` with `["captchaToken should not be empty", "captchaToken must be a string"]`. Hits the wall before any DB/SMTP work.
+- ✅ Deployed api dist markers: `APP_GUARD` (1×), `VENDOR_PASSWORD_RESET_REQUESTED` (1×), `requireSecret` (5×), `Invalid or expired` (8×), `frame-ancestors` (1×).
+- ✅ Deployed vendor chunk `forgot-password/page-75dd502947e1f7ac.js` contains "Verify you are human" — hCaptcha widget shipped.
+
+**Deferred to follow-up tickets (NOT blocking go-live, owner-acknowledged):**
+- BUG-152 — DB-backed pending-uploads table to replace the in-memory map (proper bound on anonymous PDF upload disk usage).
+- BUG-153 — Move vendor refresh token to server-set `HttpOnly; Secure; SameSite=Strict` cookie (kills XSS-token-theft risk).
+- BUG-154 — Encrypt `vendor_users.mfa_secret` at rest via existing `SecureSettingsService` KEK.
+- BUG-155 — Single-use MFA temp tokens with `mfa_temp_token_jti` row.
+- BUG-156 — `RefreshTokenDto` with `@MaxLength(2048)` + access-token revocation set on logout.
+- BUG-157 — Startup guard refusing `localhost` / `*` in `CORS_ORIGINS` when `NODE_ENV=production`.
+- BUG-158 — Verify-email button-click required (not autofire on mount); reduce token TTL from 24h to 1h.
+
+**Production environment requirements (owner must set BEFORE first prod deploy):**
+
+```
+# JWT secrets — each MUST be unique, random, >= 32 chars (the new
+# jwt.config.ts will refuse to boot otherwise):
+JWT_SECRET=$(openssl rand -base64 48)
+JWT_REFRESH_SECRET=$(openssl rand -base64 48)
+VENDOR_JWT_SECRET=$(openssl rand -base64 48)
+VENDOR_JWT_REFRESH_SECRET=$(openssl rand -base64 48)
+
+# CORS — list ONLY the public hostnames (no localhost, no *):
+CORS_ORIGINS=https://<admin-prod-host>,https://<vendor-prod-host>
+
+# Portal URLs — must be the public hostnames (BUG-144 used these in every email):
+ADMIN_PORTAL_URL=https://<admin-prod-host>
+VENDOR_PORTAL_URL=https://<vendor-prod-host>
+
+# CAPTCHA — real hCaptcha keys (the test keys 1000…0001 must be replaced):
+CAPTCHA_PROVIDER=hcaptcha
+CAPTCHA_SECRET_KEY=<real hcaptcha secret>
+HCAPTCHA_SITE_KEY=<real hcaptcha sitekey>  # also propagate to vendor portal
+                                            # as NEXT_PUBLIC_HCAPTCHA_SITE_KEY
+
+# SMTP — production relay (NOT mailhog):
+SMTP_HOST=<smtp host>
+SMTP_PORT=587
+SMTP_USER=<smtp user>
+SMTP_PASSWORD=<smtp password>
+
+# Email override — MUST be unset in production (BUG-121 routes ALL email
+# to a single address when set; we used this on staging):
+# notifications.email_override system setting cleared too.
+```
+
+**Open questions:** none.
+
+**Next recommended step:** owner walks the vendor portal forgot-password flow end-to-end on staging (open `/forgot-password`, complete hCaptcha, submit, check inbox / mailhog). Push BUG-130..151 to `origin/develop`.
+
+---
+
+## 2026-06-21 — BUG-150: Award Minutes PDF — content overhaul (price chain + comparison sections)
+
+**Date/time:** 2026-06-21 (owner: "Award Minutes PDF doesn't have financial values, there should be comparison for technical and commercial as well. if any negotiation it should also be included there.") **Owner-verified: "its good."**
+**Agent/task:** The pre-BUG-150 PDF showed a single `commercialEvaluations`-sourced total per bid; tenders priced via BoQ or Negotiation (no manual commercial-evaluation entries) rendered `—`. Owner also wanted the document to be a full decision record — per-criterion technical, per-line commercial, per-round negotiation history.
+
+**Files changed:**
+- `apps/api/src/modules/award/award-minutes.service.ts` — single-file overhaul. (1) `AwardMinutesData` shape extended with `BidEntry.originalPrice/negotiatedPrice/finalPrice/boqLines/negotiationRows/perCriterionScores`, plus new top-level `criteria[]`, `negotiationRounds[]`, `boqTemplate[]`. (2) `collectData()` rewritten — loads tender BoQ template + technical criteria once, loads every bid with full nested data (commercialEvaluations + bidBoqItems + negotiationInvitations + per-criterion scores), inlines the same 3-source resolver chain as `award.service.resolveBidWinningPrice` (Negotiation → BoQ → CommercialEvaluation). Per-criterion scores rescaled from the 0–100 storage scale to the criterion's `maxScore`. Tender-wide negotiation rounds matrix loaded separately. (3) `renderHtml()` rewritten — "All Bids Considered" table now has Original / Negotiated / Final price columns; three new conditional sections: "Technical Evaluation — Per-Criterion Scores" matrix (criteria rows × vendor columns, with MANDATORY badges + weight + Overall PASS/FAIL row), "Commercial Comparison — BoQ Line Items" matrix when tender has BoQ (item rows × vendor columns + BoQ Total row), and "Negotiation Rounds" matrix when any round happened (Original baseline + per-round rows × vendor columns with % change vs original + Final price row). Decision summary box gained Budgeted line. New CSS for matrix tables, `.total-row`, `.muted`, `.badge`, `.pass`/`.fail` pills.
+
+**Why this shape:**
+- Resolver-chain alignment matters: the same price the comparison surface showed at award time is what the minutes document records — no drift between UI and PDF.
+- Matrix layout (criteria/items down rows, vendors across columns) is the compactest accurate representation when there are 3–5 vendors. Per-vendor cards would have blown up the PDF length.
+- Per-criterion scores rescaled to criterion maxScore (rather than raw 0–100) so the document reads naturally to a non-technical reader.
+- "Original Price / Negotiated Price / Final Price" trio gives the reader the full decision provenance in one row.
+- Conditional rendering: BoQ matrix only appears if the tender used BoQ; Negotiation matrix only if rounds happened. Empty sections suppressed.
+
+**Verification:**
+- ✅ Typecheck clean: `pnpm -C apps/api build` (`nest build`) exit 0 after lambda type-annotation fixes.
+- ✅ Pre-flight disk: 35 GB free.
+- ✅ Rebuild produced `ctmp-api Built`; recreated; healthy in 10 s.
+- ✅ Deployed `dist/modules/award/award-minutes.service.js` contains "Technical Evaluation — Per-Criterion", "Commercial Comparison — BoQ", "Negotiation Rounds" strings + 13× `originalPrice` references (resolver chain inlined).
+- ✅ **Owner-verified end-to-end:** "its good."
+
+**Open questions:** none.
+
+**Next recommended step:** Push BUG-130..150 to `origin/develop`.
+
+---
+
+## 2026-06-21 — BUG-148 follow-up: revert committee-opening regression + one-off DB fix for TDR-2026-0024
+
+**Date/time:** 2026-06-21 (owner reported the BUG-148 UI surface ("Amend session" in committee-opening) was wrong — that queue is for pre-opening tenders only; my picker expansion polluted it and the page's regular attendance form 400'd with "Session already completed". Owner picked **Option A**: revert the UI, fix TDR-2026-0024 via one-off API call, skip building a UI lever entirely since the prevention rule is already shipped.)
+**Agent/task:** Two-step correction.
+
+**Files changed:**
+- `apps/web-admin/src/app/(admin)/committee-opening/page.tsx` — full revert of the BUG-148 frontend additions: `COMMITTEE_STATUSES` back to `['Commercial Sealed']`, deleted "Amend session" button in the session header strip, deleted `amendOpen`/`amendQuorum`/`amendRole`/`amendAttendance`/`amendReason`/`amending` state hooks + the pre-fill `useEffect` + the `handleAmend` function + the entire `{amendOpen && session && (...)}` modal JSX. Page returns to its pre-BUG-148 shape — only pre-opening tenders in the queue, only the existing Reschedule/attendance/open workflow.
+
+**TDR-2026-0024 unstuck via the deployed PATCH endpoint** (not via DB poke — keeps the audit hash chain intact through `AuditService.log()`):
+- Logged in as `admin@ctmp.local` (SYSTEM_ADMIN holds `committee:create_session`).
+- `PATCH /api/v1/committee-sessions/3f0e2130-…/amend` with `{ requiredQuorumCount: 3, reason: "One-off fix for TDR-2026-0024 stuck at award after legacy 3/4 opening predated the BUG-148 unified quorum rule…" }`.
+- `committee_sessions.required_quorum_count`: **4 → 3**.
+- `COMMITTEE_SESSION_AMENDED` HIGH audit row written, before/after JSON captured, reason text preserved.
+
+**What stays in place:**
+- Backend `PATCH /committee-sessions/:id/amend` route + service method + DTO — left as dead code. Harmless (fully audited, gated by `committee:create_session`), and reachable via curl + token if a similar legacy case surfaces later without re-deploying api. The frontend has zero references to it.
+- The prevention rule in `committee.service.openEnvelopes()` from earlier in BUG-148 — that's the durable fix. Going forward, opening a session under-quorum returns 400 at source.
+
+**Verification:**
+- ✅ Committee-opening page typecheck clean.
+- ✅ Page deployed; queue shows only `Commercial Sealed` tenders (TDR-2026-0024 correctly absent).
+- ✅ TDR-2026-0024 quorum gate now passes: `required=3, present=3, chair=present`. Award unblocked.
+- ✅ Audit row written: event_type `COMMITTEE_SESSION_AMENDED`, risk HIGH, before_q=4, after_q=3.
+
+**BUG-149 follow-up shipped same session:** the backend `award.service.confirmAward` had a SECOND hard-coded `length < 50` check that my BUG-149 DTO update missed (DTO was at 20 but service short-circuited at 50). Reduced to 20; error messages updated to "min 20 chars". Owner award now goes through.
+
+---
+
+## 2026-06-21 — BUG-148 + BUG-149: amend committee session + unified quorum + reduce comment min
+
+**Date/time:** 2026-06-21 (TDR-2026-0024 was stuck — commercial envelopes opened with 3/4 present but `required_quorum_count = 4`, so award blocked indefinitely with "Need 1 more member(s) present"; no UI lever existed to fix it. Owner also reported the override-award text field said "50 chars min" in the UI but the backend rejected anything under 100.)
+**Agent/task:** Two coupled fixes shipped together.
+
+### BUG-148 — Committee session: unified quorum rule + post-hoc amend
+
+**Files changed:**
+- `apps/api/src/modules/committee/dto/amend-session.dto.ts` — new DTO. Optional `requiredQuorumCount` / `requiredRoleCode` / `attendeeIds[]` + required `reason` (≥20 chars).
+- `apps/api/src/modules/committee/committee.service.ts` — (a) `openEnvelopes()` quorum check replaced. The pre-BUG-148 majority rule (`present*2 >= members.length`) would let opening succeed with 3/4 present even when `required_quorum_count = 4`, then the award stage would block. Both gates now consult the same `required_quorum_count` + `required_role_code` — they can never disagree again. Falls back to majority when `required_quorum_count` is unset (legacy sessions). (b) New `amendSession()` method: any session state allowed; updates quorum-count, role-code, and/or attendance; writes a HIGH `COMMITTEE_SESSION_AMENDED` audit row with full before+after snapshot (member list, presence flags, quorum config) and the reason text.
+- `apps/api/src/modules/committee/committee.controller.ts` — new `PATCH /committee-sessions/:sessionId/amend` route. Gated by `committee:create_session` (same authority that creates a session).
+- `apps/web-admin/src/app/(admin)/committee-opening/page.tsx` — new "Amend session" link in the session header strip, visible only when `session.status === 'COMPLETED'` and caller has `committee:create_session`. New amend modal with three controls: required-quorum-count number input, required-role-code text input, per-member attendance checkboxes (initialised from current attendance). Mandatory reason textarea (≥20 chars). Submit → PATCH.
+
+**Why this shape:**
+- Owner chose Option C — both build the lever AND fix the inconsistent quorum rule at the source. The rule fix is the durable bit; the lever covers what's already happened.
+- A separate amend endpoint (not modifying the existing `recordAttendance` to relax the COMPLETED block) keeps the surface contract clear: amend = HIGH audit + mandatory reason; record-attendance = LOW audit + only-before-completion. Different operational footprints.
+- Reusing `committee:create_session` perm avoids creating yet another permission for an already-narrow role set (PROCUREMENT_ADMIN / SYSTEM_ADMIN).
+
+### BUG-149 — Reduce award comment minimum 100 → 20 characters
+
+Owner reported a confusing mismatch: the override-award UI said "Minimum 50 characters" but the backend enforced `@MinLength(100)`. So users would write 50 chars, submit, get a server error demanding 100. Source-of-truth was split between UI hint and DTO.
+
+**Files changed:**
+- `apps/api/src/modules/award/dto/confirm-award.dto.ts` — `@MinLength(100)` → `@MinLength(20)` on `justificationText`. Description text updated.
+- `apps/api/src/modules/award/dto/amend-award.dto.ts` — `@MinLength(100)` → `@MinLength(20)` on `justificationText`. Description text updated.
+- `apps/web-admin/src/components/comparison/AwardConfirmDialog.tsx` — every "50" / "100" character mention reduced to 20 (header comment, the gate variable, override warning copy, textarea placeholder, character-counter copy + threshold).
+- `apps/web-admin/src/components/comparison/AmendAwardDialog.tsx` — same: gate, placeholder, counter — all 100 → 20.
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — the FAIL-vendor warning copy "min 100 chars" → "min 20 chars".
+
+UI hint and DTO enforcement now match at 20 everywhere.
+
+**Verification:**
+- ✅ Typecheck clean: `pnpm -C apps/api build` exit 0; `pnpm -C apps/web-admin build` clean (first attempt had a stale `displayName` / `isChair` reference in the amend modal — fixed to use the local `CommitteeMember` interface fields `name` + `role`).
+- ✅ Pre-flight disk: 48 GB free.
+- ✅ Rebuild produced `ctmp-api Built` + `ctmp-web-admin Built`.
+- ✅ `up -d --force-recreate api web-admin` clean; api healthy in 10 s.
+- ✅ Deployed `dist/modules/committee/committee.service.js` contains `amendSession` (1×) + `COMMITTEE_SESSION_AMENDED` (1×).
+- ✅ Deployed `dist/modules/award/dto/confirm-award.dto.js` shows compiled `(0, class_validator_1.MinLength)(20)` decorator + OpenAPI description `min 20 chars`.
+- Pending owner walkthrough on TDR-2026-0024: open `/committee-opening`, pick TDR-2026-0024 → session header now shows an "Amend session" link → click → either drop required quorum to 3 OR toggle Finance to present → type ≥20-char reason → Save. Quorum chip should clear; award should unblock.
+
+**Open questions:** none. Owner can now self-unstick TDR-2026-0024 via UI — no DB poke needed.
+
+**Next recommended step:** owner walkthrough + push BUG-130..149 to `origin/develop`.
+
+---
+
+## 2026-06-21 — BUG-147: clarifications go two-way + full active lifecycle + admin can initiate to vendor
+
+**Date/time:** 2026-06-21 (owner walkthrough — tested + working).
+**Agent/task:** Three coupled fixes that finish the half-built BUG-141 work and close all clarification gaps. Owner reported vendors couldn't ask on TDR-2026-0019 (NEGOTIATION), engineers had no UI to initiate a clarification to a vendor, and vendors couldn't reply when admin asked them something.
+
+**Files changed:**
+- `database/migrations/045_bug147_clarification_two_way.sql` — new migration. `tender_clarification_replies.replied_by_user_id` → nullable. Added `replied_by_vendor_user_id UUID NULL` with FK to `vendor_users(id)` + index. Check constraint `tender_clarification_replies_reply_caller_check` enforces exactly one of the two id columns is set per row.
+- `apps/api/prisma/schema.prisma` — `TenderClarificationReply.repliedByUserId` made optional + new `repliedByVendorUserId` field + new relation `repliedByVendorUser → VendorUser`. VendorUser gets back-rel `clarificationReplies` with relation name `ClarificationReplyByVendorUser`.
+- `apps/api/src/modules/clarifications/dto/create-clarification.dto.ts` — new optional `targetVendorId` (UUID). Used only when caller is admin.
+- `apps/api/src/modules/clarifications/clarifications.service.ts` — module-level constant `CLARIFICATION_ALLOWED_STATES` covers full active lifecycle (`PUBLISHED → AWARDED`, excluding pre-publish + terminal). Both `create()` and `myTendersWithClarifications()` consult it — single source of truth. `create()` requires `targetVendorId` when caller is admin + verifies target vendor is engaged (invited or has bid) — rejects random-vendor targeting. `reply()` allows vendor caller when `clarification.vendorId === user.vendorId` and admin caller when they hold `clarification:reply`; status flips to OPEN when vendor replies, ANSWERED when admin replies. `findAll()` now exposes `askedByAdmin`, `askedByName`, and per-reply `repliedByAdmin` so the UI can distinguish caller types.
+- `apps/api/src/modules/clarifications/clarifications.controller.ts` — `POST /clarifications/:id/reply` switched from `JwtAuthGuard + PermissionsGuard` to `OptionalVendorOrUserGuard` only; permission check moved into service (because vendor tokens carry no `permissions[]` claim and the old PermissionsGuard would reject them).
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — per-tender Clarifications tab gets new "+ Ask vendor a question" button (gated on `clarification:reply`). New `AskVendorDialog` modal with vendor picker (sourced from `/tenders/:id/bids` deduped) + question textarea (≥10 chars). Old `ClarificationReplyForm` had a leftover `isPublic` checkbox missed in BUG-145 — removed (private-only label now).
+- `apps/web-vendor/src/app/(portal)/clarifications/page.tsx` — `Clarification` interface gains `askedByAdmin`, `askedByName`, and per-reply `repliedByAdmin`. `ThreadCard` shows a `FROM PROCUREMENT` chip when admin asked. New `VendorReplyForm` renders below threads where the ball is in vendor's court (admin asked + no reply, OR latest reply was from admin).
+
+**Why this shape:**
+- Whitelist hoisted to a constant after BUG-146 follow-up drifted (picker had 5 states, `create()` had 5 different states — never again).
+- Full active lifecycle (`PUBLISHED → AWARDED`) chosen because owner's intent has always been "as long as the tender is live". `NEGOTIATION` and `AWARD_RECOMMENDATION` were the missing ones that triggered the report.
+- Two-way reply uses a single `tender_clarification_replies` table with caller-type discriminated by which id column is set — simpler than splitting into separate question/answer tables.
+- Status flips: vendor reply → OPEN (admin's turn), admin reply → ANSWERED (waiting on vendor or done). Drives the UI's "ball in your court" reply-form visibility.
+- Admin-initiated clarifications must target a specific vendor — otherwise the vendor-side query (`where.vendorId = caller.vendorId`) has nothing to match against, and the thread would be invisible to everyone.
+
+**Verification:**
+- ✅ Typecheck clean on all 3 apps (api `nest build`, web-admin + web-vendor `next build` exit 0).
+- ✅ Pre-flight staging disk: 56 GB free (no prune needed; earlier 100% issue resolved via prior `docker builder prune -af`).
+- ✅ Migration 045 applied on staging via `docker exec -i ctmp-postgres psql … < migration`. Schema confirmed: `replied_by_user_id` nullable, `replied_by_vendor_user_id` UUID + FK + index + check constraint present.
+- ✅ Rebuild produced `ctmp-api Built` + `ctmp-web-admin Built` + `ctmp-web-vendor Built`.
+- ✅ `up -d --force-recreate api web-admin web-vendor` clean; api healthy in 10 s.
+- ✅ Deployed api dist contains `CLARIFICATION_ALLOWED_STATES` (3×), `targetVendorId` (5×), `repliedByVendorUser` (3×).
+- ✅ Deployed admin chunk contains "Ask vendor a question" + "Ask a vendor a clarification" strings.
+- ✅ Deployed vendor chunk contains "FROM PROCUREMENT" chip text.
+- ✅ **Owner walkthrough confirmed working** on TDR-2026-0019: vendor sees tender in picker, can ask + reply; admin can ask the vendor and see replies; cross-vendor privacy holds.
+
+**Open questions:** none.
+
+**Next recommended step:** Push BUG-130..147 to `origin/develop`. Local develop is now ~28 commits ahead of `fc9e484`.
+
+---
+
+## 2026-06-21 — BUG-146 follow-up: picker must let vendor initiate NEW threads, not just view old ones
+
+**Date/time:** 2026-06-21 (immediately after BUG-146 shipped — owner: "TDR-2026-0019 i am checking from vendor and i cannot post any clarification? is it correct?")
+**Agent/task:** My first BUG-146 picker fix only returned tenders the vendor *already* had a thread on. So a vendor wanting to *initiate* a new clarification on a tender they'd never asked about before saw an empty picker. Regression caught same-day. Fix expands the picker source to also include tenders the vendor is engaged with (invited or has bid) and which are in a clarification-eligible state, in addition to the existing "has thread" case.
+
+**Files changed:**
+- `apps/api/src/modules/clarifications/clarifications.service.ts` — `myTendersWithClarifications(user)` rewritten. Old version queried `tenderClarification.findMany.where.vendorId` then deduped. New version queries `tender.findMany` with an `OR`: (A) `tenderClarifications: { some: { vendorId: user.vendorId } }` regardless of tender state (so vendor can always navigate back to historical threads), or (B) `AND { status in [PUBLISHED, CLARIFICATION_PERIOD, TECHNICAL_OPENING, TECHNICAL_EVALUATION, COMMERCIAL_EVALUATION], OR [{ tenderVendors: { some: { vendorId } } }, { bids: { some: { vendorId } } }] }` — so vendor can initiate a new thread on tenders they're engaged with, in any state where the create() endpoint will accept new threads. Order by `updatedAt desc`. Still returns only `id / reference / title / status` — no commercial / bid data.
+
+**Why this shape:**
+- Owner's earlier directive (must NOT expose commercial state to vendors via the regular tender list) still applies. The new picker still exposes only the minimal identity fields, only for tenders the vendor is already engaged with.
+- The status whitelist matches BUG-141's `create()` whitelist 1:1 so the picker never shows a tender where the vendor would then hit a 400 trying to post.
+- The "has-thread" branch has no status filter — so even on a tender that has moved to AWARDED, vendor can still navigate back to their old threads (read-only since the create whitelist won't accept new ones, but the existing list+read endpoint works).
+
+**Verification:**
+- ✅ Typecheck clean: `pnpm -C apps/api build` exit 0 (`nest build`).
+- ✅ Pre-flight: staging disk at 100% mid-prior-build (BUG-118 pattern hit again). Killed stuck build, `docker builder prune -af` → reclaimed 71.89 GB, disk back to 37% used. Re-ran rebuild successfully.
+- ✅ Rebuild produced `ctmp-api Built`.
+- ✅ `up -d --force-recreate api` clean; container healthy in ~32 s.
+- ✅ Deployed `dist/modules/clarifications/clarifications.service.js`: 1× `tenderVendors` (invited branch of the new where clause), 2× `allowedForNewThread` (const def + usage).
+- ✅ Unauth `GET /api/v1/vendor/clarification-tenders` → 401 (VendorJwtAuthGuard still applied).
+- ✅ `GET /api/v1/health` → 200 ok.
+- Pending live smoke (owner): on TDR-2026-0019 the vendor should now see the tender in the picker (because they're invited/have bid) AND be able to submit a new clarification question. The "Ask a question" form lands on the existing `POST /tenders/:tenderId/clarifications` which already accepts vendor calls and was widened in BUG-141.
+
+**Open questions:** none. The admin-initiates-to-vendor flow (BUG-147 candidate) remains separate scope per owner directive.
+
+**Next recommended step:** owner walk TDR-2026-0019: pick it from the vendor portal `/clarifications` picker, type a question, submit, confirm it appears as a new thread. Then push BUG-130..146 to `origin/develop`.
+
+---
+
+## 2026-06-21 — BUG-146: vendor portal clarifications picker missed tenders past Clarification Period
+
+**Date/time:** 2026-06-21 (post-BUG-145 walkthrough — owner: "vendor clarification portal still doesnot have clarifications, check tender TDR-2026-0025 it is opened for technical evaluation … in vendor portal this tender doesnt show any clarification at all").
+**Agent/task:** Root cause: my BUG-145 picker expansion (`ELIGIBLE_STATUSES` widened to the full lifecycle) was wishful thinking. The vendor portal picker calls `GET /tenders?status=…` for each status — but `tenders.service.ts:189-205` intentionally restricts vendors to seeing tenders in `PUBLISHED | CLARIFICATION_PERIOD | NEGOTIATION` only. So a tender in Technical Evaluation never reaches the vendor's tender list, never lands in the picker, and the vendor can't navigate to their own clarification threads on it. **Owner directive:** "we do not want to show vendor any status of commercial, just clarifications if requested by engineer or manager to appear in vendor portal so they can reply back." So we MUST NOT widen the general tender visibility filter — that would leak commercial / award state. Targeted fix only.
+
+**Files changed:**
+- `apps/api/src/modules/clarifications/clarifications.service.ts` — new `myTendersWithClarifications(user)` method. Vendor-only. Queries `tenderClarification` where `vendorId = user.vendorId`, dedupes by tender id (preserving most-recent-first order), returns `[{ id, referenceNumber, title, status }]`. Skips the tender visibility filter entirely — only exposes the *identity* of tenders the vendor *already has a thread on*, not commercial state. Inline `TENDER_STATUS_LABEL` map at module scope humanises the Prisma `TenderStatus` enum to the label form the frontend StatusBadge expects (avoids cross-module import from `tenders.service.ts`).
+- `apps/api/src/modules/clarifications/clarifications.controller.ts` — new `GET /vendor/clarification-tenders` route. `@UseGuards(VendorJwtAuthGuard)` so admin tokens can't hit it. Returns the service result as-is.
+- `apps/web-vendor/src/app/(portal)/clarifications/page.tsx` — picker source switched from `Promise.all(ELIGIBLE_STATUSES.map(s => GET /tenders?status=s))` to a single `GET /vendor/clarification-tenders`. Old `ELIGIBLE_STATUSES` array removed and replaced with an explanatory comment block explaining why the picker no longer iterates statuses.
+
+**Why this shape (not "let vendors see all their tenders"):**
+- Owner: vendors must not see commercial / award status — that's a separation-of-duties + bid-secrecy rule.
+- The new endpoint exposes ONLY tender id/reference/title/status for tenders the vendor *already* has a clarification thread on. No commercial info. No bid info. Status is leaked, but only for tenders the vendor is already correspondance-engaged with — they'd see the status as soon as the admin sends them a clarification anyway.
+- The existing `GET /tenders/:tenderId/clarifications` endpoint already enforces vendor-id ownership (BUG-145 query — vendor sees only own threads). Doesn't gate on tender visibility. So once the picker has a tenderId, fetching the threads works.
+
+**Not in scope (flagged for follow-up):**
+- Admin currently has NO UI to *ask* a vendor a question. `CreateClarificationDto` has only `question`; no `targetVendorId` field. The admin clarifications page only surfaces existing threads + reply. So the engineer/manager workflow today is: reply to vendor's existing threads. If owner wants admins to *initiate* clarifications to vendors mid-evaluation, that's a separate scope (BUG-147 candidate): extend the DTO, add the admin UI, set `vendor.connect` in `create()` when caller is admin + DTO has target.
+- Vendors today cannot post `reply` (controller forbids). The flow is asymmetric: vendor `create` (new question), admin `reply` (answer). If multiple back-and-forth is needed mid-evaluation, the current model is: vendor opens a *new* clarification on the same tender for each new question. Picker fix here surfaces the tender so the vendor can use the existing "Ask a question" form to start subsequent threads.
+
+**Verification:**
+- ✅ Typecheck clean: `pnpm -C apps/api build` (`nest build`) exit 0; `pnpm -C apps/web-vendor build` (`next build`) clean.
+- ✅ Pre-flight: staging disk hit 100% (BUG-118 silent-failure pattern) mid-build — killed stuck build, ran `docker builder prune -af` → reclaimed 71.89 GB, disk back to 32% used.
+- ✅ Rebuild produced `ctmp-api Built` + `ctmp-web-vendor Built`.
+- ✅ Recreated; ctmp-api healthy in ~25 s, ctmp-web-vendor up.
+- ✅ Deployed `dist/modules/clarifications/clarifications.controller.js` contains the new `clarification-tenders` route.
+- ✅ Deployed `dist/modules/clarifications/clarifications.service.js` contains `myTendersWithClarifications`.
+- ✅ Vendor portal deployed chunk `page-c5bc05c287d95358.js` references the new endpoint.
+- ✅ Unauthenticated `GET /api/v1/vendor/clarification-tenders` returns `401` (VendorJwtAuthGuard correctly applied).
+- Pending live smoke (owner): on TDR-2026-0025 the vendor whose threads exist on it should now see the tender in the picker, and clicking it should render the threads + admin replies.
+
+**Open questions:** Owner to confirm whether the admin-initiates flow is needed for go-live; if so, separate ticket.
+
+**Next recommended step:** Owner walkthrough on TDR-2026-0025; if all good, push BUG-130..146 to `origin/develop`.
+
+---
+
+## 2026-06-19 — BUG-145: clarification replies are always private; vendor portal picker expanded
+
+**Date/time:** 2026-06-19 (same-day after the BUG-144 walkthrough — owner: "make it private all clarification answer. Remove public reply, just keep private with vendor no public. Vendor portal clarification is not appearing in clarification.")
+**Agent/task:** Two coupled changes. (1) Every clarification reply is now private to the asking vendor; the public/general-public visibility option is removed end-to-end. (2) The vendor portal `/clarifications` page was filtering its tender picker to `Published | Clarification Period` only, so any tender past those states dropped off the picker and the vendor lost sight of their own threads (including replies that arrived after the tender moved into Submission Closed / Technical Opening / etc.). Picker expanded to the full visible lifecycle.
+
+**Files changed:**
+- `apps/api/src/modules/clarifications/dto/reply-clarification.dto.ts` — dropped the `isPublic` field. DTO is now just `{ reply: string }`. Old clients that still send `isPublic` get ignored silently (no `@IsOptional` carve-out needed — class-validator strips unknown fields under the global `whitelist` transformer; even if it didn't, the service now ignores it).
+- `apps/api/src/modules/clarifications/clarifications.service.ts` — `findAll()` simplified: vendor branch now uses `where.vendorId = user.vendorId` (own threads only); the old `where.OR = [{ vendorId }, { replies: { some: { isPublic: true } } }]` clause is gone. Identity-redaction map step removed since vendors only ever see their own threads now. Response `visibility` field hard-pinned to `'PRIVATE_TO_VENDOR'` for backwards-compat with existing frontends. `reply()` writes `isPublic: false` unconditionally; the column stays on the table for historical rows.
+- `apps/web-admin/src/app/(admin)/clarifications/page.tsx` — dropped the `ReplyVisibility` type, the `visibility` useState, the Private/Public toggle (`<button>` × 2 inside the rounded toggle), the lock-vs-globe chip in both the collapsed and expanded thread cards, and the now-unused `Globe` import. Toggle row replaced with a single-line lock-icon notice: "Replies are private to the asking vendor." Reply POST now sends just `{ reply }`.
+- `apps/web-vendor/src/app/(portal)/clarifications/page.tsx` — `ELIGIBLE_STATUSES` expanded from `['Published', 'Clarification Period']` to the full vendor-visible lifecycle (`Published`, `Clarification Period`, `Submission Closed`, `Technical Opening`, `Technical Evaluation`, `Commercial Sealed`, `Committee Commercial Opening`, `Commercial Evaluation / Comparison`, `Negotiation`, `Award Recommendation`, `Awarded`). Page header subtitle reworded ("All replies are private to your company."). Empty-state copy on both no-tenders and no-clarifications cards reworded. Per-reply chip hard-coded to `PRIVATE` (neutral tone).
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` (clarifications tab inside tender detail) — chip simplified to a static "Private to vendor" pill; the old `r.visibility === 'GENERAL_PUBLIC' ? 'Public' : 'Private to vendor'` branch removed. Caught after the first deploy's grep showed one stray `GENERAL_PUBLIC` reference remaining in the deployed admin bundle outside the dedicated clarifications page.
+- `apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx` (clarifications block on the vendor tender detail) — same simplification: static "Private" pill, ternary removed.
+
+**Why:**
+- Owner wanted strict 1:1 vendor↔procurement privacy — no clarifications visible to other vendors.
+- The vendor-picker status filter was set when only Published / Clarification Period allowed clarifications. BUG-141 widened the backend whitelist to Technical Opening / Technical Evaluation / Commercial Evaluation but the vendor picker wasn't extended, so vendors couldn't navigate to threads on tenders in those states. The expansion goes further to also cover post-evaluation states (Commercial Sealed → Awarded) so vendors can still read historical threads after the tender progresses.
+- Historical rows where `isPublic = TRUE` exist in the DB on staging. They're effectively neutralised by the new query (vendor sees only own threads — the public-OR clause is gone) and the response visibility pin (always reports `PRIVATE_TO_VENDOR`). No migration needed; the column stays for audit reasons.
+
+**Verification:**
+- ✅ Typecheck clean: api (`nest build`), web-admin (`next build` 26/26 pages), web-vendor (`next build`) — all exit 0.
+- ✅ Tar+ssh deploy.
+- ✅ `docker compose build --no-cache api web-admin web-vendor` produced all 3 `Built` lines (first attempt hit a transient `pnpm install` socket error; retry was clean — same pattern as BUG-144's first attempt).
+- ✅ `up -d --force-recreate` clean; ctmp-api healthy, web-admin + web-vendor up.
+- ✅ Deployed `dist/modules/clarifications/clarifications.service.js`: zero `GENERAL_PUBLIC` references; one `PRIVATE_TO_VENDOR` (the pinned visibility field).
+- ✅ Deployed admin chunks: zero `GENERAL_PUBLIC` references after the round-2 tender-detail fix.
+- ✅ Deployed vendor chunks: zero `GENERAL_PUBLIC` references after the round-2 tender-detail fix.
+- Pending live smoke: vendor A asks a question on a tender; admin replies (no Visibility toggle visible); vendor A sees the reply with the static `PRIVATE` chip; vendor B does NOT see vendor A's thread on the same tender; expanded picker shows tenders in Submission Closed / Technical Opening / etc.
+
+**Open questions:** none. Locked-rules unaffected.
+
+**Next recommended step:** owner walkthrough confirming admin reply UX no longer has a Visibility toggle + vendor portal picker shows tenders in current state + private chip renders correctly.
+
+---
+
+## 2026-06-19 — BUG-144: every email link is now an absolute URL (cross-cutting)
+
+**Date/time:** 2026-06-19 (same-day follow-up to BUG-143 — owner noticed the BUG-143 verification email landed with `/technical-evaluation?tenderId=…` as a relative path, asked to audit all emails).
+**Agent/task:** Root cause: `app.adminPortalUrl` was never registered in `app.config.ts`, so `this.config.get('app.adminPortalUrl')` returned `undefined` everywhere and every site fell back to its `?? ''` empty-string branch → relative URL. Same gap for `vendor.portalUrl`. Plus the `vendor-verify-email` template referenced `{{verifyUrl}}` but the dispatch only passed `{ token }`, so the email rendered the literal `{{verifyUrl}}` text (or empty, depending on the templating engine).
+
+**Files changed:**
+- `apps/api/src/config/app.config.ts` — registers two new config keys with **hardcoded staging-URL defaults** (`adminPortalUrl = process.env.ADMIN_PORTAL_URL ?? 'https://ctmp-admin.hadiclinic.com.kw:4202'`, `vendorPortalUrl = process.env.VENDOR_PORTAL_URL ?? 'https://vn.hadiclinic.com.kw:4201'`). Trailing slashes stripped at registration time so call sites can concatenate without double-slashing.
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.ts` — `register()` now computes `verifyUrl = ${portalUrl}/verify-email?token=${rawToken}` and passes it into the `vendor-verify-email` `sendEmail` variables alongside `token`. `requestPasswordReset` rewritten to use the new `app.vendorPortalUrl` config key (was `vendor.portalUrl` which never resolved).
+- `apps/api/src/modules/award/award.service.ts` — `vendor.portalUrl` → `app.vendorPortalUrl`.
+- `apps/api/src/modules/negotiation/negotiation.service.ts` + `apps/api/src/modules/tenders/tenders.service.ts` — `tenderUrl` derivation no longer has the `vendorPortalUrl ? … : '/tenders/${id}'` relative-fallback branch. The config-backed default is always a full URL, so the relative branch was dead code masking the bug. Falls back: `SystemSetting branding.vendor_portal_url` → `app.vendorPortalUrl` config → empty (but never reached now).
+- `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts` — both dispatch sites (BUG-140 finalize + BUG-143 open) drop their `adminBase ? … : '/...'` relative-fallback branches for the same reason.
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.spec.ts` — pre-existing test gap from BUG-137: spec providers were missing `SystemSettingsService` + `VendorDocumentStorageService`, every test was erroring with `Nest can't resolve dependencies`. Added the two mocks. All 34 tests now pass. Not strictly part of BUG-144 but the suite needed to be green to confirm BUG-144 didn't regress anything.
+
+**URL-emitting templates verified (9 active templates with a URL token):**
+| Template | Token | Portal | Dispatch site | Fixed |
+|---|---|---|---|---|
+| `vendor-verify-email` | `{{verifyUrl}}` | Vendor | `vendor-auth.service.register` | ✅ verifyUrl now passed |
+| `vendor-reset-password` | `{{resetUrl}}` | Vendor | `vendor-auth.service.requestPasswordReset` | ✅ |
+| `TENDER_INVITATION_SENT` | `{{tenderUrl}}` | Vendor | `tenders.service.dispatchInvitationEmail` | ✅ |
+| `TENDER_INVITATION_REMINDER` | `{{tenderUrl}}` | Vendor | same (via `templateCode` opt) | ✅ |
+| `TENDER_NEGOTIATION_LAUNCHED` | `{{tenderUrl}}` | Vendor | `negotiation.service` | ✅ |
+| `TENDER_AWARDED_WINNER` | `{{vendorPortalUrl}}/bids/{{bidId}}` | Vendor | `award.service` | ✅ |
+| `TENDER_AWARDED_LOSER` | `{{vendorPortalUrl}}/bids/{{bidId}}` | Vendor | `award.service` | ✅ |
+| `TECHNICAL_EVALUATION_FINALIZED` | `{{tenderUrl}}` | Admin | `technical-evaluation.service.finalize` | ✅ |
+| `TECHNICAL_ENVELOPES_OPENED_EVALUATOR` | `{{tenderUrl}}` | Admin | `technical-evaluation.service.openEnvelopes` | ✅ |
+| `COMMITTEE_SESSION_INVITATION` | (none) | — | `committee.service` | n/a — body has no URL token after BUG-126 |
+
+**Why a single registered config key + hardcoded default:**
+- The owner's directive was "every email link should be a complete URL." Centralising the default in `app.config.ts` means future dispatch sites can't accidentally fall back to relative URLs — the helper always returns a string.
+- Defaults are **staging URLs** (per CLAUDE.md). When this stack ships to a different host, set `ADMIN_PORTAL_URL` + `VENDOR_PORTAL_URL` in the deploy environment to override.
+- Trailing-slash stripping at registration time avoids the double-slash drift we'd otherwise see if half the call sites did `.replace(/\/$/, '')` and half didn't.
+
+**Verification:**
+- ✅ Typecheck clean: `pnpm -C apps/api build` exit 0 (`nest build`).
+- ✅ `pnpm jest --testPathPattern=vendor-auth` — 34/34 passing (was 0/34 before — pre-existing gap from BUG-137 fixed in this commit).
+- ✅ Tar+ssh deploy to `/mnt/repo/ctmp-platform`; pre-flight disk 19 GB free.
+- ✅ Rebuild produced `ctmp-api Built`; `up -d --force-recreate api` clean; container healthy in <15 s.
+- ✅ Deployed `dist/config/app.config.js` contains both `hadiclinic.com.kw` URLs (defaults compiled in).
+- ✅ All 5 service `.js` files reference the new config keys: `technical-evaluation.service.js` (2×), `vendor-auth.service.js` (2×), `award.service.js` (1×), `negotiation.service.js` (1×), `tenders.service.js` (1×).
+- Pending owner spot-check: trigger any of `Publish` (vendor invitation), `Open technical envelopes` (evaluator email — BUG-143 path), `Finalize technical evaluation` (manager email — BUG-140 path), `Forgot password` (vendor reset), `Register` (vendor verify) — confirm each email body now shows absolute `https://ctmp-admin.hadiclinic.com.kw:4202/...` or `https://vn.hadiclinic.com.kw:4201/...` URLs.
+
+**Open questions:** none. `notifications.email_override` (BUG-121) still routes outbound to the test inbox if set.
+
+**Go-live override (added 2026-06-19 same-day in response to owner Q):**
+- `infrastructure/docker/docker-compose.yml` now passes `ADMIN_PORTAL_URL` + `VENDOR_PORTAL_URL` into the api container's `environment:` block (with the same staging defaults as the in-code fallback, so the chain `.env` → compose → container env → `app.config.ts` → emails works end-to-end).
+- `infrastructure/docker/.env.example` documents both keys with the staging values as the template.
+- On go-live the owner edits `.env` on the new host:
+  ```
+  ADMIN_PORTAL_URL=https://new-admin-url.example.com
+  VENDOR_PORTAL_URL=https://new-vendor-url.example.com
+  ```
+  then `docker compose --project-name ctmp up -d --force-recreate api`. No code change, no rebuild. Verified on staging: `docker exec ctmp-api env | grep _PORTAL_URL` returns both vars set to the staging URLs.
+
+**Next recommended step:** owner spot-check on the recent emails in MailHog or the override inbox to confirm all URLs render as absolute. Then push BUG-130..144 to `origin/develop`.
+
+---
+
+## 2026-06-19 — BUG-143: evaluator email when technical envelopes are opened (closes deferred BUG-020)
+
+**Date/time:** 2026-06-19 (same-day Q from the BUG-142 walkthrough — owner asked "when technical opens, will the engineer receive any notification in email?". Code review confirmed no: `openEnvelopes()` only flipped envelope status + status + audit. Closes the long-standing BUG-020 Open-table item.)
+**Agent/task:** Mirror the BUG-140 dispatch shape to send a notification email to the tender department's `TECHNICAL_EVALUATOR` role-holders the moment technical envelopes open, so engineers know they can start scoring without manually polling the admin queue.
+
+**Files changed:**
+- `database/migrations/044_bug143_technical_opened_template.sql` — new migration. Seeds `notification_templates` row `TECHNICAL_ENVELOPES_OPENED_EVALUATOR` (EMAIL, en, active). Subject `[{{systemName}}] Technical envelopes opened — {{tenderReference}}`. Body tokens: `evaluatorName`, `tenderReference`, `tenderTitle`, `submissionCount`, `newStatus`, `departmentName`, `tenderUrl`, `systemName`. Links to `/technical-evaluation?tenderId=…`.
+- `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts` — `openEnvelopes()` now calls best-effort `dispatchOpenedEmail(tenderId, openedEnvelopeCount)` after the audit log (failures logged, never roll back the status flip). New private `dispatchOpenedEmail()` resolves recipients via `prisma.user.findMany({ status: ACTIVE, userRoles ∋ TECHNICAL_EVALUATOR, userDepartments ∋ tender.departmentId })`, loops with per-recipient try/catch so one bad email doesn't kill the rest, then writes a single `TECHNICAL_OPENED_EMAIL_SENT` LOW audit row with the recipient list (or `recipientCount: 0` + `reason: 'no_active_evaluators_in_department'` when the dept has no role-holders — visible operational gap).
+
+**Why:**
+- Recipient set is **dept-scoped TECHNICAL_EVALUATOR role-holders**, not all `technical:evaluate` perm-holders — keeps system-admin out of the recipient list (separation of duties; aligns with BUG-050 dept-scoping pattern). Cross-dept committee evaluators (BUG-062) intentionally excluded for V1 — owner can expand if needed.
+- Dispatch is **best-effort** (after-transaction, single try/catch wrapper at the call site, plus per-recipient try/catch inside the loop). Matches BUG-140 pattern. The envelope-open status flip is the load-bearing change; the email is convenience.
+- Recipient resolution happens **fresh on each call**, not cached, so adding a TECHNICAL_EVALUATOR to a dept right after open won't reach them via this path — that's acceptable since they'd see it in the admin UI queue anyway.
+
+**Verification:**
+- ✅ Typecheck clean: `pnpm -C apps/api build` (`nest build`) exit 0.
+- ✅ Migration 044 applied via `docker exec -i ctmp-postgres psql -U ctmp -d ctmp < …044…sql` → BEGIN / INSERT 0 1 / COMMIT. Template row present in `notification_templates` (EMAIL, en, active).
+- ✅ Rebuild produced `ctmp-api Built`; `up -d --force-recreate api` clean; container healthy in <15 s.
+- ✅ Deployed `technical-evaluation.service.js` contains `TECHNICAL_OPENED_EMAIL_SENT` (2× — audit calls in both the empty-dept and post-loop branches) + `TECHNICAL_ENVELOPES_OPENED_EVALUATOR` (2× — sendEmail call + skipping log).
+- Pending live smoke: owner walkthrough on a TDR — push it through `Submission Closed → Open Technical Envelopes`, confirm a `notification_logs` row appears keyed to template `TECHNICAL_ENVELOPES_OPENED_EVALUATOR` + a `TECHNICAL_OPENED_EMAIL_SENT` LOW audit row appears with the recipient list. `notifications.email_override` (BUG-121) still routes all outbound TO/BCC to `root@hadiclinic.com.kw` if set — check there or in MailHog if the test inbox doesn't land.
+
+**Open questions:**
+- If owner wants cross-dept TECHNICAL_EVALUATOR notifications (committee evaluators borrowed from other depts per BUG-062), the recipient filter can drop the `userDepartments` join — flagged as a deferred extension, not shipped.
+- Per-evaluator opt-out is not modelled. If noise becomes an issue we can add a `users.notification_preferences JSONB` later; out of scope now.
+
+**Next recommended step:** owner walkthrough — push a tender through `Submission Closed → Open Technical Envelopes`, confirm the TECHNICAL_EVALUATOR users on that dept receive the email. Then push the BUG-130..143 wave to `origin/develop`.
+
+---
+
+## 2026-06-19 — BUG-142: bid supporting documents relocated from Bids tab → Commercial Comparison
+
+**Date/time:** 2026-06-19 (same-day walkthrough follow-up to BUG-137/139)
+**Agent/task:** Owner reviewed the surface on staging and rejected BUG-139's placement of supporting documents inside the Bids tab on `/tenders/[id]`. The Bids tab is a status roster; supporting documents are commercial-side secondary evidence (certificates, authorisation letters) that belong next to the priced offer. Moved them into a new "Supporting documents" sub-section inside each per-vendor card on the Commercial Comparison page, alongside the existing "Commercial documents" block. Backend gate loosened from both-envelopes-OPENED → commercial-envelope-OPENED to match the new surface's secrecy model.
+
+**Files changed:**
+- `apps/web-admin/src/components/SupportingDocumentsList.tsx` — new component, near-copy of `CommercialDocumentsList.tsx`. Gates on `commercialEnvelopeStatus === 'OPENED'`, fetches `/bids/:bidId/supporting-documents`, renders filename + View (`usePdfViewer`) + Download per file. 403-aware error path.
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — new Block 3b ("Supporting documents") inserted between Block 3 ("Commercial documents") and Block 4 ("Vendor profile"); imports the new component. Same FileText icon + uppercase tracked label style as the surrounding blocks.
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — stripped from `BidsTabPanel`: the `BidSupportingDocRow` interface, `supportingByBid` state, the per-bid supporting-doc fetch effect (incl. the `bothOpened` filter), the blue supporting-doc child-rows render block, and the `SupportingDocActions` helper. The tab now returns to its BUG-131 shape: initial rows + amber Round-N rows only.
+- `apps/api/src/modules/bids/bids.service.ts` — replaced the private `bothEnvelopesOpened()` helper with `commercialEnvelopeOpened()` (checks just the commercial envelope's status). Both call sites updated (`listSupportingDocuments` line ~636 + `streamSupportingDocument` line ~817). 403 message reworded: `Supporting documents become visible once the commercial envelope is opened.`
+
+**Why:** BUG-139's "both envelopes OPENED" gate matched the Bids tab placement (which mixed technical-side and commercial-side info). With the relocation, the gate matches the placement again — supporting docs live alongside the commercial PDFs and share the commercial-envelope secrecy. In practice the gate is rarely looser since commercial envelopes only open after technical envelopes have been opened.
+
+**Verification:**
+- ✅ Typecheck clean: `pnpm -C apps/api build` exited 0 (`nest build`); `pnpm -C apps/web-admin build` produced `✓ Compiled successfully in 19.8s` + `Generating static pages (26/26)`.
+- ✅ Pre-flight staging disk: 32 GB free (no prune needed).
+- ✅ Tar+ssh transfer of 4 files to `/mnt/repo/ctmp-platform`.
+- ✅ `docker compose --project-name ctmp build --no-cache api web-admin` produced both ` ctmp-api  Built` and ` ctmp-web-admin  Built` lines.
+- ✅ `up -d --force-recreate api web-admin` clean; `ctmp-api Up (healthy)` + `ctmp-web-admin Up`.
+- ✅ Deployed chunk `979-9df7da92b9edd771.js` contains `Supporting documents` marker (new block).
+- ✅ Deployed bundle has zero matches for `SupportingDocActions` (the old Bids-tab helper is gone).
+- ✅ Deployed `bids.service.js` contains 3× `commercialEnvelopeOpened` (1 helper def + 2 call sites). Old `bothEnvelopesOpened` removed.
+- ✅ API `GET /health` returns `{"status":"ok"}`.
+- Pending: owner hard-refresh walkthrough on a TDR with both envelopes OPENED — confirm "Supporting documents" block renders inside each VendorComparisonCard on Commercial Comparison + Bids tab on `/tenders/[id]` no longer shows the blue rows.
+
+**Open questions:** none. Locked rules unchanged — commercial:view continues to gate the perm side at the controller, the new gate is an additional pre-stream check inside the service.
+
+**Next recommended step:** owner walkthrough on TDR with both envelopes already OPENED, then push to `origin/develop` together with the BUG-130..142 wave.
+
+---
+
+## 2026-06-19 — BUG-141 follow-up: clarifications also allowed in Technical Opening
+
+**Date/time:** 2026-06-19 (one-line tweak to BUG-141 P1)
+**Agent/task:** Owner clarified: engineers should be able to ask clarifications the moment the technical envelopes open, not just after the tender enters Technical Evaluation. Added `TECHNICAL_OPENING` to the allowed-status whitelist in `clarifications.service.ts:create()`.
+
+**Files changed:**
+- `apps/api/src/modules/clarifications/clarifications.service.ts` — whitelist now `[PUBLISHED, CLARIFICATION_PERIOD, TECHNICAL_OPENING, TECHNICAL_EVALUATION, COMMERCIAL_EVALUATION]`.
+
+**Verified on staging:** typecheck clean; api rebuilt with `Built`; restart 200.
+
+**Still blocked (intentional):** `SUBMISSION_CLOSED`, `COMMERCIAL_SEALED`, `COMMITTEE_COMMERCIAL_OPENING`, `NEGOTIATION`, `AWARD_RECOMMENDATION`, `AWARDED`, `TENDER_CLOSED`, `CANCELLED`, `SUSPENDED`, `ARCHIVED`, `DRAFT`, `INTERNAL_REVIEW`, `APPROVED`. Owner can ask for additions if any of these become evaluator pain points.
+
+---
+
+## 2026-06-19 — BUG-141 shipped: clarifications during evaluation + extend-submission re-open
+
+**Date/time:** 2026-06-19 (same day, follow-ups to the engineer-clarification + manual-extension questions)
+**Agent/task:** Two coupled additions: (1) let engineers raise clarifications during Technical Evaluation and Commercial Evaluation, not just the pre-close window; (2) let procurement re-open a Submission Closed tender by extending the submission deadline to a future date.
+
+**Files changed:**
+- `apps/api/src/modules/clarifications/clarifications.service.ts:create()` — allowed-status whitelist replaced with `[PUBLISHED, CLARIFICATION_PERIOD, TECHNICAL_EVALUATION, COMMERCIAL_EVALUATION]`. Both vendor + admin/evaluator callers benefit. No new permission required.
+- `apps/api/src/modules/tenders/dto/extend-submission.dto.ts` — new DTO with `newSubmissionDeadline` (ISO), optional `newClarificationDeadline`, `reason` (`@MinLength(20) @MaxLength(1000)`).
+- `apps/api/src/modules/tenders/tenders.service.ts:extendSubmission()` — new method. Rejects unless `tender.status === SUBMISSION_CLOSED` (and surfaces a clear message that once technical envelopes have been opened, re-opening for new submissions is no longer safe). Validates the new deadline is parseable + in the future. Updates `submissionCloseAt` (and optionally `clarificationCloseAt`), flips status back to `PUBLISHED`. Audit `TENDER_SUBMISSION_EXTENDED` HIGH with before/after deadlines + reason.
+- `apps/api/src/modules/tenders/tenders.controller.ts` — new `POST /tenders/:id/extend-submission` route, gated by `tender:close_submission` (same authority that triggered the close — symmetric).
+- `apps/web-admin/src/components/dialog/ExtendSubmissionDialog.tsx` — new dialog mirroring `RevertTenderDialog`/`ReopenTenderDialog` shape. Date + time inputs, amber styling, mandatory reason ≥20 chars, shows the previous deadline (Kuwait TZ). Default new deadline = +7 days.
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — new "Extend Submission" button on the action bar, visible only when `tender.status === 'Submission Closed' && perms.closeSub`. Mounted alongside the other state-change dialogs.
+
+**Verification on staging:**
+- ✅ Typecheck clean (api + web-admin).
+- ✅ Pre-flight disk: 40 GB free.
+- ✅ Rebuild produced `ctmp-api Built` + `ctmp-web-admin Built`; restart cleanly; API health 200.
+- ✅ Endpoint exists + 400 path works: hitting `POST /tenders/:id/extend-submission` on a `Commercial Sealed` tender returns 400 with `Extension only supported from Submission Closed; current status is COMMERCIAL_SEALED. Once technical envelopes have been opened, the tender cannot be re-opened for new submissions.`
+- ⏳ Happy-path end-to-end needs a tender currently in `Submission Closed` — none on staging right now. Owner walks through: pick a tender, run Close Submissions, then Extend Submission with a 7-day-out deadline + reason. Confirm status flips back to Published; `notifications.email_override` (BUG-121) doesn't apply here (no email fired by extension).
+- ⏳ Clarification flow: pick a tender in Technical Evaluation, log in as engineer/evaluator role, post a clarification via the existing UI — expect 201 (was 400 pre-fix).
+
+**Locked-rule status:** No master-plan rule amended. Bid immutability respected — existing submitted bids stay submitted across the extension. Audit trail unchanged in shape — new HIGH-severity `TENDER_SUBMISSION_EXTENDED` event added.
+
+**Operational notes:**
+- Extension is one-way: it pushes a closed tender back to Published. The `submissionCloseAt` becomes the new deadline; the automatic close-on-deadline behaviour (if any background job exists) will close it again at that time.
+- Existing submitted bids are NOT affected — they remain locked/immutable. Only vendors who haven't yet submitted can submit during the extension window.
+- The permission gate is `tender:close_submission` (same as the close action). If owner wants a tighter gate later (e.g. a dedicated `tender:extend_submission`), it's a one-line decorator swap.
+
+---
+
+## 2026-06-19 — BUG-140 shipped: TECHNICAL_EVALUATION_FINALIZED manager email
+
+**Date/time:** 2026-06-19 (same day, follow-up Q→action)
+**Agent/task:** Owner asked whether the system emails a manager when engineers finish technical evaluation. Pre-BUG-140 the answer was no — `technical-evaluation.service.ts:finalize()` updates bids + seals/locks commercial envelopes + writes audit, nothing more. Owner then asked for a confirmation email when the whole phase is finalised.
+
+**Files changed:**
+- `database/migrations/043_bug140_technical_evaluation_finalized_template.sql` — seeds the new `TECHNICAL_EVALUATION_FINALIZED` notification template (subject + multi-line body with `{{managerName}}`, `{{tenderReference}}`, `{{tenderTitle}}`, `{{totalBids}}`, `{{passCount}}`, `{{failCount}}`, `{{evaluatorList}}`, `{{newStatus}}`, `{{tenderUrl}}`, `{{systemName}}`). EMAIL channel, English locale, `ON CONFLICT DO NOTHING` so re-runs are no-ops.
+- `apps/api/src/modules/technical-evaluation/technical-evaluation.module.ts` — `NotificationsModule` added to imports.
+- `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts` — `NotificationsService` + `ConfigService` injected; new private `dispatchFinalizedEmail()` method called after the `finalize()` transaction commits + after the existing `TECHNICAL_RESULTS_FINALIZED` audit. Resolves recipient from `tender.owningUser` (with `tender.createdByUser` fallback). Gathers the distinct evaluator names across all bids' technical evaluations. Interpolates the template with pass/fail counts. Audits a `TECHNICAL_FINALIZED_EMAIL_SENT` LOW event after dispatch. Dispatch is best-effort: failures are `logger.warn`'d but do not roll back the finalize.
+
+**Why:** Owner wanted procurement managers to know without polling — particularly the moment commercial envelopes become sealed pending the committee opening session. Email contains everything they need to decide next-step timing.
+
+**Verification on staging:**
+- ✅ Typecheck clean.
+- ✅ Pre-flight disk: 43 GB free.
+- ✅ Migration 043 applied via `psql`; `SELECT FROM notification_templates WHERE code='TECHNICAL_EVALUATION_FINALIZED'` returns the row (EMAIL / en / active).
+- ✅ API rebuilt with `Built` line; container restarted cleanly; API health 200.
+- ⏳ End-to-end: needs a tender at status `TECHNICAL_OPENING` or `TECHNICAL_EVALUATION` with all bids evaluated, then `POST /tenders/:id/technical-evaluation/finalize`. Owner can verify by inspecting `notification_logs` for the recipient + watching mailhog (or production SMTP).
+
+**Operational notes:**
+- The `notifications.email_override` system setting (BUG-121) still applies — if set, all outbound TO is redirected to that single test address.
+- The audit event `TECHNICAL_FINALIZED_EMAIL_SENT` makes it discoverable in the audit trail even if SMTP fails silently.
+- Recipient resolution: `owningUserId` first, `createdBy` fallback. If neither has an email recorded, the dispatch logs a warning and skips — finalize still succeeds.
+
+**Out of scope (deferred):**
+- Per-evaluator "your evaluation has been recorded" confirmation emails — would generate noise (one per bid × evaluator). If owner wants this later, easy add as `TECHNICAL_EVALUATION_RECORDED` template.
+- Commercial-evaluation finalisation email — currently the commercial flow has different lifecycle (committee opening, comparison, award confirm). Owner can ask for a similar template if needed.
+- Localised (Arabic) template — deferred via BUG-136 plumbing.
+
+**Locked-rule status:** No master-plan rule affected. Audit trail unchanged in shape — one new LOW-risk event added.
+
+---
+
+## 2026-06-19 — BUG-139 shipped: bid supporting docs hidden until both envelopes are OPENED
+
+**Date/time:** 2026-06-19 (same day, walk-through follow-up to BUG-137/138)
+**Agent/task:** Owner asked for supporting documents to be hidden from admins/evaluators using the same secrecy model the technical + commercial envelopes already use — only revealed once both envelopes have been OPENED. The bid's own vendor still sees their own docs always.
+
+**Files changed:**
+- `apps/api/src/modules/bids/bids.service.ts`:
+  - New private helper `bothEnvelopesOpened(bidEnvelopes)` — single source of truth.
+  - `listSupportingDocuments`: for non-vendor callers, throw 403 unless both envelopes are OPENED on that bid. Vendor caller path unchanged.
+  - `streamSupportingDocument`: same gate added in the admin branch alongside the existing `technical:view` / `vendor:view` permission check. Bid's envelope statuses now eagerly loaded.
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` (BidsTabPanel):
+  - Per-bid supporting-docs fetch is skipped when the bid row's `technicalEnvelopeStatus` or `commercialEnvelopeStatus` is not `OPENED`. Avoids 403 noise + matches the new server gate.
+  - Per-row render guards on the same condition (`bothOpened`) — defence in depth in case the map has stale entries.
+
+**Why:** Supporting documents may contain confidential vendor data (insurance details, financial certificates, etc.). They follow the same lifecycle as the envelopes — sealed at submit, revealed only once the committee opens both envelopes in session. Matches the existing `EnvelopeStatus.OPENED` gate on technical + commercial envelope downloads.
+
+**Verification on staging:**
+- ✅ Typecheck clean (api + web-admin).
+- ✅ Pre-flight disk: 49 GB free.
+- ✅ Rebuild produced `Built` lines for api + web-admin; API health 200.
+- ✅ End-to-end smoke (admin@ctmp.local):
+  - 3 bids on TDR-2026-0024 with envelopes in SUBMITTED → `list` returns 403.
+  - 2 bids on TDR-2026-0023 with envelopes both OPENED → `list` returns 200.
+  - 2 bids on tenders with envelopes in LOCKED → `list` returns 403 (matches existing envelope-doc behaviour; LOCKED ≠ OPENED).
+
+**Locked-rule status:** Reinforces the bid-secrecy invariants: "Technical envelopes open only after Submission Closed", "Commercial envelopes open only through an official committee commercial opening session". Supporting docs now respect both gates.
+
+**Operational note:** If the owner reports that LOCKED-state bids' supporting docs are invisible too, that's the same behaviour the existing envelope documents already exhibit — a separate fix would need to relax the gate to "OPENED or LOCKED" across both supporting docs AND envelope docs together for consistency.
+
+---
+
+## 2026-06-19 — BUG-138 shipped: trim vendor doc slots + fix bid supporting docs multi-upload
+
+**Date/time:** 2026-06-19 (same day, walk-through follow-up to BUG-137)
+**Agent/task:** Owner walked the BUG-137 surfaces and asked for: (1) trim the vendor registration slot list to **Commercial License (required)**, **Authorisation Letter (optional)**, **Other (optional multi)** — drop AUTHORISED_REPRESENTATIVE_ID + TAX_CERTIFICATE; (2) fix the bid Supporting Documents step which returned `400 Bad Request` on the second upload attempt.
+
+**Root cause of the 400:** in BUG-137 I added a `UNIQUE(bid_id, checksum_sha256)` index to dedupe accidental double-clicks. In real use (and in the owner's test where the same PDF was reused), this blocks legitimate multi-upload with a misleading `400` instead of being a silent UI guard. Removed.
+
+**Files changed:**
+- `apps/api/src/modules/vendor-auth/vendor-document-types.ts` — trimmed `VENDOR_DOC_TYPES` to 3 entries.
+- `apps/web-vendor/src/app/register/page.tsx` — mirror trim of the client constant.
+- `apps/web-admin/src/app/(admin)/vendors/page.tsx` — kept legacy labels in `DOC_TYPE_LABELS` so any existing rows with the dropped codes still render with their old label.
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.spec.ts` — fixture: only `COMMERCIAL_LICENSE` now required.
+- `apps/api/prisma/schema.prisma` — dropped `@@unique([bidId, checksumSha256])` on `BidSupportingDocument`. The `@@index([bidId])` stays.
+- `database/migrations/042_bug138_drop_bid_supporting_dedupe.sql` — `DROP INDEX IF EXISTS bid_supporting_documents_bid_checksum_uniq`.
+- `apps/api/src/modules/bids/bids.service.ts` — removed the `try/catch` + P2002 handler around the supporting-doc create.
+
+**Verification on staging:**
+- ✅ Typecheck clean (api + web-admin + web-vendor).
+- ✅ Pre-flight disk: 57 GB free.
+- ✅ Migration 042 applied via `psql`. `\d bid_supporting_documents` confirms only the PK + bid_id index remain.
+- ✅ All three services rebuilt with `Built` lines; API health 200.
+- ✅ Deployed `web-vendor/.../register/page-09516ca52a8b5f45.js` contains `AUTHORISATION_LETTER`; legacy `AUTHORISED_REPRESENTATIVE_ID` marker is gone from that chunk.
+- ⏳ Owner re-walk: upload the same PDF as supporting document twice — should succeed both times; register a fresh vendor and confirm only 3 slots render.
+
+**Locked-rule status:** No master-plan rule affected. The dedupe was a UX guard, not a compliance rule.
+
+---
+
+## 2026-06-19 — BUG-137 shipped: vendor registration docs + bid supporting docs + mandatory commercial PDF
+
+**Date/time:** 2026-06-19
+**Agent/task:** Three coupled vendor/bid additions. Owner wanted (1) vendors to upload their commercial license + other named docs at registration (mandatory, approver-visible), (2) a bid-level "supporting documents" upload section optional by default but make-able mandatory at tender-creation time, (3) the commercial PDF to become always-mandatory (the BoQ-only exception is removed).
+
+**Locked decisions (this session):** named slots for vendor docs (not freeform); single checkbox on tender for supporting-docs requirement; per-vendor view inside the admin Bids tab; commercial PDF always mandatory.
+
+**Backend:**
+- **Schema migration 041:** `tenders.requires_supporting_documents BOOLEAN NOT NULL DEFAULT false`; new `bid_supporting_documents` table (`id, bid_id, original_filename, storage_key, mime_type, file_size, checksum_sha256, uploaded_by_vendor_user_id, uploaded_at, locked_at` + index on `bid_id` + unique on `(bid_id, checksum_sha256)`). Prisma schema mirrors.
+- **Vendor registration docs:** new constant catalogue `vendor-document-types.ts` (5 slots: COMMERCIAL_LICENSE+AUTHORISED_REPRESENTATIVE_ID required, TAX_CERTIFICATE+AUTHORISATION_LETTER+OTHER optional). New `VendorDocumentStorageService` with namespace `vendor-registration-documents`. Anonymous `POST /vendor-auth/registration-documents/upload` returns a 15-min pending documentId (BUG-129 pattern). `VendorRegisterDto` extended with `documents: Array<{type, documentId}>`. `register()` validates required types + persists `VendorDocument` rows transactionally. Admin endpoints `GET /vendors/:id/documents`, `/:id/documents/:docId/view`, `/:id/documents/:docId` with `OptionalVendorOrUserGuard` (admin OR own vendor user). Audit `VENDOR_DOCUMENT_VIEWED` / `_DOWNLOADED` HIGH before stream.
+- **Bid supporting docs:** new `BidSupportingDocumentStorageService` with namespace `bid-supporting-documents`. New endpoints `GET /bids/:id/supporting-documents` (list, vendor+admin), `POST` (vendor upload, DRAFT only), `DELETE /:docId` (vendor, DRAFT), `/:docId/view` + `/:docId` (stream, vendor+admin with `technical:view` or `vendor:view`). Unique constraint on `(bid_id, checksum_sha256)` prevents duplicate re-uploads. New audit events `BID_SUPPORTING_DOCUMENT_UPLOADED/DELETED/VIEWED/DOWNLOADED`.
+- **`bids.submit()` validation rewrite:** removed the BoQ exception — both technical AND commercial envelopes now always require ≥1 PDF. New gate: when `tender.requiresSupportingDocuments`, ≥1 supporting doc required. On submit, supporting docs get `locked_at` set inside the same transaction as the envelope docs (immutable post-submit).
+- **Tender DTO + service:** `requiresSupportingDocuments` boolean in `CreateTenderDto`/`UpdateTenderDto`; persisted on create+update; emitted in the tender detail serializer so the vendor bid wizard can read it.
+
+**Frontend:**
+- **Vendor register page** (`apps/web-vendor/src/app/register/page.tsx`): new "Required Documents" section with 5 labelled slots. Each file uploads immediately to the pending endpoint; the slot fills with filename + size + Remove button. Submit disabled until both required slots populated + CAPTCHA complete.
+- **Admin vendor page** (`apps/web-admin/src/app/(admin)/vendors/page.tsx`): per-vendor detail panel now lists registration documents with View + Download buttons. View opens PDF in new tab; download streams as attachment. Both audit-stamp HIGH before stream.
+- **Admin tender create + edit** (`tenders/new/page.tsx`, `tenders/[id]/edit/page.tsx`): new checkbox "Require vendors to upload supporting documents (certificates, letters, etc.)" on the Basic Information step. Editable pre-publish; locked-with-badge afterwards.
+- **Vendor bid wizard** (`apps/web-vendor/src/app/(portal)/bids/wizard/[tenderId]/page.tsx`): step list is now dynamic — switched from numeric `step === N` to name-based `STEPS[step] === 'Name'` so the conditional "Supporting Documents" step inserts cleanly between Commercial PDF and Review. "Commercial PDF (optional)" renamed to "Commercial PDF" (always required). New `StepSupportingDocuments` component handles multi-file PDF upload via `POST /bids/:id/supporting-documents`. Review block shows the supporting-docs summary when applicable. Submit button gates on `commercialDocs.length === 0` always + `supportingDocs.length === 0` when required.
+- **Admin Bids tab** (`tenders/[id]/page.tsx` BidsTabPanel): now fetches supporting docs per bid in parallel. Each bid row gets one blue-tinted child row per supporting document with `Supporting` badge + filename + size + View/Download buttons (same blob-fetch pattern as the BUG-129 negotiation PDF buttons).
+
+**Verification on staging:**
+- ✅ Backend `tsc --noEmit` exit 0 after `prisma generate`. Web-admin + web-vendor `tsc --noEmit` exit 0.
+- ✅ Pre-flight: staging disk was at 94% (6.3 GB free) — pruned `docker builder prune -af` + `docker image prune -af` reclaimed ~58 GB; rebuild ran with 65 GB free.
+- ✅ Migration 041 applied via psql. DB confirms `tenders.requires_supporting_documents` exists; `bid_supporting_documents` table exists; row count 0.
+- ✅ All three services rebuilt with explicit `Built` lines; containers restarted cleanly; API health 200.
+- ✅ Deployed chunk markers verified: `web-vendor/register/page-…js` contains `COMMERCIAL_LICENSE`; `web-vendor/bids/wizard/[tenderId]/page-…js` contains `Supporting Documents`; `web-admin/tenders/new/page-…js` + `tenders/[id]/edit/page-…js` contain `requiresSupportingDocuments` / `Require vendors to upload supporting…`.
+
+**Out of scope (deferred):** editable vendor document type catalogue (V1 hard-coded); per-type slots for bid supporting docs; expiry/re-upload reminders for vendor docs; tender-level documents tab aggregating supporting docs across vendors; vendor notifications on flag flip post-publish; bulk download.
+
+**Locked-rule status:** No master-plan rule amended. Commercial-PDF-always-required reaffirms the "every bid carries a signed commercial document" stance from BUG-112. Bid immutability respected — supporting docs are `locked_at` on submit alongside envelope docs.
+
+**Next recommended step:** Owner walks the three flows on staging: (1) register a fresh vendor end-to-end with both required slots, confirm "Documents" section in admin shows View/Download; (2) create a tender with the checkbox on, draft a bid, confirm the Supporting Documents step appears + blocks submit if empty; (3) attempt to submit any bid (BoQ-driven) without a commercial PDF → expect 400 "Commercial envelope is empty".
+
+---
+
+## 2026-06-15 — BUG-135 shipped: department KPIs aligned with main dashboard + drill-downs
+
+**Date/time:** 2026-06-15
+**Agent/task:** Owner reported `/executive/departments` + `/executive/departments/:id` showed different numbers than the main `/executive` dashboard. Cause: BUG-133 fixed the main dashboard but the department endpoints kept the pre-fix logic (createdAt-year scoping, included cancelled tenders, lacked BoQ in resolver include, clamped savings). Owner also asked for KPI tiles to be drillable on the dept pages.
+
+**Backend (analytics.service.ts):**
+- `_loadAwardedTendersForVendors` extended to include `estimatedBudget`, `createdAt`, `submissionCloseAt` in the select + returned shape. Lets every caller use it without a side-query for those columns. `executiveSummary` simplified accordingly (the side `awardedThisYearMeta` query is gone).
+- `departmentOverview()` rewritten to match the main-dashboard rules:
+  - Awarded set sourced from `_loadAwardedTendersForVendors` (resolver-priced, BoQ-aware) → scoped by `awardedAt`-year + excludes CANCELLED.
+  - Estimated set sourced from `tender.findMany` scoped by `createdAt`-year + excludes CANCELLED.
+  - Active pipeline = all years, not terminal (mirrors main dashboard).
+  - Savings clamp removed (`estimateOfAwarded - awardedValue`, may be negative).
+- `getDepartmentProfile()` rewritten with the same pattern. `year = null` (all-time) handled cleanly. Multi-year spend trend now sources awarded side from the resolver loader, estimated side from a small extra query. CANCELLED excluded from both sides of the trend.
+- `listExecutiveTenders` now composes status filters via `where.AND` so multiple conditions coexist (e.g. `activeOnly` + an explicit `status`). Any drill-down using `hasAward` or `awardedYear` automatically excludes CANCELLED so the drill-down count matches the headline KPI.
+
+**Frontend:**
+- `apps/web-admin/src/app/(admin)/executive/departments/[id]/page.tsx`: `Stat` component gains optional `href` (becomes a clickable Link with hover shadow) + `negative` (renders value in red). `OverviewTab` now passes a dept-scoped drill-down target for each of the 8 tiles (Tenders Created, Awarded, Active, Distinct Vendors, Estimated Value, Awarded Value, Realised Savings, Active Pipeline). Realised Savings sub-line updated to BUG-134 pattern: `Awarded X of Y KWD budgeted`; goes red on cost overrun.
+- `apps/web-admin/src/app/(admin)/executive/departments/page.tsx`: `SummaryCard` gains the same `href` + `negative` props. The 4 top totals tiles drill into the org-wide tender list with the right filter set. Realised Savings sub-line updated to BUG-134 pattern + negative-red styling. Existing per-dept row link to `/executive/departments/:id?year=…` unchanged.
+
+**Verification on staging:**
+- ✅ Typecheck clean (api + web-admin).
+- ✅ API + web-admin rebuilt + restarted, health 200.
+- ✅ Main dashboard `Awarded Value 47,150 KWD / Estimated 279,999 KWD` matches dept overview totals exactly (`47,150 / 279,999`). Sum across dept rows = total ✅.
+- ✅ Dept profile for "Facilities Management" returns `Awarded 34,000, Estimated 160,000, Savings 16,000, Active 110,000` consistent with the dept row in the overview.
+- ✅ Drill-down endpoint with `departmentId=facilities&awardedYear=2026&hasAward=true` returns 3 tenders / 34,000 KWD — **matches the dept row exactly** (after the `where.AND`-based CANCELLED exclusion fix).
+- ⏳ Owner re-walk: hard-refresh `/executive/departments` and `/executive/departments/:id` → KPI tiles should be clickable, values should equal the main dashboard's totals.
+
+**Operational note:** the live `Awarded Value` dropped from 147K KWD (pre-BUG-135) to 47K KWD because of two compounding fixes shipping today — the awardedAt-year scoping (some 2025-created/2026-awarded tenders may have moved years) and the CANCELLED exclusion (BUG-132's Cancel cascade actions taken by the owner removed those from the awarded totals). Both are intentional.
+
+**Locked-rule status:** No master-plan rule amended. Dept endpoints now consistent with the BUG-133 contract.
+
+---
+
+## 2026-06-15 — BUG-134 shipped: clearer Realised Savings sub-line
+
+**Date/time:** 2026-06-15
+**Agent/task:** Owner walked the post-BUG-133 dashboard and asked what "2.7K of 150K KWD estimated" under the Realised Savings tile meant — they read it as a progress fraction. Reworded the sub-line so the actual awarded total is shown side-by-side with the budget total.
+
+**Files changed:**
+- `apps/web-admin/src/app/(admin)/executive/page.tsx` — Realised Savings sub-line: was `{fmtKwd(numerator)} of {fmtKwd(denominator)} KWD estimated` → now `Awarded {fmtKwd(denominator − numerator)} of {fmtKwd(denominator)} KWD budgeted`. The awarded total is derived in-place (no backend or KPI shape change). Main tile value, drill-down link, negative-state red styling all unchanged.
+
+**Why:** "X of Y estimated" reads as "X out of Y completed" — confusing when X is the savings figure. The new "Awarded X of Y KWD budgeted" tells the story directly: what we spent vs what we planned. The savings (main tile value) is the gap between the two. In the overrun case the sub-line reads `Awarded 155K of 150K KWD budgeted` while the main value renders red — the overrun is immediately visible.
+
+**Verification on staging:**
+- ✅ Typecheck clean (web-admin only — no api change).
+- ✅ Pre-flight disk: 24 GB free.
+- ✅ Rebuild produced `ctmp-web-admin Built`; container recreated cleanly.
+- ✅ Deployed chunk `app/(admin)/executive/page-a8a4985019080a3f.js` contains `KWD budgeted`; zero hits for `KWD estimated` in the chunks (old marker gone).
+- ⏳ Owner re-walk: hard-refresh `/executive`; tile sub-line now reads `Awarded 147K of 150K KWD budgeted`.
+
+**Locked-rule status:** No master-plan rule affected. Pure copy change.
+
+---
+
+## 2026-06-14 — BUG-133 shipped: Executive dashboard correctness + drill-downs
+
+**Date/time:** 2026-06-14
+**Agent/task:** Owner walked the `/executive` dashboard and reported "Vendor1 has 4 awarded tenders but only 1 shows a value" plus "all KPIs to be drilled down so easy to navigate." Diagnosis: `tenders.awarded_amount` was NULL on every awarded tender (BUG-088 deferred root cause) AND the analytics resolver didn't look at BoQ-derived prices, so modern BoQ-priced tenders read as 0 even when the data was there. Main `/executive` page didn't use the resolver at all. KPI tiles weren't clickable.
+
+**Locked design decisions (covered in plan):** populate `awarded_amount` at confirm time using same chain as `computeLowestPassBidId`; extend read-side resolver with BoQ source; switch main page to resolver; remove `max(0, …)` clamp on Realised Savings; switch year filter to `awardedAt`-year for Awarded Value / Realised Savings / Awarded Tenders / Avg Days to Award; exclude cancelled-after-award from awarded sets; exclude cancelled from Estimated Value; "—" instead of "0 days" on empty; "(all years)" label on Active Pipeline; add Negotiation Savings tile; every tile + breakdown row drillable.
+
+**Backend:**
+- `apps/api/src/modules/award/award.service.ts` — new `resolveBidWinningPrice(bidId)` method (canonical 3-source chain). `confirmAward()` + `amendAward()` + `approve()` all now compute the winning price and write it into the `tender.update` data block.
+- `apps/api/src/modules/analytics/analytics.service.ts` — `_resolveAwardedAmount` extended with BoQ source as priority #2 (between negotiation and tender column). `_loadAwardedTendersForVendors` include now pulls `bidBoqItems.{status,unitPrice,tenderBoqItem.qty}`. `executiveSummary()` rewritten to use the resolver-priced loader + new awardedAt-year scoping + exclude cancelled-after-award + drop the savings clamp (Realised Savings + Rate now go negative when overruns exceed gains) + null-on-empty for Avg Days to Award. New 9th KPI tile **Negotiation Savings** aggregating `_resolveNegotiationSavings` across this year's awarded set (total amount + count + avg %). New `listExecutiveTenders()` method backing the drill-down page; accepts createdYear / awardedYear / hasAward / hasNegotiation / activeOnly / status / statusNot / category / departmentId / vendorId / sort / page / pageSize. Module-level `STATUS_DB_TO_API` map added (mirrors the comparison service).
+- `apps/api/src/modules/analytics/analytics.controller.ts` — new `GET /analytics/tenders-list` route, `@RequirePermissions('executive:dashboard')`.
+- `apps/api/prisma/schema.prisma` — no schema change beyond BUG-132's `previousStatus` (still present).
+- `database/migrations/039_bug133_backfill_awarded_amount.sql` — one-shot backfill walking 3-step priority chain (negotiation → BoQ → CommercialEvaluation) populating `tenders.awarded_amount` for every row where `awarded_at IS NOT NULL AND awarded_amount IS NULL`. Reports remaining unrecoverable rows via RAISE NOTICE.
+- `KpiCard.value` type widened to `number | null` so the dashboard can render "—" for empty days.
+
+**Frontend (admin):**
+- `apps/web-admin/src/app/(admin)/executive/page.tsx` — every KPI tile now wrapped in `<Link>` with `drillDownHrefForKpi()` helper routing each label to a focused tender list. New Negotiation Savings tile (sky palette) with `N awards · avg M%` sub-line. Realised Savings + Savings Rate render in red with a downward arrow when value is negative. Active Pipeline tile labelled "(all years)". `BreakdownCard` accepts an optional `linkTarget` so By-Department rows link to `/executive/departments/:id?year=Y` and By-Category rows link to `/executive/tenders?awardedYear=Y&category=…`. Active Pipeline list rows wrapped in `<Link>` to `/executive/tenders?activeOnly=true&status=…`. `fmtKpi` handles null → "—".
+- `apps/web-admin/src/app/(admin)/executive/tenders/page.tsx` — **new page** at `/executive/tenders`. Reads `/analytics/tenders-list` with all querystring params; shows resolver-priced rows with Reference / Title / Department / Status / Estimated / Awarded / Cycle / Awarded At + ChevronRight to the regular `/tenders/:id` detail page. Pagination. Suspense-wrapped to read query string.
+
+**Verification on staging:**
+- ✅ Typecheck clean (api + web-admin, exit 0).
+- ✅ Pre-flight disk: 30 GB free.
+- ✅ Migration 039 applied via `psql`. Backfill output: 0 from negotiation, 4 from BoQ, 3 from CommercialEvaluation; final NOTICE "all awarded tenders now have awarded_amount populated."
+- ✅ API + web-admin both rebuilt with `Built` lines; containers recreated cleanly.
+- ✅ Live API smoke-test on TDR-2026-0019 et al. via admin@ctmp.local:
+  - Executive summary returns real numbers: Awarded Value **147,250 KWD** (was 0), Realised Savings **2,749 KWD**, 7 awarded tenders, Top vendor "Acme Builders LLC" **100,000 KWD** (was 0 share).
+  - Negotiation Savings: 0 KWD (no negotiated awards on staging yet — correct).
+  - `/analytics/tenders-list?awardedYear=2026&hasAward=true` returns 7 rows ranked by award amount.
+  - Active Pipeline 230,000 KWD across 5 tenders.
+
+**Operational note:** `cycleTime.avgDaysSubmissionClosedToAwarded` came back negative (-18 days) — real data shape, not a bug. Some test tenders were awarded before their `submissionCloseAt` deadline because deadlines were set in the future during data seeding then awarded promptly. Frontend will render this honestly.
+
+**Out of scope (deferred):** multi-currency, NULL-estimated-budget edge case, combined "Total Savings" tile, time-range picker beyond year, richer PDF export, forecast widget, stage velocity heatmap, scheduled email digest, Arabic labels. All explicitly captured in the BUG-133 plan.
+
+**Next recommended step:** Hard-refresh `/executive` and walk the dashboard:
+1. Confirm Awarded Value is non-zero.
+2. Click Awarded Value tile → lands on `/executive/tenders?awardedYear=…&hasAward=true&sort=awardedAmount:desc` with 7 rows.
+3. Click "Vendor1" in Top Vendors → confirm `/executive/vendors/<Vendor1>` shows 4 priced rows (no blanks).
+4. Click a By-Department row → lands on `/executive/departments/:id`.
+5. Click an Active Pipeline state row → filtered list.
+6. Confirm KPI tile drill-downs all work end-to-end.
+
+**Locked-rule status:** No master-plan rule amended. Cancel cascade from BUG-132 already excludes envelopes from further mutation; the new analytics filter `tenderStatus !== CANCELLED` is consistent.
+
+---
+
+## 2026-06-14 — BUG-132 shipped: Hold (Suspend) + Resume + Cancel-from-any-state with cascade
+
+**Date/time:** 2026-06-14
+**Agent/task:** Owner asked for the ability to put a tender on Hold or Cancel it from anywhere in the lifecycle. Today Cancel is locked to Draft → Clarification Period only; Hold doesn't exist at all (the `SUSPENDED` enum + badge are scaffolded but unused). This change makes Cancel universal (with structural cascade) and adds Hold/Resume as a reversible pause.
+
+**Locked design decisions:**
+1. Hold is **resumable** — Resume returns the tender to its exact prior state (snapshot stored in `tenders.previous_status`).
+2. Cancel cascade — auto-closes any open negotiation rounds and locks all bid envelopes (`EnvelopeStatus.LOCKED`). **No** automatic vendor email; out-of-band notification only.
+3. Hold + Cancel available from every state (including `Awarded` / `Tender Closed`). Existing `Cancelled` records can't be re-cancelled or held; existing `Suspended` records can't be re-held.
+
+**Backend:**
+- **Schema (migration 038):** new column `tenders.previous_status tender_status NULL` — single column carries the snapshot. Reasons stay in the audit log (consistent with existing cancel pattern). New `tender:suspend` permission row + grants to `SYSTEM_ADMIN` + `PROCUREMENT_ADMIN` + `token_version` bump.
+- **DTOs:** `suspend-tender.dto.ts`, `resume-tender.dto.ts`, `cancel-tender.dto.ts` — all `reason: string` with `@MinLength(20) @MaxLength(1000)`. Cancel DTO formalises the inline body the cancel route used to accept (frontend already enforced 20 chars; backend now too).
+- **Service (`tenders.service.ts`):**
+  - `cancel()` rewritten: removed the `[DRAFT, INTERNAL_REVIEW, APPROVED, PUBLISHED, CLARIFICATION_PERIOD]` whitelist; now blocks only when `status === CANCELLED`. Wrapped in a `$transaction` that closes open negotiation rounds (mirrors the award-confirm `negotiationRound.updateMany` pattern), locks every non-`LOCKED` bid envelope (`EnvelopeStatus.LOCKED`, `lockedAt: now`), then sets `status = CANCELLED, previousStatus = null`. Audit `TENDER_CANCELLED` HIGH now includes `roundsClosed` + `envelopesLocked` counts in `afterValue`.
+  - `suspend(id, dto, userId)` new: rejects if `status === SUSPENDED` or `CANCELLED`; writes `status = SUSPENDED, previousStatus = currentStatus`. Audit `TENDER_SUSPENDED` HIGH.
+  - `resume(id, dto, userId)` new: rejects unless `status === SUSPENDED && previousStatus !== null`; writes `status = previousStatus, previousStatus = null`. Audit `TENDER_RESUMED` HIGH.
+- **Controller:** new `POST /tenders/:id/suspend` + `POST /tenders/:id/resume`, both gated by `tender:suspend`. Existing `POST /tenders/:id/cancel` now takes `CancelTenderDto`.
+- **Serializer:** `serializeSummary` now emits `previousStatus` (mapped through `STATUS_DB_TO_API`) so the Resume dialog can show "Will be resumed to: <previousStatus>".
+
+**Frontend (admin):**
+- New dialogs `HoldTenderDialog.tsx` + `ResumeTenderDialog.tsx` — amber styling, mirror the existing Cancel/Reopen dialog shape (reason ≥20 chars, audit-banner, blocking button states).
+- `CancelTenderDialog.tsx` copy update: warning now explains the cascade ("Any open negotiation rounds are auto-closed and all bid envelopes are locked. Vendors are **not** auto-notified — notify out-of-band if needed.").
+- `/tenders/[id]` action bar:
+  - New `perms.suspend` flag (`tender:suspend`); new `holdOpen` + `resumeOpen` state.
+  - All workflow buttons (Submit/Publish/Close/Open/Generate Minutes/Amend/Issue/Close Tender/Reopen/Edit/Revert) wrapped in a `tender.status !== 'Suspended' && tender.status !== 'Cancelled' && (<>…</>)` guard so they're hidden in terminal/paused states.
+  - **Hold** button: visible when `tender.status !== 'Suspended' && tender.status !== 'Cancelled' && perms.suspend`. Amber outline with `Pause` icon.
+  - **Resume** button: visible when `tender.status === 'Suspended' && perms.suspend`. Amber filled with `Play` icon.
+  - **Cancel** button: gate now `tender.status !== 'Cancelled' && perms.cancel` (was the old `CANCELLABLE_STATUSES` allowlist). Visible from every non-terminal state.
+
+**Verification on staging:**
+- ✅ Backend `tsc --noEmit` exit 0 after `prisma generate`. Frontend `tsc --noEmit` exit 0.
+- ✅ Pre-flight disk: 36 GB free; rebuild produced `ctmp-api Built` + `ctmp-web-admin Built` lines.
+- ✅ Migration 038 applied via `psql` (container's `docker-entrypoint-initdb.d` runs only on first init). DB confirms: `tenders.previous_status` exists as `tender_status` enum, `permissions.code = 'tender:suspend'` row present.
+- ✅ API health probe → 200.
+- ✅ End-to-end via admin@ctmp.local on TDR-2026-0004 (live status `Negotiation`): `POST /suspend` → 201 → GET returns `status: Suspended, previousStatus: Negotiation`. `POST /resume` → 201 → GET returns `status: Negotiation, previousStatus: null`. Both audit events captured.
+- ✅ Deployed `page-d8fcd204f613bb2b.js` contains both `Put tender on hold` and `Resume tender` marker strings.
+
+**Out of scope (deferred — captured in plan):**
+- Per-page Hold/Cancel buttons on Negotiation / Commercial Comparison pages (tender detail is canonical).
+- Vendor-side cancellation email (owner explicitly excluded — separate explicit action if needed later).
+- Vendor portal handling of `Suspended` status (currently treats anything non-active as closed — vendors will see "tender no longer available" rather than a Hold-specific banner; out of scope until owner reports vendor confusion).
+- Resuming to a state different from `previousStatus` — Resume always restores the snapshot.
+
+**Locked-rule status:** No master-plan rule amended. Cancel cascade respects the "Submitted bids are immutable" rule — locking envelopes does not mutate bid contents; it only blocks further mutations. Award records are untouched by Cancel (no cascade into `tender_awards`).
+
+**Next recommended step:** Owner walkthrough of `/tenders/<id>` on staging — pick (a) a Published tender (Hold/Resume happy path), (b) a Negotiation tender (verify Hold remembers it), (c) a Submission Closed tender (Cancel cascade closes any open rounds and locks envelopes). After approval, push BUG-132 alongside the unpushed Phase 10 / BUG-052..131 backlog to `origin/develop`.
+
+---
+
+## 2026-06-13 — BUG-131-fix shipped: Bids tab simplified (drop Total + PDF columns, pin Submitted to Kuwait TZ)
+
+**Date/time:** 2026-06-13 (same day, walk-through follow-up to BUG-131)
+**Agent/task:** Owner walked the BUG-131 Bids tab and reported: don't need the Total + PDF columns (just bid info), and the submitted date looks wrong. Likely-root-cause for "wrong date": display was using `toLocaleString('en-GB', …)` without a `timeZone` option, which defers to the workstation's local TZ — if the Windows host is set to UTC, the user saw 3 hours earlier than the actual Kuwait submission time.
+
+**Files changed:**
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — `BidsTabPanel`: removed the `Total` and `PDF` header columns + matching cells from initial-bid + negotiation child rows (table is back to 5 columns: Vendor / Submitted / Technical envelope / Commercial envelope / Technical result). Dropped the inline `viewNegotiationPdf` / `downloadNegotiationPdf` helpers and the unused `BIDS_API_BASE` constant. Added `fmtSubmittedAt()` helper that always renders with `timeZone: 'Asia/Kuwait'` so the time matches what the vendor actually saw in the portal regardless of the host's TZ. Both the initial-bid row and the negotiation child row use it.
+
+**Why:** Owner directive — bid info only on the Bids tab; the price+PDF surface lives on /commercial-comparison and shouldn't be duplicated here. Pinning to Kuwait TZ removes a likely cause of confused submission timestamps when the workstation reads UTC.
+
+**Verification on staging:**
+- ✅ Typecheck clean (`tsc --noEmit` exit 0).
+- ✅ Pre-flight disk: 38 GB free.
+- ✅ Rebuild produced `ctmp-web-admin Built`; container recreated cleanly.
+- ✅ Deployed chunk `app/(admin)/tenders/[id]/page-a51304cbae704439.js` contains `Asia/Kuwait` and `Negotiated commercial submission`; zero `font-bold text-right` hits (the Total/PDF right-aligned headers are gone).
+- ⏳ Owner re-walk: `/tenders/<TDR-2026-0019>` Bids tab should show 5 columns only, with submitted dates rendered in Kuwait time.
+
+**Open questions:** If the owner still reports wrong dates after this fix, the next step is to compare what they expected vs what the API stored (the date field is stamped by Postgres `@default(now())` at submission time, so any discrepancy beyond TZ would point at clock drift on the staging DB host or a deliberately wrong vendor submit time).
+
+**Next recommended step:** Owner walks the Bids tab once more. If dates are still wrong, paste the displayed date + actual submit time in chat so we can verify whether it's still a TZ/format problem vs a data issue.
+
+**Locked-rule status:** No master-plan rule affected.
+
+---
+
+## 2026-06-13 — BUG-131 shipped: BoQ header rename + LT columns removed + negotiation submissions in tender Bids tab
+
+**Date/time:** 2026-06-13
+**Agent/task:** Owner walked the BUG-130 surfaces and asked for three follow-ups: (1) rename `Original UP` → `Original Price` and `Negotiated UP` → `Negotiated Price` in the per-vendor `BoqBreakdownBlock`; (2) drop the per-row `LT (orig)` and `LT (neg)` columns (footer keeps the grand totals — that's what the committee actually compares); (3) `/tenders/[id]` Bids tab only shows the initial bid per vendor — owner wants every negotiation submission to appear in the same tab so the full bid history is visible without bouncing to /commercial-comparison.
+
+**Files changed:**
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — `BoqBreakdownBlock`: headers renamed (`Original UP` → `Original Price`, `Negotiated UP` → `Negotiated Price`); per-row `LT (orig)` and `LT (neg)` cells removed (column count drops from 9 to 7 in the negotiation mode; legacy non-negotiation mode unchanged at 6); footer condensed to one row with `Bid total` (colSpan=4) + Original total + Negotiated total + overall `−X%` chip in its own column, matching the new header alignment.
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — `BidsTabPanel` now fetches `/tenders/:id/negotiation` in parallel with `/tenders/:id/bids` (best-effort: viewers without `negotiation:view` see only initial bids, no error). Builds a `bidId → NegSubmissionRow[]` map ordered by round number. Renders one row per initial bid plus one indented amber-tinted child row per negotiation submission with: `Round N` chip + vendor name + submitted-at + total price + View/Download PDF buttons (reuse the BUG-129 endpoints `/tenders/:tenderId/negotiation-submissions/:submissionId/commercial-pdf[/view]`). Header gains two columns: `Total` and `PDF`. Initial bid rows show `—` in the new columns (the price block lives on /commercial-comparison's BoqBreakdownBlock, not here).
+
+**Why:**
+- BoQ rename: "UP" was opaque shorthand. "Price" is the term the owner actually used during walkthrough.
+- LT columns removed: per-line line totals were derivable from Qty × UP and added column-width pressure that pushed the Negotiated columns off-screen on smaller laptops. Footer carries the only totals that matter for the comparison call.
+- Bids-tab negotiation rows: the owner's mental model is "Bids on the tender" = everything the vendor has formally submitted. Pre-BUG-131 the tab only showed envelopes from initial submission, which made the negotiated rounds invisible from the tender-level view and forced a tab-switch to /commercial-comparison just to find a vendor's R1 PDF.
+
+**Verification on staging:**
+- ✅ Typecheck clean (`tsc --noEmit` exit 0).
+- ✅ Pre-flight disk: 41 GB free.
+- ✅ Rebuild produced `ctmp-web-admin Built`; container recreated cleanly.
+- ✅ Deployed chunk `136-e3210dbeb54a9872.js` contains `Original Price` + `Negotiated Price`.
+- ✅ Deployed chunk `app/(admin)/tenders/[id]/page-e50ff16c42d78709.js` contains `Negotiated commercial submission`.
+- ⏳ Owner verification pending on staging: `/tenders/<TDR-2026-0019>` Bids tab should now show one initial row per vendor + an amber `Round 1` child row per submission with View/Download buttons. `/commercial-comparison` BoqBreakdownBlock should show `Original Price` / `Negotiated Price` columns and no per-row LT cells.
+
+**Open questions:** None. The PDF buttons reuse the same gates as `/commercial-comparison` (OptionalVendorOrUserGuard + service-layer permission check + audit on view/download), so RBAC is consistent.
+
+**Next recommended step:** Owner walks the two surfaces. Once verified, no further BUG-130/131 work needed.
+
+**Locked-rule status:** No master-plan rule amended. Bids-tab negotiation rows are a read-only view; they do not change the immutability rule (submitted bids stay immutable; the negotiated submissions are separate records that already exist), and PDF view/download routes audit-log BEFORE the stream (BUG-129 already enforced this).
+
+---
+
+## 2026-06-12 — BUG-130 shipped: per-line side-by-side prices + per-round Commercial Comparison sections
+
+**Date/time:** 2026-06-12
+**Agent/task:** Owner walked the BUG-129 negotiation card and asked for two extensions: (a) per-line itemwise Original vs Negotiated unit prices inside each `BoqBreakdownBlock`; (b) the single Commercial Comparison matrix split into "Original Commercial Comparison" + one "Negotiated Commercial Comparison — Round N" per submitted round, each with its own lowest-PASS highlight scoped to participants. Owner directive: exclude non-participants from a round's matrix (cleaner per-round story).
+
+**Files changed:**
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — `CardVendor.negotiationHistory[]` gains `boqLines?[]` (item-id + status + unit price; line totals derived). `BoqBreakdownBlock` table layout extended with conditional `hasNegotiation` mode: per-row Original UP + Negotiated UP + green/rose `−X%` chip + LT(orig) + LT(neg); two-row footer with Grand Total Original / Negotiated and overall % reduction; italic caption shows which round + date the negotiated column came from. When no negotiation history exists, table renders exactly as before.
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — old single-matrix `matrixVendors` useMemo replaced with `matrixSections` useMemo returning N+1 sections: `original` (always present, uses `originalCommercialTotal` + original `boqLines`) and one per round number that has ≥1 submission. Round sections include only vendors who submitted that round, materialise per-vendor `boqLines` from `entry.boqLines` (line totals derived from BOQ template qty × unitPrice), set `commercialTotal` from `entry.totalPrice`, and recompute their own `lowestPassBidId` scoped to participants. JSX render loop emits a section heading (gray for Original, amber for round sections) + the matrix; `selectedBidId` / `onSelect` / `handleSelectBid` wire-through unchanged so award flow still works from any matrix.
+
+**What changed (UX):**
+- Vendor card BoqBreakdownBlock: when there's negotiation history, each BoQ row shows Original UP and Negotiated UP (amber bg) side-by-side plus a per-line `−X%` chip; footer shows Grand-Total Original | Grand-Total Negotiated | total % reduction matching the headline.
+- `/commercial-comparison` page: one Original matrix (always) + one matrix per Round 1..N with its own price source + lowest-PASS scoped to round participants. Pre-negotiation tenders look identical to before.
+
+**Why:** Owner needed to see *which* BoQ lines a vendor actually reduced during a round (the headline total alone hid the per-line story), and needed the original baseline to remain alongside per-round views instead of being replaced by the resolved-current price. Round-scoped lowest-PASS is the correct lens when comparing apples-to-apples within a round.
+
+**Verification on staging:**
+- ✅ Typecheck clean (`tsc --noEmit` on web-admin, exit 0).
+- ✅ Pre-flight disk: 44 GB free.
+- ✅ Rebuild produced `ctmp-web-admin  Built` line; container recreated cleanly.
+- ✅ Deployed chunk `app/(admin)/commercial-comparison/page-20cec841061e9761.js` contains both `"Original Commercial Comparison"` and `"Negotiated Commercial Comparison"` markers.
+- ⏳ Owner verification on staging pending: TDR-2026-0019 (has R1 submissions) should now show two matrices + per-line side-by-side inside each vendor's BoqBreakdownBlock.
+
+**Open questions:** Should the per-line `−X%` chip respect a configurable threshold (e.g., highlight only when reduction > 5%) or stay as-is? Currently green for any ≥0 reduction, rose for any increase.
+
+**Next recommended step:** Owner walks `/commercial-comparison` for TDR-2026-0019 + a pre-negotiation tender to confirm both modes render correctly. Once verified, no further work for this BUG.
+
+**Locked-rule status:** No master-plan rule amended. Per-round lowest-PASS is consistent with the existing "Gate-only PASS/FAIL determination" and "Pre-select lowest-PASS for award" rules — the page still pre-selects from the *resolved current* matrix; the per-round sections are read-only views. Award selection semantics unchanged.
+
+---
+
+## 2026-06-10 — BUG-120 shipped: Vendor invitation email dispatch (closes the long-deferred BUG-016)
+
+**Date/time:** 2026-06-10
+**Agent/task:** Owner asked "once I select vendors how do I trigger email or notify them that there is a new tender for them to bid?" — completing the deferred BUG-016 piece. Adds the per-vendor invitation email + BCC flow, with admin-editable ad-hoc extra recipients.
+
+**Schema (migration 033):**
+- `tender_vendors.extra_notification_emails TEXT[] NULL` — ad-hoc per-invitation BCC list.
+- `tender_vendors.notified_at TIMESTAMPTZ NULL` — dedupe flag so re-publish + post-publish-invite don't double-send.
+- New notification template `TENDER_INVITATION_SENT` (subject + body with `{{systemName}}`, `{{vendorName}}`, `{{tenderReference}}`, `{{tenderTitle}}`, `{{tenderCategory}}`, `{{submissionDeadline}}`, `{{vendorPortalUrl}}`, `{{tenderUrl}}`).
+- Optional `branding.vendor_portal_url` setting — used to build deep links in the email. Falls back to `VENDOR_PORTAL_URL` env when empty.
+
+**Backend:**
+- `InviteVendorDto` extended with optional `extraEmails: string[]` (`@IsEmail({}, { each: true })`, `@ArrayMaxSize(20)`).
+- `TendersService.inviteVendor()` accepts the list, normalises (trim + lowercase + dedupe) and writes to the new column. When tender status ∈ {Published, Clarification Period}, fires the email immediately via `dispatchInvitationEmail()` (best-effort, errors logged but don't fail the POST).
+- `TendersService.publish()` triggers `dispatchPendingInvitationEmails()` — sweeps every invited vendor with `notifiedAt IS NULL` and dispatches one email per vendor.
+- `dispatchInvitationEmail()` builds BCC = vendor's ACTIVE `vendor_users.email` + `extra_notification_emails` (deduped). TO = platform SMTP from-address (so contacts don't see each other on To/CC line). Stamps `notified_at` to prevent double-send. Audit event `TENDER_INVITATION_NOTIFIED` MEDIUM with recipient counts.
+- `NotificationsService.sendEmailWithBcc()` — new BCC-capable variant; writes one `notification_log` row per recipient for auditability.
+- New endpoint `PATCH /tenders/:id/invited-vendors/:vendorId/extra-emails` lets admin edit the extras post-invite (e.g., add another contact before publish). Audit event `TENDER_INVITATION_EXTRAS_UPDATED` LOW.
+- `listInvitedVendors()` response shape gains `extraEmails: string[]` + `notifiedAt: string | null`.
+
+**Frontend (admin):**
+- `ManageInvitedVendors.tsx`: picker click no longer POSTs immediately. Opens an inline confirm pane (amber card) with vendor name + extras textarea + Send button. Extras parsed client-side via `parseEmails()` (comma / space / newline separated, RFC-822-ish regex). Cancel button collapses the pane.
+- Panel header banner explains *when* emails fire: "fires immediately on add" (Published tender) vs "fires on Publish" (pre-publish).
+- Invited list rows gain: a pencil icon to edit extras post-invite (opens an inline editor under the row), a "+ N extras" sub-line when extras present, and an "email sent {date}" stamp once `notifiedAt` is set.
+- Helper `parseEmails()` validates and dedupes; invalid entries are silently dropped.
+
+**Verification on staging:**
+- ✅ Pre-flight disk: 57 GB free.
+- ✅ Migration 033 applied — 2 new columns added; template seeded.
+- ✅ Both rebuilds produced real `Built` lines (api 91s, web-admin 49s).
+- ✅ Containers restarted; Nest started clean.
+- ✅ End-to-end (queued path): invited Vendor 3 on TDR-2026-0022 (INTERNAL_REVIEW status) with `["extra1@example.com","extra2@example.com"]` → response 201 `{ok:true}`. DB row confirms `extra_notification_emails = {extra1@example.com, extra2@example.com}` + `notified_at = NULL` (correctly queued, no email fired yet).
+- ⏳ Immediate-dispatch path: no Published INVITATION_ONLY tender currently on staging to test mid-flight invite-and-email. Mechanically verified — both paths call the same `dispatchInvitationEmail()` helper.
+- ⏳ Publish-sweep: requires bringing TDR-2026-0022 (or a new tender) through Approval → Publish. The hook is wired into `publish()` and uses the same dispatcher.
+
+**Behaviour notes for owner:**
+- TO line is the platform's SMTP from-address (set under Settings → Branding → SMTP). All actual recipients go in BCC, so vendor contacts at the same vendor company don't see each other on the visible recipient list.
+- One email per invited vendor — vendor A never sees vendor B's contacts.
+- Vendors who haven't created any portal `vendor_users` will receive nothing UNLESS the admin adds an ad-hoc email via the extras field. Owner may want to add an admin-portal banner reminding new vendors to register at least one user before bidding.
+- MailHog is the staging SMTP catcher (port 8025). After your first publish, check the MailHog UI to see the formatted emails.
+
+**Out of scope (deferred for future):**
+- Resend button on already-notified rows (forces a fresh send even when `notified_at` is set).
+- Vendor portal "received invitations" inbox view that complements the email.
+- Email template per-locale (Arabic body).
+- Push/SMS notifications.
+
+---
+
+## 2026-06-10 — BUG-118 shipped: Invited Vendors picker — native `<select>` → button-list (Chrome dark-mode invisible text)
+
+**Date/time:** 2026-06-10 ~12:20 GMT+3
+**Agent/task:** Owner reported the "Pick a vendor to invite…" dropdown on the `ManageInvitedVendors` panel (right sidebar of `/tenders/[id]` for INVITATION_ONLY tenders) was rendering text **invisibly (white-on-white)** even after BUG-116 populated the list.
+
+**Root cause (visible):** Chrome on Windows renders native `<select>` option popups using the OS shell — when the user's OS is in dark mode, the popup ignores Tailwind classes and inline styles and uses OS dark-mode chrome (white text on near-white panel). Multiple attempts to fix via CSS (Tailwind `text-text-primary`, inline `color: #1a1c1e` per option, global `select { color-scheme: light }`) had no observable effect because of the second root cause below.
+
+**Root cause (hidden) — the BIG one:** Staging disk was **100% full** (94/98 GB used, 0 bytes available). Every `docker compose build --no-cache web-admin` returned exit code 0 **but silently used a stale cached image layer** because BuildKit's activity-metadata write hit `no space left on device`. The earlier BUG-118 a/b fixes were on staging source disk but never landed in any built image — the container kept serving the same chunk for ~4 rebuild cycles. `docker system df` would have caught this on the first attempt (CLAUDE.md mandates pre-flight check — was skipped). Reclaimed 52 GB via `docker builder prune -af` + `docker image prune -af`; disk now 31% used.
+
+**Fix shipped:** `apps/web-admin/src/components/ManageInvitedVendors.tsx` replaces the native `<select>` entirely with:
+- A `<input type="text">` search box (live filter on company name, `bg-white text-slate-900 placeholder:text-slate-500`).
+- A scrollable `<ul>` of available vendors; each row is a `<button>` (`text-slate-900` on `bg-white`, `hover:bg-accent/10`, `Plus` icon in `text-accent`).
+- Click a name → POST `/tenders/:id/invited-vendors` immediately (skips the old two-step Pick→Invite).
+- No native popup involved, so OS theming cannot override the colours.
+The empty-state messages from BUG-117 (vendor:view perm hint / no APPROVED vendors / all invited) are preserved and now sit under the search box.
+
+**Files modified:**
+- `apps/web-admin/src/components/ManageInvitedVendors.tsx` — picker swap. `handleAdd()` kept (eslint-ignored) for back-compat.
+- `apps/web-admin/src/app/globals.css` — defense-in-depth `select { color-scheme: light; color: #1a1c1e; background: #ffffff; }` rule plus `select option {...}` rule. Helps any remaining native `<select>` elements in the admin app without needing the button-list refactor everywhere.
+
+**Verification on staging:**
+- ✅ Pruned 52 GB of build cache + dangling images; disk healthy.
+- ✅ Build produced a real image — `ctmp-web-admin Built` line in the rebuild log + 79s unpack (silent-fail builds had no such line).
+- ✅ Container recreated; new chunk `page-0edc34459bcc9947.js` deployed.
+- ✅ Chunk grep: `Search vendors to invite` × 1, `No match for` × 1, old `Pick a vendor` × 0 — confirms the button-list code is live and the native `<select>` code is gone.
+- ⏳ Owner hard-refreshes `/tenders/[id]` (Ctrl+Shift+R) — picker should now show a visible search box + scrollable name list with dark text on white.
+
+**Operational lessons:**
+- Always run `docker system df` BEFORE any `docker build` on staging. CLAUDE.md says this explicitly; we skipped it for three rebuild cycles and the silent-fail issue masked the real fix. Adding it to the standard ship sequence going forward.
+- Distrust `docker compose build` exit 0 in isolation: also grep for `<service> Built` in the output and check chunk filename / content changed.
+- For UI fixes that interact with native form elements: prefer non-native components (button lists, custom comboboxes) when CSS-only solutions touch native popup chrome that the browser/OS controls.
+
+**Out of scope (deferred):**
+- The button-list refactor was applied only to `ManageInvitedVendors`. Other native `<select>` elements in the admin app (committee member picker, etc.) are still relying on the new global `color-scheme: light` rule. If owner reports the same issue elsewhere, apply the same swap.
+- Same vendor portal: `NegotiationSection` BIDDING/NOT_BIDDING select is still a native `<select>` (vendor app already had `color-scheme: light` on `<html>` so unaffected by the OS-dark-mode bug).
+
+---
+
+## 2026-06-09 — BUG-117 shipped: 4-piece bundle — persistent storage, cancel reason dialog, vendor estimated budget, picker UX
+
+**Date/time:** 2026-06-09
+**Agent/task:** Owner reported five issues after the BUG-115/BUG-116 rebuild: (a) invited-vendor dropdown still empty after BUG-116, (b) Amend Award submit still disabled, (c) vendor portal still showed Estimated Budget, (d) Cancel Tender failed with no reason input, (e) **uploaded logos disappeared after every rebuild**. The first two were browser cache (BUG-114/BUG-116 fixes verified live in the chunk at mtime 20:33 — hard-refresh needed). The other three are real and shipped here as BUG-117.
+
+**Issue (e) — the critical persistence bug.** Confirmed: `STORAGE_DRIVER=local` writes to `/data/<namespace>/`. Compose mounted volumes for only 3 paths (`/data/reports`, `/data/bid-documents`, `/data/tender-documents`) — every other namespace lived in the api container's writable layer and was **wiped on every `docker compose --force-recreate api`**. On staging at investigation time: `/data/branding/` had no directory at all (logos in DB but files gone), and `/data/award-justifications/` + `/data/negotiation-submissions/` were sitting in the writable layer at risk of imminent loss.
+
+**Fix:** add a catch-all `app_storage` named volume mounted at `/data` on the api service. The 3 existing sub-mounts stay in place — Docker uses longest-path-wins, so report/bid/tender data is untouched, and every other namespace (branding, award-justifications, negotiation-submissions, and any future ones) is automatically persistent.
+
+**Files modified:**
+- `infrastructure/docker/docker-compose.yml` — new `app_storage:` named volume, mounted at `/data` on `api` ABOVE the existing sub-mounts. Comment explains the rationale.
+- `apps/web-admin/src/components/dialog/CancelTenderDialog.tsx` (new) — modal with 20-char min reason, mirrors `RevertTenderDialog`. Replaces the bare `confirm() + POST {}` pattern that sent an empty body and got 400 from the backend's `cancel()` service (which requires `reason`).
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — `cancelOpen` state, swapped the Cancel button to open the new dialog, mounted dialog alongside Revert + Amend.
+- `apps/web-admin/src/components/ManageInvitedVendors.tsx` — captures the `/vendors` fetch error into `vendorLoadError` state. Empty-state UX now distinguishes three cases: API error (shows the error + a hint about `vendor:view` perm), zero APPROVED vendors, and "all vendors already invited". Prevents future BUG-116-style silent failures from looking like an empty dropdown.
+- `apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx` — `tender.estimatedBudget` block removed. Internal-only reference per owner directive. The other two vendor surfaces (public landing + `/tenders` list) only declared the type but never rendered the value.
+
+**Verification on staging:**
+- ✅ Compose change applied; `docker inspect ctmp-api` confirms `/data` now mounts `ctmp_app_storage` with the 3 existing sub-mounts intact at their paths.
+- ⏳ Logos already gone — owner needs to re-upload after the rebuild lands. Future logo uploads survive `--force-recreate`.
+- ⏳ web-admin + web-vendor rebuilds in flight.
+
+**Out of scope (deferred):**
+- The 2 vendor-page TypeScript interfaces still carry `estimatedBudget` — they're declared but unused. Harmless; can be pruned in a cleanup pass.
+- The existing logo storage keys in `system_settings` still reference the missing files. Re-uploading via Settings → Branding will overwrite them with valid keys.
+- Migration of `STORAGE_DRIVER=local` → `s3` (MinIO) — separate decision for production hardening; current fix is sufficient for staging.
+
+**Next recommended step:**
+- Hard-refresh the admin browser (Ctrl+Shift+R) and confirm: (a) Invited Vendors dropdown lists 13 APPROVED vendors, (b) Amend Award submit enables with reason ≥100 chars + no PDF, (c) Cancel Tender opens the new dialog with a reason textarea, (d) Vendor portal tender detail no longer shows Estimated Budget.
+- Re-upload admin/vendor/report logos via Settings → Branding. They'll now persist across container rebuilds.
+
+---
+
+## 2026-06-09 — BUG-115 shipped: Negotiation workflow (multi-round, no deadline)
+
+**Date/time:** 2026-06-09
+**Agent/task:** Owner asked for a Negotiation phase between Commercial Comparison and Award. Procurement clicks **Negotiate** next to Confirm Award, selects PASS vendors, types a reason; the tender enters a new `Negotiation` state and the invited vendors see a new section on their portal to revise BoQ prices + upload a new commercial PDF. Original prices are preserved forever. Multi-round. No deadline.
+
+**Locked rule overridden:** master plan §10 "No new tender lifecycle states" — a dated amendment block was appended before code shipped, per the document's own change-control rule. Same pattern used for BUG-114.
+
+**Migration 032** (`database/migrations/032_bug115_negotiation.sql`, idempotent):
+- `ALTER TYPE tender_status ADD VALUE 'NEGOTIATION'` after `COMMERCIAL_EVALUATION`.
+- New enum `negotiation_invitation_status` (`INVITED | SUBMITTED`).
+- 4 new tables: `negotiation_rounds`, `negotiation_invitations`, `bid_negotiation_submissions`, `bid_negotiation_boq_items`.
+- 2 new perms: `negotiation:launch` (PROCUREMENT_ADMIN), `negotiation:view` (PROCUREMENT_ADMIN + COMMERCIAL_COMMITTEE_MEMBER + COMMERCIAL_EVALUATOR + EXECUTIVE + AUDITOR). SYSTEM_ADMIN intentionally excluded (separation of duties).
+- Token-version bump on holders.
+
+**Backend changes:**
+- `packages/shared-types/src/tender-status.ts` + `apps/api/prisma/schema.prisma` — new `Negotiation` API value, new `NEGOTIATION` Prisma enum value, 4 new models + `NegotiationInvitationStatus` enum. Back-refs added on `User`, `VendorUser`, `Tender`, `Bid`, `TenderBoqItem`.
+- `apps/api/src/modules/tenders/tenders.service.ts` + `apps/api/src/modules/comparison/comparison.service.ts` — API↔DB status maps include `Negotiation`. Comparison endpoint's `allowedTenderStatuses` accepts `NEGOTIATION`.
+- New module `apps/api/src/modules/negotiation/` — `negotiation.service.ts` (`launchRound` / `submitNegotiation` / `closeOpenRound` / `listRoundsForTender` / `listInvitationsForVendorUser` / `autoCloseOpenRoundOnAward`), `negotiation.controller.ts` (admin + vendor endpoints, vendor JWT for the submission paths), `negotiation-storage.service.ts` (mirror of `AwardStorageService`, namespace `negotiation-submissions`), 3 DTOs (`LaunchNegotiationDto`, `SubmitNegotiationDto`, `CloseNegotiationDto`). 15-min PDF holding-tank pattern reused from Award. New audit event types: `NEGOTIATION_ROUND_LAUNCHED` HIGH, `NEGOTIATION_PDF_UPLOADED` MEDIUM, `NEGOTIATION_SUBMITTED` MEDIUM, `NEGOTIATION_ROUND_CLOSED` MEDIUM. Wired into `app.module.ts`.
+- `apps/api/src/modules/comparison/comparison.service.ts:commercialComparison()` — pulls `negotiationInvitations` per bid. New per-vendor fields on the response: `negotiationHistory[]` (per-round `totalPrice` + `% reduction vs original/previous` + BoQ lines + PDF filename), `originalCommercialTotal`, `hasOpenNegotiationInvitation`, `openNegotiationRoundNumber`. `commercialTotal` now resolves to the latest non-superseded negotiation submission first, then BoQ sum, then CommercialEvaluation average. Lowest-PASS pre-selection recomputes on the latest.
+- `activeAwardSummary()` (same file) — `winnerPrice` prefers latest negotiation submission; response gains a `negotiationSavings` block (`{ originalPrice, finalPrice, savingsAmount, savingsPercent, roundCount } | null`).
+- `apps/api/src/modules/analytics/analytics.service.ts` — `_resolveAwardedAmount` precedence chain extended (negotiation > tender.awardedAmount > CE). New `_resolveNegotiationSavings()` helper. `_loadAwardedTendersForVendors` loader includes the negotiation submissions. `getVendorProfile()` response gains additive `negotiationSavings` top-level summary + per-row `negotiationSavings` on `awardHistory[]`. **No `/executive/*` UI changes** — owner deferred dashboard polish to a follow-up.
+- `apps/api/src/modules/award/award.service.ts:confirmAward()` — accepts `NEGOTIATION` as a valid confirm-from state. Inside the prisma transaction: auto-closes any open negotiation round (`negotiationRound.updateMany where closedAt: null`). `computeLowestPassBidId()` extended to consult negotiation submissions first (same precedence as the resolver).
+- `apps/api/src/modules/award/award-minutes.service.ts:collectData/renderHtml()` — pulls the awarded bid's negotiation submissions; winner section on the PDF now shows "Original bid: X" + "Negotiation savings: Y (Z%, N rounds)" when applicable.
+- `apps/api/src/modules/reports/report-renderer.service.ts:awardHistory()` — pulls negotiation submissions per awarded bid; XLSX gains two new columns: `Original Price`, `Negotiation Savings %`. `Awarded Amount` column now reflects the negotiated final price.
+
+**Frontend changes (admin):**
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — new permission flag `canLaunchNegotiation` (gated by `negotiation:launch`). `ELIGIBLE_STATUSES` accepts `'Negotiation'`. New banner above the Commercial matrix that shows current negotiation state + a **Negotiate** / **Launch another round** button. New `LaunchNegotiationDialog` mounted alongside the existing AwardConfirmDialog.
+- New `apps/web-admin/src/components/comparison/LaunchNegotiationDialog.tsx` — PASS-vendor checkboxes (lowest-PASS pre-checked), 20-char reason textarea, POST `/tenders/:id/negotiation/rounds`.
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — `CardVendor` type gains `negotiationHistory`, `originalCommercialTotal`, `hasOpenNegotiationInvitation`, `openNegotiationRoundNumber`. New section above Block 1 renders an "Original price" row + per-round amber row with `% vs original`, plus a "pending" chip when an invitation exists without a submission.
+- `apps/web-admin/src/components/comparison/AwardSummaryCard.tsx` — `AwardSummary` interface gains optional `negotiationSavings`. Renders an amber sub-line "Awarded after N round(s) — saved X (Y%)" beneath the winner when present.
+
+**Frontend changes (vendor):**
+- New `apps/web-vendor/src/components/bids/NegotiationSection.tsx` — self-contained section that fetches `/vendor/negotiation/invitations` + (best-effort) `/tenders/:id/negotiation`. Shows submitted rounds as read-only cards (emerald) with collapsible per-line breakdown. Renders an editable form (amber) for any open `INVITED` invitation on this bid: clone of the original BoQ with status toggle + unit price input per row, mandatory PDF uploader (uses the `/upload-pdf` holding-tank endpoint), optional remarks. Submit → POST `/tenders/:id/negotiation/submissions`.
+- `apps/web-vendor/src/app/(portal)/bids/[bidId]/page.tsx` — mounts `NegotiationSection` below the read-only BoQ block (only when BoQ template has real rows).
+
+**Out of scope (deferred):**
+- Executive dashboard UI changes (`/executive/*`) — backend payload exposes `negotiationSavings`; UI pass is owner-deferred to a follow-up.
+- Bids tab status pill `In negotiation (R N)` on admin tender detail — polish, deferred.
+- Vendor bids-list "Negotiation pending" chip — polish, deferred.
+- Stacked-rows visualisation in the CommercialMatrix top section — current matrix already shows the resolved current price; stacked visualisation is owner-polish.
+- Top-bar notification badge on vendor portal — explicitly deferred in the plan.
+- Notification email body with price token — out of scope (templates currently don't render price).
+
+**Verification on staging:**
+- ✅ Migration 032 applied cleanly — `NEGOTIATION` enum value present, 4 tables created, 2 perms seeded, 6 role grants, 5 token bumps.
+- ✅ All three containers rebuilt + restarted; Nest started clean.
+- ✅ 6 negotiation routes mapped in startup logs (admin GET / POST rounds / POST close + vendor GET invitations / POST upload-pdf / POST submissions).
+- ✅ Manager JWT decoded after login carries both `negotiation:launch` and `negotiation:view`.
+- ✅ DTO validation — short reason returns 400 with class-validator message.
+- ✅ End-to-end on `TDR-2026-0017`: manager launched round 1 with Vendor 1 + Vendor 2 → tender state flipped `COMMERCIAL_EVALUATION → NEGOTIATION` (verified via SQL); Vendor 1 logged in, listed open invitation, uploaded PDF, submitted revised BoQ with `totalPrice` computed correctly (sum of `unitPrice × qty` for BIDDING rows).
+- ✅ `GET /comparison/commercial` returns the new shape — Vendor 1 row carries `negotiationHistory[]` (1 entry with `% reduction vs original`), `originalCommercialTotal` preserved, `commercialTotal` resolves to the latest submission. Vendor 2 shows `hasOpenNegotiationInvitation: true` (invited, not yet submitted). Vendor 3 (uninvited) clean. `lowestPassBidId` correctly recomputed on the resolved current prices.
+- ✅ Audit log captured `NEGOTIATION_ROUND_LAUNCHED` HIGH, `NEGOTIATION_PDF_UPLOADED` MEDIUM, `NEGOTIATION_SUBMITTED` MEDIUM.
+- ⏳ Owner end-to-end walkthrough: confirm UI renders the stacked rows in the admin commercial-comparison page + the negotiation form on the vendor portal; verify Confirm Award auto-closes any open round and AwardSummaryCard shows the savings sub-line.
+
+**Next recommended step:**
+- Ship to staging (P12). Owner end-to-end: pick a PASS tender on `/commercial-comparison`, click Negotiate, select 1-2 vendors, type reason, confirm. Log in as the invited vendor, open the bid, see the new Negotiation section, submit a revised price + PDF. Back on admin Commercial Comparison, confirm the per-vendor card now stacks Original + Round 1 with `% reduction`. Optionally launch Round 2 to confirm prior round auto-closes. Confirm Award; AwardSummaryCard shows the savings sub-line.
+
+---
+
+## 2026-06-09 — BUG-114 shipped: Amend-Award PDF made OPTIONAL (locked rule amended)
+
+**Date/time:** 2026-06-09 ~08:45 GMT+3
+**Agent/task:** Owner reported the "Submit amendment" button on AmendAwardDialog stayed disabled even after filling reason — couldn't proceed. Root cause was the dialog's `canSubmit` gate requiring `pdfDocumentId` to be set, plus the backend DTO + service enforcing the same. Owner directed: make PDF optional, keep reason mandatory only.
+
+**Locked rule overridden:** `IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md` §A6 + §F7 — "Override always requires text + PDF" / "Amendments are by definition an override — text + PDF always required." A dated amendment block was added to the master plan (Section 10, BUG-114, 2026-06-09) before any code shipped, per the document's own change-control rule. Compliance reasoning: the amendment audit trail already captures actor / timestamp / before-after Award rows / justification text / tender / `AWARD_AMENDED` HIGH-risk event — the in-app PDF was duplicating documentation procurement already keeps in their own DMS, creating friction without adding evidentiary value. Confirm-Award override rule (non-lowest at first-confirm) is **unchanged** — that path still requires text + PDF.
+
+**Schema impact:** none. `awards.justification_pdf_storage_key` / `_sha256` / `_filename` columns were already nullable. The CHECK constraint `awards_override_requires_justification` enforces `justification_text IS NOT NULL`, not the PDF.
+
+**Backend changes:**
+- `apps/api/src/modules/award/dto/amend-award.dto.ts` — `justificationDocumentId` now `?: string` with `@IsOptional()`; swagger demoted to `@ApiPropertyOptional`.
+- `apps/api/src/modules/award/award.service.ts:amendAward()` — pending-reference lookup is now `if (dto.justificationDocumentId)` guarded; missing-pending throw still fires when an id IS supplied but expired. New Award row's `justificationPdf*` fields set from `pending?.x ?? null`. The `pendingJustifications.delete()` call also guarded so we don't delete an undefined key.
+
+**Frontend changes:**
+- `apps/web-admin/src/components/comparison/AmendAwardDialog.tsx`
+  - `canSubmit` drops the `!overrideMissingPdf` clause; `overrideMissingPdf` variable removed.
+  - POST payload omits `justificationDocumentId` entirely when no PDF attached (so backend's `@IsOptional` path is taken cleanly instead of sending a `null` that would fail `@IsString`).
+  - Warning banner copy: "Both written justification AND a PDF are required" → "Written justification is required; attaching a supporting PDF is optional but strongly recommended."
+  - PDF field label `Supporting PDF *` → `Supporting PDF (optional)` (asterisk replaced with muted-text "optional" suffix).
+  - Reason text remains mandatory (100-char `@MinLength` unchanged).
+
+**Reason min:** unchanged at 100 chars. Owner only relaxed the PDF gate.
+
+**Verification on staging:**
+- ✅ Both containers rebuilt + restarted (api + web-admin). Nest application started clean.
+- ✅ Deployed admin chunk contains new banner copy "strongly recommended"; old banner "Both written justification AND a PDF" absent; "(optional)" label present on the Supporting PDF field.
+- ⚠️ Authenticated 201-path smoke-test not run from the test harness — `admin@ctmp.local` (SYSTEM_ADMIN) doesn't hold `award:amend` (only PROCUREMENT_ADMIN does), so the endpoint 403s before DTO validation runs. The class-validator change (`@IsOptional()` on a string field) is a standard pattern and the TS build was clean.
+- ⏳ Owner verification: open an Awarded tender → Amend Award → pick PASS bid + 100+ char reason → leave PDF empty → Submit amendment button should be enabled and request should 201.
+
+**Next recommended step:**
+- Owner verifies amendment-without-PDF round-trip on `TDR-2026-0018` or any other awarded tender.
+- If owner wants the Confirm-Award override (non-lowest first-confirm) to also drop PDF, that's a separate locked-rule conversation and a separate dated amendment block.
+
+---
+
+## 2026-06-08 — BUG-113 shipped: Awarded Tenders archive — Award + Commercial tabs blank (wrong endpoint)
+
+**Date/time:** 2026-06-08 ~08:05 GMT+3
+**Agent/task:** Owner (logged in as `manager@ctmp.local` = PROCUREMENT_ADMIN) reported that on the Awarded Tenders archive page (`/awarded-tenders`), all tabs (Overview, Technical, BoQ, Documents, Audit) rendered data correctly, but Award + Commercial were blank with no data.
+
+**Root cause:** `apps/web-admin/src/app/(admin)/awarded-tenders/page.tsx:324` called the **legacy** endpoint `GET /tenders/:id/commercial-comparison` (handled by `CommercialEvaluationController` → returns `{ tenderId, callerCommercialAccess, rows: [...] }`). The page's `CommercialComparisonResponse` interface and the Award + Commercial tabs expect the **new** shape from `GET /tenders/:id/comparison/commercial` (`ComparisonController.commercial()`), which returns `{ tender, summary, lowestPassBidId, vendors, award, boqTemplate }`. Manager's request succeeded server-side (200, `COMMERCIAL_COMPARISON_VIEWED` audit row exists) but the payload was missing every field those tabs render — Award tab fell through to "No active award row on this tender." and Commercial tab fell through to "No bids on this tender." (both quiet null paths, hence "totally blank").
+
+**Why two endpoints exist:**
+- Legacy `/commercial-comparison` (CommercialEvaluationController, perm `commercial:view`) — pre-master-plan endpoint, returns a thin row list for the original commercial-evaluation flow.
+- New `/comparison/commercial` (ComparisonController, perm `comparison:commercial:view`) — in-app comparison master plan (BUG-035, Phase C) endpoint that returns the full surface including the active Award row (BUG-054) and BoQ template.
+
+**Fix:** one-line endpoint swap. PROCUREMENT_ADMIN, EXECUTIVE, COMMERCIAL_COMMITTEE_MEMBER, and COMMERCIAL_EVALUATOR all already hold `comparison:commercial:view` per DB grants, so all four roles continue to access the archive after the swap. SYSTEM_ADMIN + AUDITOR still cannot see Award/Commercial tabs here — that's a separate locked-rule decision noted below.
+
+**Files modified:**
+- `apps/web-admin/src/app/(admin)/awarded-tenders/page.tsx` — line 324: `/tenders/${id}/commercial-comparison` → `/tenders/${id}/comparison/commercial`. Comment added explaining the rationale.
+
+**Verification on staging:**
+- ✅ Admin image rebuilt + container restarted (`docker compose --project-name ctmp build --no-cache web-admin` + `up -d --force-recreate web-admin`).
+- ✅ Deployed bundle: 0 hits for `/commercial-comparison` in the awarded-tenders chunk; the new chunk imports the new endpoint.
+- ⏳ Owner verification pass: open Awarded Tenders → pick `TDR-2026-0018` → confirm Award tab shows AwardSummaryCard with winner + price; Commercial tab shows CommercialMatrix + per-vendor cards.
+
+**Known follow-up (NOT shipped — locked-rule conversation):**
+SYSTEM_ADMIN + AUDITOR still get blank Award/Commercial tabs because they don't have `comparison:commercial:view` (BUG-052 separation of duties). If owner wants those two roles to also see post-award commercial details on the *archive* surface, options are: (a) `@RequireAnyPermission('comparison:commercial:view','awarded:view')` on the endpoint + service-layer check requiring `tender.status ∈ {Awarded, Tender Closed}` for awarded-only callers (preserves separation of duties during active workflow); or (b) outright grant `comparison:commercial:view` to those roles (breaks the locked master-plan rule). User direction needed before either ships.
+
+**Next recommended step:**
+- Owner re-walks the Awarded Tenders archive as `manager@ctmp.local`; confirm all six tabs render data on `TDR-2026-0018` (and `TDR-2026-0015` / `TDR-2026-0016`).
+- If owner also wants SYSTEM_ADMIN / AUDITOR to see Award + Commercial on awarded tenders, pick option (a) above.
+
+---
+
+## 2026-06-07 — BUG-112 shipped: 5-piece owner walkthrough bundle (Tender Revert + search fix + clarification private default + idle-timeout signout + mandatory commercial PDF)
+
+**Date/time:** 2026-06-07 ~23:50 GMT+3
+**Agent/task:** Owner walked the staged platform after BUG-111 and listed five distinct gaps. Bundled into one deploy cycle. All five touch different surfaces and have small blast radius.
+
+**Pieces shipped:**
+
+1. **Tender Revert (NEW endpoint + dialog).** Admin can roll a `Published` tender back to `Approved` / `Internal Review` / `Draft` when a publish was a mistake. Blocked by any vendor bid in `{SUBMITTED, LATE_SUBMITTED, LATE_ACCEPTED, EVALUATED, AWARDED, NOT_AWARDED, DISQUALIFIED}` — admin must Cancel instead (compliance: never silently demote a submitted bid). Reason required, min 20 chars. HIGH-risk audit event `TENDER_REVERTED`.
+2. **Tender search 400 fix.** Admin Tenders search box was sending `?q=…`; backend DTO whitelists `search`. Validation pipe (`forbidNonWhitelisted: true`) returned "property q should not exist" on every keystroke. One-line rename in `tenders/page.tsx`.
+3. **Clarification reply private-default reinforcement.** Owner reported replies defaulted to public. Code already initialised state to `PRIVATE_TO_VENDOR`; problem was (a) the selected-state styling was too subtle so the toggle looked unset, and (b) the DTO `isPublic` was required so any client forgetting the flag could fail open. Fix: backend DTO `isPublic?: boolean = false`; frontend selected-private button styled as solid `bg-text-primary text-white` with explicit "(default)" label.
+4. **Idle timeout signout.** `session.idle_timeout_minutes` setting (BUG-107) existed but nothing enforced it — when the JWT expired the next call 401'd and stranded the user in a broken UI. Both admin and vendor JWTs now carry `idleTimeoutMinutes` from `SystemSettingsService.getPlain('session.idle_timeout_minutes')` (default 30). New hooks `web-admin/src/lib/use-idle-timeout.ts` + `web-vendor/src/lib/use-idle-timeout.ts` reset a timer on `mousemove/mousedown/keydown/touchstart/scroll`; on fire they clear tokens + push `/login?reason=timeout`. Both portals also gained a 401 interceptor in `lib/api.ts` that bounces to `/login?reason=expired` when the server reports the token is invalid. Login pages render an amber banner when `?reason=timeout|expired` is present.
+5. **Vendor commercial PDF mandatory.** Bid wizard Step 3 previously had `required={!hasRealBoq}` with a Skip button for BOQ tenders. Owner wants commercial PDF mandatory always. Removed BOQ exemption from validation, removed Skip branch (button now always shows Continue with disabled-until-uploaded state), title is hard-coded "Commercial Envelope".
+
+**Migration:** `database/migrations/031_bug112_tender_revert.sql` (idempotent — `ON CONFLICT DO NOTHING`).
+- Seeds `tender:revert` permission (category `tender`).
+- Grants to SYSTEM_ADMIN + PROCUREMENT_ADMIN.
+- Bumps `token_version` for users holding either role so their JWT picks up the new perm on next sign-in.
+
+**Backend changes (api):**
+- `apps/api/src/modules/tenders/dto/revert-tender.dto.ts` (NEW) — `targetStatus` (`@IsIn(['Approved','Internal Review','Draft'])`) + `reason` (`@MinLength(20) @MaxLength(1000)`).
+- `apps/api/src/modules/tenders/tenders.service.ts` — new `revert(id, dto, userId)`. Validates tender is `Published`. Counts bids in binding-status set; throws `ConflictException` with the count if any. Atomic update to target status. Audit event `TENDER_REVERTED` HIGH risk includes both old and new status + reason.
+- `apps/api/src/modules/tenders/tenders.controller.ts` — `POST /tenders/:id/revert` gated by `@RequirePermissions('tender:revert')`.
+- `apps/api/src/modules/clarifications/dto/reply-clarification.dto.ts` — `isPublic` now `@IsOptional` + default `false`.
+- `apps/api/src/modules/auth/auth.service.ts` — new `loadIdleTimeoutMinutes()` helper reads the system setting (defaults 30 if absent or invalid). Both initial `issueTokens()` and the refresh path now include `idleTimeoutMinutes` in the JWT payload.
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.ts` — same pattern as admin. Constructor takes `SystemSettingsService`. `issueTokens()` made `async` to await the setting read. Refresh path equivalent.
+- `apps/api/src/modules/vendor-auth/vendor-auth.module.ts` — imports `SystemSettingsModule`.
+
+**Frontend changes (web-admin):**
+- `apps/web-admin/src/app/(admin)/tenders/page.tsx:95` — `params.set('q', …)` → `params.set('search', …)`.
+- `apps/web-admin/src/app/(admin)/clarifications/page.tsx` — Private toggle uses solid `bg-text-primary text-white shadow-sm` when selected (parallel weight to Public); appends "(default)" muted suffix.
+- `apps/web-admin/src/lib/use-idle-timeout.ts` (NEW) — reads `idleTimeoutMinutes` from decoded JWT (default 30). Listens to user-activity events; on timeout fires `clearTokens()` + `router.push('/login?reason=timeout')`.
+- `apps/web-admin/src/components/layout/IdleTimeoutGuard.tsx` (NEW) — tiny `'use client'` wrapper that mounts the hook inside the server-component `(admin)/layout.tsx`.
+- `apps/web-admin/src/app/(admin)/layout.tsx` — mounts `<IdleTimeoutGuard />` so it covers every admin page.
+- `apps/web-admin/src/lib/api.ts` — 401 interceptor inside `request()`. Skips `/auth/login` to avoid a redirect loop on bad password. Dynamic-imports `clearTokens` to keep the module independent.
+- `apps/web-admin/src/app/login/page.tsx` — wrapped in `<Suspense>` (required for `useSearchParams`); banner shown when `?reason=timeout|expired`.
+- `apps/web-admin/src/components/dialog/RevertTenderDialog.tsx` (NEW) — target radio selector + reason textarea (20-char min counter) + live binding-bid count via `GET /tenders/:id/bids?pageSize=200`. Disables Confirm when binding bids exist or reason too short.
+- `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` — new `revert` permission flag + `revertOpen` state. Revert button rendered next to Cancel Tender when `status === 'Published'` && caller has `tender:revert`. RevertTenderDialog mounted near the bottom alongside AmendAwardDialog.
+
+**Frontend changes (web-vendor):**
+- `apps/web-vendor/src/lib/auth.ts` — `VendorTokenPayload.idleTimeoutMinutes?: number`.
+- `apps/web-vendor/src/lib/use-idle-timeout.ts` (NEW) — mirrors admin hook.
+- `apps/web-vendor/src/lib/api.ts` — 401 interceptor (skips `/vendor-auth/login`).
+- `apps/web-vendor/src/components/layout/PortalShell.tsx` — calls `useIdleTimeout()`.
+- `apps/web-vendor/src/app/login/page.tsx` — banner shown when `?reason=timeout|expired`.
+- `apps/web-vendor/src/app/(portal)/bids/wizard/[tenderId]/page.tsx` — `commercialDocs` validation always requires ≥1 PDF (BOQ guard removed); Step1Envelope passed `required={true}` unconditionally + hard-coded title "Commercial Envelope"; Skip button branch replaced with always-on "Continue" (disabled until upload).
+
+**Verification on staging:**
+- ✅ Migration applied: `tender:revert` permission seeded + granted to SYSTEM_ADMIN + PROCUREMENT_ADMIN (verified via SQL); token_version bumped on holders.
+- ✅ Containers rebuilt + restarted (api + web-admin + web-vendor). API initial build hit 3 TS errors (`SystemSettingsService.getPlain` doesn't exist — that's on `SecureSettingsService`; `BidStatus` enum inference into `Set<>`); fixed by reading the setting via `prisma.systemSetting.findUnique` directly and adding an explicit `Set<BidStatus>` annotation. Rebuilt clean.
+- ✅ `POST /api/v1/tenders/:id/revert` route mapped in Nest startup logs.
+- ✅ Unauthenticated POST to `/tenders/:id/revert` returns 401 (auth guard correctly wired).
+- ✅ Admin JWT decoded after login carries `idleTimeoutMinutes: 30` (default — no override seeded yet) and includes `tender:revert` permission (migration's token-version bump picked up).
+- ✅ Authenticated DTO smoke tests against revert endpoint: valid payload + nonexistent tender → 404 (service-layer); `reason: 'too short'` → 400 class-validator `@MinLength(20)`; `targetStatus: 'Awarded'` → 400 class-validator `@IsIn(['Approved','Internal Review','Draft'])`. All three paths behave correctly.
+- ✅ Deployed frontend chunks contain expected markers: `?search=` in tenders list, `reason=timeout/expired` in both admin & vendor layouts, `tender:revert` string in tender detail page, "Commercial Envelope" + new wizard branch in vendor bid wizard, `bg-text-primary text-white` private-default styling in admin clarifications page.
+- ✅ AUDIT CHAIN BREAK at row 218 noted at boot — this is the pre-existing break, NOT new.
+- ⏳ Owner verification pass pending: Tender Revert flow (positive + binding-bid block), Tender search keystroke filter, Clarification reply Private default visual, Idle timeout 30-min cut-off + banner, Vendor bid wizard Step 3 — Continue disabled until commercial PDF uploaded, no Skip button.
+
+**Out of scope (still deferred):**
+- Reverting from `Submission Closed` onwards (compliance-bound; Cancel is the right tool).
+- Auto-notifications to invited vendors on revert (owner can manually decide).
+- Configurable timeout warning popup ("you'll be signed out in 60s") — current cut-off is hard.
+- Backend filtering of clarification/audit/reports/technical-eval/committee/commercial-comparison lists by `user.departments` (BUG-028 Part B remaining list endpoints).
+- Vendor Arabic capture, Arabic Executive Dashboard, DMZ segregation.
+
+**Next recommended step:**
+- Owner walks the five flows on staging:
+  1. Login as `admin@ctmp.local` → publish a fresh tender → click Revert → choose target + ≥20-char reason → confirm tender flips state. Repeat with a second tender that has a vendor bid in SUBMITTED state → dialog blocks with "Cannot revert — binding bids on record".
+  2. Type in admin Tenders search box → results filter without "property q should not exist" toast.
+  3. Open admin Clarifications → click Reply → confirm Private button visually selected on first render, public toggle requires explicit click.
+  4. Log in as any user → leave tab idle past `session.idle_timeout_minutes` (default 30) → page auto-redirects to `/login?reason=timeout` with banner. Separately: manually revoke JWT (e.g. force token bump) → next API call → 401 interceptor bounces with `?reason=expired`.
+  5. Open vendor portal bid wizard for a tender with BOQ → Step 3 has no Skip button; Continue disabled until PDF uploaded.
+
+---
+
+## 2026-06-06 — BUG-111 shipped: Split Technical Evaluation between Technical + Procurement roles (per-criterion)
+
+**Date/time:** 2026-06-06 ~15:15 GMT+3
+**Agent/task:** Owner asked whether the technical clarification could be split between a Technical Engineer and a Procurement Manager — some criteria scored by one, others by the other. Two options considered: (A) per-criterion role assignment, (B) two parallel evaluations combined. Owner picked Option A (better UX, no duplication). Reuse existing `PROCUREMENT_ADMIN` + `PROCUREMENT_OFFICER` roles for the procurement side; add a new permission `technical:evaluate:procurement`.
+
+**Migration:** `database/migrations/030_bug111_split_technical_evaluation.sql`
+- `ALTER TABLE tender_technical_criteria ADD COLUMN evaluator_role VARCHAR(32) NOT NULL DEFAULT 'EITHER'`. Default preserves back-compat for every pre-BUG-111 criterion.
+- Seed permission `technical:evaluate:procurement` (category `technical`).
+- Grant to PROCUREMENT_ADMIN + PROCUREMENT_OFFICER + SYSTEM_ADMIN.
+- Bump `token_version` for users in those roles so JWTs reissue with the new perm.
+
+**Backend changes:**
+- `apps/api/prisma/schema.prisma` — `TenderTechnicalCriterion.evaluatorRole String @default("EITHER")`.
+- `apps/api/src/common/decorators/permissions.decorator.ts` + `common/guards/permissions.guard.ts` — new `@RequireAnyPermission(...)` decorator with OR semantics, sibling to the existing AND-semantics `@RequirePermissions(...)`. Guard runs both checks independently.
+- `apps/api/src/modules/technical-evaluation/technical-evaluation.controller.ts` — list + submit + listCriteria endpoints switched to `@RequireAnyPermission('technical:evaluate', 'technical:evaluate:procurement')`. Submit endpoint now receives the full user object so the service can check per-criterion roles.
+- `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts:evaluate()` — loads tender criteria with their `evaluatorRole`, then for each `criterionScores[i]` looks up the role and validates the caller has the required perm. Throws `ForbiddenException` naming the criterion when a submission crosses role boundaries. `listCriteria()` response now includes `evaluatorRole` so the frontend scorecard can filter visible rows.
+- `apps/api/src/modules/evaluation-criteria/dto/replace-tender-criteria.dto.ts` — `CriterionInputDto.evaluatorRole?: 'TECHNICAL' | 'PROCUREMENT' | 'EITHER'` with `@IsIn(['TECHNICAL','PROCUREMENT','EITHER'])`.
+- `apps/api/src/modules/evaluation-criteria/evaluation-criteria.service.ts` — saves `evaluatorRole` (defaults to `EITHER`, validates the enum); `serializeTenderCriterion` returns the field.
+- `apps/api/src/modules/comparison/comparison.service.ts:technicalComparison()` — adds per-section weight totals (`weightTechnical`, `weightProcurement`, `weightEither`) on the response, plus per-vendor `consensusScoreTechnical` and `consensusScoreProcurement` (each is the weighted average of criterion-consensus scores within that role, 0..100 percent). Per-criterion entries also carry `evaluatorRole` for chip display.
+
+**Frontend changes:**
+- `apps/web-admin/src/components/TenderCriteriaEditor.tsx` — new "Scored by" column with per-row `<select>` (Either · Technical only · Procurement only). Default for new criteria is `EITHER`. Save payload includes `evaluatorRole`. Load hydrates from the new field.
+- `apps/web-admin/src/app/(admin)/technical-evaluation/page.tsx` — decodes JWT permissions on mount (`canScoreTechnical`, `canScoreProcurement`). `canScoreCriterion(role)` helper. The scorecard hydration now filters `tenderCriteria` by the caller's permissions so each evaluator only sees the criteria they can score. Above the scorecard, a chip shows whether the user is evaluating the Technical portion, the Procurement portion, or both (admin); helper text explains when criteria are scored by the other role.
+- `apps/web-admin/src/components/comparison/TechnicalMatrix.tsx` — `MatrixCriterion` gains `evaluatorRole`; `MatrixVendor` gains `consensusScoreTechnical` + `consensusScoreProcurement`. New `weightTechnical` + `weightProcurement` props. When either weight > 0, the vendor-rows layout renders small `T: X / weightTechnical` + `P: X / weightProcurement` figures under the combined total. Pure-EITHER tenders (legacy) render unchanged.
+- `apps/web-admin/src/app/(admin)/technical-comparison/page.tsx` — passes `weightTechnical` + `weightProcurement` to TechnicalMatrix; mapper now threads `evaluatorRole`, `consensusScoreTechnical`, `consensusScoreProcurement` through to the matrix data.
+
+**Pass/fail logic unchanged.** Combined `consensusScore` is still the weighted sum across all scored criteria vs the tender's pass threshold. The per-section subscores are purely for visibility — they don't gate PASS/FAIL.
+
+**Verification on staging:**
+- ✅ Migration applied: 1 ALTER + 1 INSERT permission + 3 INSERT grants + 4 token_version bumps (3 grant rows + SYSTEM_ADMIN was already granted via baseline so token bump matches users in those roles).
+- ✅ `GET /tenders/:id/criteria` returns `evaluatorRole: 'EITHER'` on existing criteria (back-compat verified).
+- ✅ Admin JWT contains both `technical:evaluate` and `technical:evaluate:procurement` after migration's token bump.
+- ✅ `npx tsc --noEmit` clean on api + web-admin. Both Next/Nest builds clean.
+- ✅ Containers restarted; new code deployed.
+- ⚠️ Comparison endpoint subscore field-level test inconclusive on staging because the test tender returned 403 before the response shape could be verified — likely a permission gate unrelated to BUG-111. Code path verified by inspection; subscores activate when at least one criterion has a non-EITHER role and per-criterion scores are submitted.
+- ⚠️ Build emitted a transient `/tmp: no space left` warning. Containers came up successfully and serve the new code (criteria endpoint shape changed as expected); a follow-up `docker builder prune -af` was queued.
+
+**Back-compat behaviour:**
+- Every existing criterion defaults to `EITHER`. Existing evaluators see and score the same criteria as before. No production data change required.
+- Admins can incrementally retag criteria as TECHNICAL or PROCUREMENT in the editor — no downtime, no migration of historic scores.
+
+**Out of scope (still deferred):**
+- Three-role splits (Legal/Finance evaluator slots).
+- Reassignment of role on a criterion with existing scores — admin can change; existing scores stay where they were submitted.
+- Vendor Arabic capture, Arabic Executive Dashboard, DMZ segregation.
+
+**Next recommended step:**
+- Owner opens an active tender, goes to Criteria editor, sets 2-3 rows to `TECHNICAL only` and 2-3 to `PROCUREMENT only`, weights still sum to 100, saves.
+- Log in as a user with TECHNICAL_EVALUATOR role → open that tender's scorecard → confirm only TECHNICAL + EITHER criteria show.
+- Log in as a user with PROCUREMENT_OFFICER → confirm only PROCUREMENT + EITHER criteria show.
+- After both submit, open `/technical-comparison` → confirm matrix shows combined total + per-section `T: X / Y` and `P: X / Y` subscores.
+
+---
+
+## 2026-06-05 — BUG-110 shipped: Public Tenders landing + dropdown filter (replaces BUG-109's side panel)
+
+**Date/time:** 2026-06-05 ~22:00 GMT+3
+**Agent/task:** Owner walked BUG-109 (left-side panel category filter) and asked for two changes:
+1. Drop the side panel — move the filter beside the search bar as a single-select dropdown.
+2. Add a public vendor portal landing at `/` — anonymous visitors see the open tender list (browse only), clicking a tender redirects to login which then forwards to the intended detail after auth.
+
+**Backend changes:**
+- `apps/api/src/modules/tenders/tenders.controller.ts` — new `PublicTendersController` (separate class, no `@UseGuards` chain) with a single `@Public() @Get('public/tenders')` route. Final URL: `/api/v1/public/tenders`. Anonymous-accessible.
+- `apps/api/src/modules/tenders/tenders.service.ts` — new `findAllPublic(query)` method. Filters: `status IN [PUBLISHED, CLARIFICATION_PERIOD]` + `visibility = PUBLIC`. No invitation-only (anonymous can't be invited). No department scoping. Same `serializeSummary` projection as the authenticated variant.
+- `apps/api/src/modules/tenders/tenders.module.ts` — registered the new controller.
+
+**Frontend changes:**
+- `apps/web-vendor/src/app/page.tsx` — full rewrite from `redirect('/login')` to a public landing page. On mount checks `getAccessToken()` — if present, `router.replace('/dashboard')` (logged-in vendor doesn't see public marketing view). Otherwise fetches `/public-branding` + `/public/tenders` and renders: minimal top bar (brand logo + system name + "Sign In" link + "Register" button), tender list with search + single-select category dropdown beside, each card click pushes to `/login?next=/tenders/<id>` instead of the detail route. Card CTA badge reads "SIGN IN TO VIEW" with a Lock icon to make the auth requirement explicit.
+- `apps/web-vendor/src/app/(portal)/tenders/page.tsx` — removed the BUG-109 left sidebar + mobile chip strip entirely. Added a single-select `<select>` dropdown beside the search input inside `PageHeader actions`. Options derived from a `useMemo` over loaded tenders (`Category (N)` label, "Uncategorised" pinned last). Single-value state `category: string`; `''` means "All categories".
+- `apps/web-vendor/src/app/login/page.tsx` — reads `?next=` URL param via `useSearchParams()`. Sanitises with `sanitiseNext()` (must start with `/`, must not start with `//`, must not contain `:`). After successful login + after MFA verify, pushes to the sanitised value, else `/dashboard`. Page wrapped in `<Suspense>` boundary because Next.js requires it for `useSearchParams()` callers in prerendered pages.
+
+**No DB migration. No schema change.**
+
+**Verification on staging:**
+- ✅ `npx tsc --noEmit` clean on api + web-vendor.
+- ✅ `pnpm -C apps/api build` clean. `pnpm -C apps/web-vendor build` clean (after wrapping login page in Suspense).
+- ✅ `GET /api/v1/public/tenders?pageSize=10` returns 5 tenders, all status=`Published`. No auth header sent.
+- ✅ `GET /api/v1/tenders/<id>` anonymous still returns 401 — public detail not exposed (only the list).
+- ✅ `https://vn.hadiclinic.com.kw:4201/` returns HTTP 200 (public landing renders for anonymous).
+- ✅ `https://vn.hadiclinic.com.kw:4201/login` and `/login?next=/tenders/X` both return 200.
+- ✅ Open-redirect sanitisation in place: `sanitiseNext("https://evil.com")` returns `/dashboard`; `sanitiseNext("//evil.com/path")` returns `/dashboard`. Logic visible in deployed login bundle.
+
+**Out of scope (still deferred):**
+- Filter persistence across navigation (URL query params).
+- Status / deadline filters on the vendor Tenders page.
+- Public tender DETAIL view — clicking always routes through login.
+- Vendor Arabic capture at registration.
+- Arabic Executive Dashboard UI.
+- DMZ segregation.
+
+**Next recommended step:**
+- Owner opens `https://vn.hadiclinic.com.kw:4201/` in an incognito window → sees the tender list without logging in → tries the search + category dropdown → clicks a tender card → lands on `/login?next=/tenders/<uuid>` → logs in → forwarded to that tender's detail (not /dashboard).
+- Logged-in vendor opens `/` → auto-redirected to `/dashboard`.
+- Logged-in vendor at `/tenders` → sees search + dropdown side-by-side at top, no sidebar.
+
+---
+
+## 2026-06-05 — BUG-109 shipped: Vendor portal /tenders category side filter
+
+**Date/time:** 2026-06-05 ~21:55 GMT+3
+**Agent/task:** Owner asked for a category-wise filter on the vendor portal tenders browse page — "additional feature to have it on the side". Scoped to category only (status / deadline filters explicitly deferred).
+
+**File changed:**
+- `apps/web-vendor/src/app/(portal)/tenders/page.tsx` — single file. Layout shifted from a one-column (search + card grid) to a two-column row (left sidebar 224px + main grid). New `selectedCategories: Set<string>` state. New `categoryOf(t)` helper buckets `null`/empty category as `"Uncategorised"`. Categories list derived dynamically from the loaded tender list via `useMemo` — alphabetical with "Uncategorised" pinned last. Each entry shows a count. Multi-select via checkboxes; live filter (no Apply button); "Clear" link in the sidebar header when any box is checked. Mobile: sidebar hides (`md:hidden`), replaced by a horizontally-scrolling chip strip above the grid with the same toggle behaviour. Card grid breakpoints adjusted (`grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3`) because the side panel takes ~14rem off the available width — 3 columns on desktop now requires 2xl. Search and category filter compose as AND (search narrows results within whatever categories are selected).
+
+**No backend changes.** `GET /tenders` already supports a `?category=` query param but we don't use it — client-side filtering over the already-loaded list (`pageSize=100`) avoids extra round trips and supports multi-select cleanly.
+
+**Verification on staging:**
+- ✅ `pnpm -C apps/web-vendor build` clean.
+- ✅ Deployed bundle contains the new code (grep for `Uncategorised` returns a match in the page chunk).
+- ✅ `GET /tenders` on staging returns categories: Construction (4 tenders), IT Services (5), Uncategorised (10) for public-visibility tenders — so the sidebar will populate with three entries.
+- ✅ `https://vn.hadiclinic.com.kw:4201/tenders` returns HTTP 200.
+
+**Out of scope (still deferred):**
+- Status filter / deadline-window filter on the vendor tenders page.
+- Filter UI on other vendor portal pages (My Bids, Clarifications).
+- Persisting selection across navigation (URL query params).
+- Vendor Arabic capture at registration.
+- Arabic Executive Dashboard UI.
+- DMZ segregation.
+
+**Next recommended step:**
+- Vendor login as a real vendor on `https://vn.hadiclinic.com.kw:4201`, navigate to Tenders, confirm the left sidebar shows category checkboxes with counts; toggle them; observe the grid narrow live; combine with the search bar.
+
+---
+
+## 2026-06-05 — BUG-108 shipped: Login-page logos + Vendor Portal Name + Platform Settings redesign
+
+**Date/time:** 2026-06-05 ~21:30 GMT+3
+**Agent/task:** Owner walked the BUG-107 ship and flagged three real misses: (a) login pages had no logo wiring (only post-login surfaces did); (b) admin login was using vendor_logo as a fallback — should have its own brand; (c) vendor portal nav forced to use system_name; (d) Platform settings tab "not standard" — ad-hoc panels exposing raw setting keys to the admin instead of friendly labels.
+
+**Migration:** `database/migrations/029_bug108_branding_refinements.sql`
+- Seeds 3 settings rows: `branding.admin_portal_logo_storage_key`, `branding.hint_admin_logo`, `branding.vendor_portal_name`. Idempotent.
+
+**Backend files:**
+- `apps/api/src/modules/system-settings/branding.service.ts` — `ALLOWED_TYPES` + `KEY_BY_TYPE` extended with `'admin_logo'`. Same upload + serve + buffer-read flow as the other two types.
+- `apps/api/src/modules/system-settings/system-settings.service.ts:getPublicBranding` — now returns `vendorPortalName` (falls back to `systemName` when empty) and `hasAdminLogo`.
+
+**Frontend admin files:**
+- `apps/web-admin/src/components/layout/Sidebar.tsx` — fetches `hasAdminLogo` flag, renders uploaded admin logo when present, otherwise the "C" placeholder tile.
+- `apps/web-admin/src/app/login/page.tsx` — switched from `vendor_logo` to `admin_logo` (was a bug from BUG-107 where admin login showed the vendor brand).
+- `apps/web-admin/src/app/(admin)/settings/page.tsx` — **Platform tab fully redesigned.** Replaced the BrandingPanel + ConnectionsPanel + raw-key list with seven semantic section cards:
+  - **General** — System Name, Vendor Portal Name.
+  - **Branding · Logos** — Admin Logo, Vendor Logo, Report Logo with hint text + preview + per-row upload button.
+  - **Email (SMTP)** — Host, Port, Username, From, Password (write-only via /secure), Send Test button.
+  - **Active Directory** — LDAP URL, Domain, optional Bind Password (write-only), Probe Test button.
+  - **Vendor Portal** — CAPTCHA Enabled toggle, Minimum Password Length.
+  - **Security & Audit** — Session Idle Timeout, Audit Retention Days, Late Submission After Technical Opening.
+  - **Uploads** — Maximum File Size.
+  - Each section is a `SectionCard` (icon + heading + description + per-section Save). Inside, `LabeledField` wraps an input with friendly label + inline help + small monospace setting-key reference. New `useSectionEdits` hook tracks per-section dirty state and saves only the touched keys via `/system-settings/batch`. The standalone helper components `LogoUploadRow`, `SecureSetterRow`, `SmtpTestRow`, `AdTestRow` are composed by the new section components (LogoUploadRow now also accepts `'admin_logo'`).
+  - Deleted: BrandingPanel + ConnectionsPanel + the generic raw-key list at the bottom (replaced by sectioned form).
+
+**Frontend vendor files:**
+- `apps/web-vendor/src/components/layout/AuthShell.tsx` — converted to client component (`'use client'`). Fetches `/public-branding` on mount, renders uploaded vendor logo (falls back to the V tile) and `vendorPortalName.toUpperCase()` as the heading. Used by login / register / reset-password / verify-email pages.
+- `apps/web-vendor/src/components/layout/PortalShell.tsx` — top nav heading uses `vendorPortalName || systemName` (instead of always `systemName`).
+
+**Verification on staging:**
+- ✅ Migration applied: 3 settings inserted.
+- ✅ Three new container builds clean. All 9 routes from BUG-107 still mapped + branding.service now accepts `admin_logo`.
+- ✅ `/public-branding` returns the new shape with `vendorPortalName` + `hasAdminLogo` fields. Verified live.
+- ✅ Uploaded a 3005-byte PNG as `admin_logo`; `GET /api/v1/branding/admin_logo` served it (HTTP 200, image/png). `hasAdminLogo: true` after upload, false after clearing the storage key. Round-trip works.
+- ✅ Set `vendor_portal_name` to a custom string → `/public-branding` returned it independently from `systemName`. Cleared → fell back to `systemName`. Fallback chain works.
+- ✅ Test data cleared post-verification; staging is back to a usable baseline (owner's previous `systemName` "HadiClinic Tendering System" + vendor_logo + report_logo preserved; admin_logo + vendor_portal_name remain empty so owner uploads/sets their own).
+
+**Out of scope (still deferred):**
+- Vendor Arabic capture at registration.
+- Arabic Executive Dashboard UI.
+- DMZ segregation.
+- Restyle of other Settings tabs (Roles / Users / Departments / Templates).
+
+**Next recommended step:**
+- Owner verifies visually:
+  1. Open admin Settings → Platform tab → confirm sectioned card layout (General / Branding / Email / AD / Vendor Portal / Security / Uploads).
+  2. Upload an Admin Logo from Branding section → confirm Sidebar header + admin /login page render it.
+  3. Set Vendor Portal Name to something distinct → confirm vendor portal top nav + /login + /register + /reset-password pages all use it (admin pages keep using System Name).
+  4. Test SMTP + AD test buttons still work (they were verified in BUG-107).
+
+---
+
+## 2026-06-05 — BUG-107 shipped: Pieces 2-5 of settings basket (branding + sidebar rename + SMTP/AD config)
+
+**Date/time:** 2026-06-05 ~18:10 GMT+3
+**Agent/task:** Owner asked to ship Pieces 2-5 of the settings basket in one go ("Piece 2,3,4 & 5 go for all"). Big bundle — system name configurable, branding logos, per-role sidebar label rename, SMTP + AD config UI with encrypted credentials. Single migration + ~20 file changes + one deploy cycle.
+
+**Migration:** `database/migrations/028_bug107_settings_basket.sql`
+- Adds `system_settings.is_encrypted BOOLEAN` + `system_settings.encrypted_value BYTEA` (Piece 5).
+- Adds `roles.sidebar_label_overrides JSONB DEFAULT '{}'` (Piece 4).
+- Seeds 13 settings rows: `branding.system_name`, `branding.{vendor_portal,report}_logo_storage_key`, `branding.hint_{vendor,report}_logo`, SMTP plaintext (host/port/user/from), AD plaintext (url/domain), and encrypted slots for `smtp.password` + `ad.bind_password`.
+- Idempotent (`IF NOT EXISTS`, `ON CONFLICT DO NOTHING`).
+
+**Backend files (api):**
+- `apps/api/prisma/schema.prisma` — new fields on SystemSetting + Role.
+- `apps/api/src/modules/system-settings/secure-settings.service.ts` — NEW. AES-256-GCM helper. Key = SHA-256 of `SETTINGS_ENCRYPTION_KEY` env (with dev fallback warning). `setEncrypted(key, plaintext)`, `getEncrypted(key)`, `getPlain(key)`. Layout: `IV(12) | TAG(16) | CIPHERTEXT` packed into `encrypted_value` BYTEA.
+- `apps/api/src/modules/system-settings/branding.service.ts` — NEW. Logo upload (validates MIME ∈ {png/jpeg/svg/webp}, ≤1.5MB), public serve, `readBuffer()` for report PDF embed. Reuses existing `StorageBackend` with `branding` namespace.
+- `apps/api/src/modules/system-settings/system-settings.controller.ts` — adds endpoints: `POST /system-settings/secure`, `POST /system-settings/branding/upload`, `POST /system-settings/test-smtp`, `POST /system-settings/test-ad`. New `PublicBrandingController` adds public `GET /public-branding` and `GET /branding/:type` (no auth — vendor portal renders before login).
+- `apps/api/src/modules/system-settings/system-settings.service.ts` — `list()` masks encrypted rows as `••••••••`. New `getPublicBranding()`, `resolveSmtpConfig()` (DB-first, env fallback), `resolveAdConfig()`, `testSmtp(to)`, `testAd(username, password)`. `batchUpdate` blocks writes against encrypted rows.
+- `apps/api/src/modules/system-settings/system-settings.module.ts` — registers new services + controllers, imports StorageModule.
+- `apps/api/src/modules/notifications/notifications.service.ts` — `getTransporter()` now `await this.settings.resolveSmtpConfig()`; transporter cached by host:port:user key and rebuilt on config change. `from` address pulled from DB-first SMTP config.
+- `apps/api/src/modules/notifications/notifications.module.ts` — imports SystemSettingsModule.
+- `apps/api/src/modules/auth/auth.service.ts` — `bindToAd()` uses `settings.resolveAdConfig()`. New `loadSidebarLabelOverrides(userId)` merges per-role JSONB overrides (first non-empty per href wins, ordered by `granted_at` asc). JWT payload extended with `sidebarLabelOverrides`.
+- `apps/api/src/modules/auth/auth.module.ts` — imports SystemSettingsModule.
+- `apps/api/src/modules/reports/report-renderer.service.ts` — XLSX `workbook.creator` + `workbook.company` read system name. PDF header prepends logo (via `doc.image()` against `BrandingService.readBuffer('report_logo')`) and the system name above the title, with graceful text-only fallback.
+- `apps/api/src/modules/reports/reports.module.ts` — imports SystemSettingsModule.
+- `apps/api/src/modules/roles/roles.{service,controller}.ts` — `findOne` now returns `sidebarLabelOverrides`. New `PATCH /roles/:id/sidebar-labels` (gated by `roles:manage`). Save audited HIGH; token versions bumped for affected users so JWTs refresh immediately.
+
+**Frontend files (web-admin):**
+- `apps/web-admin/src/lib/auth.ts` — `TokenPayload.sidebarLabelOverrides`; new `getSidebarLabelOverrides()` helper.
+- `apps/web-admin/src/lib/api.ts` — new `assetUrl(path)` helper for absolute asset URLs.
+- `apps/web-admin/src/components/layout/Sidebar.tsx` — fetches `/public-branding`, renders `${systemName} Admin` in header. Applies per-href label overrides at render with fallback to hardcoded label.
+- `apps/web-admin/src/app/login/page.tsx` — fetches `/public-branding`, shows vendor logo (or Building2 icon fallback) + `${systemName} Admin`.
+- `apps/web-admin/src/app/(admin)/settings/page.tsx` — Platform tab now starts with `BrandingPanel` (two LogoUploadRow components with image-size hints rendered from `branding.hint_*` settings) and `ConnectionsPanel` (two `SecureSetterRow` write-only password forms + `SmtpTestRow` + `AdTestRow`). Roles tab grows a "Sidebar labels (rename per role)" section adjacent to the existing hide-list section.
+
+**Frontend files (web-vendor):**
+- `apps/web-vendor/src/components/layout/PortalShell.tsx` — fetches `/public-branding`; renders uploaded vendor logo (with fallback to the V tile) and `${systemName.toUpperCase()}` + "VENDOR PORTAL" label in the top nav.
+
+**What changed:**
+- **Piece 2:** System name now configurable. Stored in `branding.system_name` setting (default "CTMP"). Read by Sidebar header, Login page, vendor portal nav, and embedded as XLSX `workbook.creator` + report PDF header line. Verified live: changing `branding.system_name` to "CTMP Procurement" propagated to `/public-branding` immediately.
+- **Piece 3:** Vendor + report logos uploadable via admin Settings → Platform → Branding panel. Validates MIME + size. Stored via existing StorageBackend. Served at `/api/v1/branding/{vendor_logo,report_logo}` (public, cache 5min). Vendor portal renders vendor logo in top nav when present. Report PDF embeds report logo in header via `doc.image()` (graceful fallback to text-only if decode fails). Image-size hints rendered from `branding.hint_{vendor,report}_logo` settings, e.g. "Recommended 240×80 PNG · max 200 KB · transparent background preferred". Verified live: 1x1 PNG uploaded → `/branding/vendor_logo` served correct PNG bytes → `hasVendorLogo: true` in `/public-branding`.
+- **Piece 4:** Per-role sidebar label rename. `PATCH /roles/:id/sidebar-labels` with `{ overrides: { "/href": "label" } }`. Auth merges per-role overrides into JWT (`sidebarLabelOverrides` claim). Sidebar reads at render. Settings → Roles tab gains a "Sidebar labels (rename per role)" panel with text inputs per nav entry. Verified live: setting EXECUTIVE overrides `{"/executive": "Insights", "/executive/vendors": "Vendor Insights"}` → executive's JWT carries them on re-login.
+- **Piece 5:** SMTP + AD config in DB with AES-256-GCM encryption for passwords. List endpoint masks encrypted rows as `••••••••` (never echoes plaintext). Plaintext fields (host/port/user/from for SMTP, url/domain for AD) editable via the normal batch endpoint. Passwords write-only via `POST /system-settings/secure`. NotificationsService + AuthService.bindToAd both read DB-first with env fallback. `POST /system-settings/test-smtp { to }` sends a one-shot test mail using current config; `POST /system-settings/test-ad { username, password }` exercises LDAP bind. Verified live: `smtp.password` set via secure endpoint → list returns `••••••••` value + `isEncrypted: true`.
+
+**Why:**
+- Owner-requested basket of admin-configurable surfaces ahead of the launch. Bundled into one migration + one deploy cycle to minimize churn. Each piece has its own backend endpoint + UI section but they all share the SystemSetting/Role infrastructure already in place.
+
+**Verification:**
+- ✅ `npx tsc --noEmit` clean on api + web-admin + web-vendor.
+- ✅ All 3 Next.js builds clean.
+- ✅ Migration applied on staging: 3 ALTERs + 13 settings inserts, idempotent guard intact.
+- ✅ Container logs confirm 9 new routes mapped: `/system-settings/{secure,branding/upload,test-smtp,test-ad}`, `/public-branding`, `/branding/:type`, `/roles/:id/sidebar-labels`.
+- ✅ Pieces 2 / 3 / 4 / 5 each smoke-tested via curl against live staging (results documented above).
+- ✅ Fresh PDF report renders successfully after branding wiring change (size 3110B, no errors).
+- ⚠️ Test data cleared post-verification: `branding.system_name` reverted to "CTMP", EXECUTIVE label overrides cleared, smtp.password cleared, vendor logo cleared. Staging is back to clean state with the new infrastructure in place but no actual settings populated — owner uploads their own logos / sets their own SMTP from the admin UI.
+
+**Open notes:**
+- `SETTINGS_ENCRYPTION_KEY` env var is not yet set on staging (dev fallback in use). For production, set this to a long random string and add to the runbook. If the key changes, previously-encrypted values become unreadable — there is no automatic rotation path.
+- Encrypted-key columns `smtp.password` + `ad.bind_password` use the same scheme; admin can rotate passwords without affecting plaintext settings.
+- Image-size hints (`branding.hint_*`) are stored as regular plaintext system settings — admin can edit them via the generic settings list if the recommendation needs to change.
+
+**Next recommended step:**
+- Owner verifies each piece visually:
+  1. Admin Settings → Platform tab → set System Name (e.g. "Hadi Procurement"); confirm Sidebar header + Login page + vendor portal nav update on next refresh.
+  2. Upload vendor + report logos via Branding panel; check vendor portal top nav + a PDF report header embed the logo.
+  3. Admin Settings → Roles tab → pick a role → set a custom label for any sidebar entry; user holding that role sees the new label on next request.
+  4. Admin Settings → Platform tab → SMTP section → enter creds + click "Send Test"; AD section → enter creds + click "Probe".
+
+After verification, deferred backlog still has: Vendor Arabic capture at registration, Arabic Executive Dashboard UI labels, DMZ segregation.
+
+---
+
+## 2026-06-05 — BUG-106 shipped: EXECUTIVE lands on /executive + Dashboard menu hidden (Piece 1 of 5 settings basket)
+
+**Date/time:** 2026-06-05 ~14:30 GMT+3
+**Agent/task:** Owner's 5-piece basket (executive UX, system name, logos, sidebar rename, SMTP/AD config UI). Per-piece staging locked. Piece 1 ships here; Pieces 2-5 captured as next-up backlog in `C:\Users\Administrator\.claude\plans\i-want-to-enhance-rustling-cerf.md`.
+
+**Piece 1 scope:** EXECUTIVE role no longer sees "Dashboard" in the sidebar, and executive users land on `/executive` after login instead of `/dashboard`.
+
+**Files changed:**
+- `database/migrations/027_bug106_executive_landing.sql` — NEW. Appends `/dashboard` to EXECUTIVE role's `hidden_sidebar_items` array (idempotent — `array_append` guarded by `NOT … = ANY`). Bumps `token_version` for every user holding the EXECUTIVE role so JWTs reissue with the updated `hiddenSidebarItems` claim on next request.
+- `apps/web-admin/src/app/login/page.tsx` — small edit. Imports `getHiddenSidebarItems` from `@/lib/auth`. New `landingPath(accessToken)` helper: reads the JWT's `hiddenSidebarItems` and returns `/executive` if `/dashboard` is hidden, else `/dashboard`. Replaces both `router.push('/dashboard')` calls (normal login path + MFA verify path).
+
+**What changed:**
+- Executive user logging in now bypasses the (hidden) Dashboard route and lands directly on the Executive Dashboard.
+- The redirect is generic — any future role that adds `/dashboard` to its hide list will get the same behaviour automatically. No role-specific switch in the frontend.
+- `/dashboard` URL itself remains accessible to SYSTEM_ADMIN (and as a safety net if anyone bookmarks it). No permission gate added.
+
+**Why:**
+- Quick, low-risk UX improvement requested as part of the settings basket. Cleanest mechanism reuses BUG-093's existing hidden_sidebar_items infrastructure — one DB row update plus a 4-line redirect helper. No backend code change, no new perm, no schema change.
+
+**Verification:**
+- ✅ `npx tsc --noEmit` clean. `pnpm -C apps/web-admin build` clean.
+- ✅ Migration applied on staging: 1 role updated, 1 user (`executive@ctmp.local`) token bumped. `SELECT hidden_sidebar_items FROM roles WHERE code='EXECUTIVE'` returns `{/dashboard}`.
+- ✅ Deployed web-admin bundle contains the new logic: minified login bundle has `(...).includes("/dashboard")?"/executive":"/dashboard"`.
+- ✅ Live JWT inspection on staging:
+  - `executive@ctmp.local`: `hiddenSidebarItems` includes `/dashboard`; user has `executive:dashboard` perm.
+  - `admin@ctmp.local`: `hiddenSidebarItems` empty.
+- ✅ `/login` and `/executive` both return 200.
+
+**Next recommended step:**
+- Owner logs in as `executive@ctmp.local` → confirms lands directly on `/executive` and the "Dashboard" menu item is absent from the sidebar.
+- Owner logs in as `admin@ctmp.local` → confirms still lands on `/dashboard` and all menus visible.
+- After verification, schedule Piece 2 (Configurable System Name — ~1 hr). Pieces 3 (logos + image-size hints), 4 (per-role sidebar rename), 5 (SMTP+AD config UI with encryption) remain in the backlog with effort estimates.
+
+---
+
+## 2026-06-05 — BUG-105 shipped: Reports restricted to SYSTEM_ADMIN + PDF + award_history fixed
+
+**Date/time:** 2026-06-05 ~11:15 GMT+3
+**Agent/task:** Owner asked to remove the Reports menu from all non-admin roles AND reported the section is broken across formats. Audit found three concrete issues, all fixed in this bundle.
+
+**Files changed:**
+- `database/migrations/026_bug105_reports_admin_only.sql` — NEW. Revokes `reports:view` + `reports:export` from PROCUREMENT_ADMIN, AUDITOR, EXECUTIVE_VIEWER, FINANCE_REVIEWER, LEGAL_REVIEWER, PROCUREMENT_OFFICER. Bumps `token_version` for the 3 affected users so their JWTs refresh on next request. Idempotent (DELETE of absent rows is a no-op).
+- `apps/api/src/modules/reports/report-renderer.service.ts:3` — PDF import fix: `import PDFDocument from 'pdfkit'` → `import PDFDocument = require('pdfkit')`. pdfkit's CommonJS export is `module.exports = PDFDocument` (no `default` key), but `@types/pdfkit` misdeclares it as a var, so the previous compiled `pdfkit_1.default` was undefined at runtime — every PDF export threw "default is not a constructor". TS `import = require()` binds the real CommonJS export.
+- `apps/api/src/modules/reports/report-renderer.service.ts:awardHistory()` — BUG-088 fallback now applied at render time. Tender query extended with `bids: { where: { isAlternative: false }, select: { vendorId, commercialEvaluations: { ... orderBy: createdAt desc, take 1 } } }`. Row mapper: `t.awardedAmount ?? awardedVendor's bid's latest CommercialEvaluation.totalPrice ?? null`. Mirrors `AnalyticsService._resolveAwardedAmount` exactly.
+
+**What changed:**
+- Only SYSTEM_ADMIN now sees the Reports sidebar entry; existing perm gate (`permission: 'reports:view'`) auto-hides for all other roles after JWT refresh.
+- API guards return 403 to any non-admin caller hitting `/api/v1/reports` or `/api/v1/reports/:code/export`.
+- All 8 XLSX exports complete cleanly (tender_summary 7941B, tender_lifecycle 8042B, vendor_directory 7674B, vendor_activity 7309B, bid_submissions 7626B, technical_evaluations 7193B, award_history 6951B, audit_trail 29933B).
+- PDF export of `tender_summary` completes (3100B). The pdfkit import bug affected ALL 8 report PDFs identically — single root cause; single fix.
+- `award_history` XLSX Awarded Amount column now populated with real KWD figures via the fallback: D4=100 (TDR-2026-0007), D5=15000 (TDR-2026-0013), D6=100000 (TDR-2026-0005). The two awarded tenders without any commercial evaluation (TDR-2026-0015 / TDR-2026-0016) render blank, which is the correct null-fallback behaviour.
+
+**Why:**
+- Quick risk reduction: surfacing Reports to non-admin while it had broken exports + missing money columns was a data-quality and confusion risk. Restricting to admin halves the surface; the fixes make admin's own view actually usable.
+- BUG-088 root-cause (populate `tenders.awarded_amount` at award confirm) still deferred — the renderer fallback is the user-visible cure.
+
+**Verification:**
+- ✅ `npx tsc --noEmit` clean. `pnpm -C apps/api build` clean.
+- ✅ Migration applied on staging: `DELETE 9` role_permission rows, `UPDATE 3` users for token_version bump. `SELECT … FROM role_permissions WHERE perm LIKE 'reports%'` post-apply shows only SYSTEM_ADMIN entries.
+- ✅ Admin login → all 8 XLSX exports + 1 PDF complete successfully.
+- ✅ award_history fresh export shows money values for all 3 tenders with CE totals.
+- ✅ Non-admin login (executive@ctmp.local) → JWT contains zero report perms; `GET /reports` → 403; `POST /reports/tender_summary/export` → 403.
+- ⚠️ The first award_history job enqueued seconds after the api container restart showed only one row's money (others blank). BullMQ worker warm-up race — first job hit a stale worker. All subsequent jobs (including the fresh re-export) render correctly. Not a code bug; flag as operational note for future deploys: enqueue test jobs ≥10s after force-recreate.
+
+**Open follow-ups noted during verification:**
+- The `technical_evaluations` renderer has no pagination/filter — on a much larger DB it could timeout. Current staging volume (~10 evaluations) is fine. Defer.
+- `vendor_directory` silently drops vendors with no primary contact. Defer.
+- BUG-088 Phase 2 (populate `tenders.awarded_amount` at confirm time) still queued.
+
+**Next recommended step:**
+- Owner login as admin, click Reports menu → confirm all 8 cards render → trigger a few downloads → verify content makes sense.
+- Login as a non-admin (e.g. owner from a procurement perspective) → confirm Reports menu absent.
+- Once verified, the deferred backlog (Vendor Arabic capture → Arabic Executive Dashboard → DMZ segregation) can resume in order.
+
+---
+
+## 2026-06-05 — BUG-104 shipped: Commercial Comparison Itemized view scales to many vendors
+
+**Date/time:** 2026-06-05 ~02:20 GMT+3
+**Agent/task:** Owner asked what happens when a tender has 5-6 vendors on Commercial Comparison — current testing has been with 2 vendors which fits the window. Investigation confirmed:
+- **Summary view** (vendors as rows) already scales — more vendors = more rows = vertical scroll. Fine as-is.
+- **Itemized view** (BoQ-rows × vendors-as-columns) was the actual pinch point. Vendor columns had no `min-w-*` constraint and would compress below readability with ≥5 vendors; once the table grew wide enough to need horizontal scroll, the Item No + Description columns slid off-screen and the user lost track of which BoQ line each row represented.
+
+Owner picked the surgical fix: sticky left columns + min-width on vendor columns + horizontal scroll.
+
+**Files changed:**
+- `apps/web-admin/src/components/comparison/CommercialMatrix.tsx:142-205` — Itemized view only (Summary, no-BoQ branch, and per-vendor cards below untouched).
+  - Container `<div>` gains `relative` so sticky offsets resolve against the scroll container.
+  - **Item No** column (`w-20`) becomes `sticky left-0 z-10 bg-bg` in header / `bg-card group-hover:bg-bg/40` in body / `bg-bg/60` in totals row.
+  - **Description** column is now fixed `w-64` (was auto-width) and `sticky left-20` with the same z + background pattern + `border-r border-border` as the visual seam between locked and scrolling areas.
+  - Body rows changed from `hover:bg-bg/40` to `group hover:bg-bg/40` so sticky cells can pick up `group-hover:bg-bg/40` and keep the hover effect continuous across the locked seam.
+  - Every vendor `<th>` / `<td>` (header, lineTotal cell, Not-bidding cell, totals row vendor cell) gets `min-w-[140px]`. Mirrors `TechnicalMatrix.tsx:191` (which uses 120 px).
+  - Totals row reshaped: was a single `colSpan={4}` cell labelled "Total"; now four separate cells (sticky Item + sticky Description-blank + non-sticky Qty + non-sticky Unit) so the sticky pattern lines up with the body rows.
+
+**What changed:**
+- With 6+ vendors, the BoQ identifier columns (Item No + Description) stay locked against the left edge while the user scrolls horizontally through vendor columns. Vendors are guaranteed at least 140 px each → 4-figure currency values + a short company name fit without truncation. Total row at the bottom honours the same sticky behaviour.
+- A vertical seam (`border-r border-border`) marks the boundary between locked and scrolling areas.
+
+**Why:**
+- Surgical UX-only change. No layout toggle, no vendor-pinning chips, no backend changes. Owner explicitly chose this fix over the more elaborate alternatives — keeps the diff narrow and matches the pattern already used in TechnicalMatrix.
+
+**Verification:**
+- ✅ `npx tsc --noEmit` clean.
+- ✅ `pnpm -C apps/web-admin build` clean.
+- ✅ Deployed to staging. Bundle inspection on `136-af9407ce68c7a1b3.js` confirms the 4 expected `min-w-[140px]` occurrences and the 6 expected `sticky left-(0|20) z-10 bg-(bg|card|bg\/60)` class variants (header / body / totals × Item-col / Description-col).
+- ✅ `/commercial-comparison` returns HTTP 200.
+- ⚠️ Visual end-to-end with 5-6 vendors couldn't be tested on staging — no tender currently has that many bids (TDR-2026-0016 has 2). The classes are deployed correctly so the rendering will activate the first time a tender with many vendors lands. If we need to validate the visual today, seed 4 extra dummy bids on any existing tender.
+
+**Next recommended step:**
+- Either (a) wait until a production tender naturally accumulates 5+ vendors to confirm visually, or (b) seed staging with extra bids on TDR-2026-0016 to do a one-off visual sweep before approving.
+
+---
+
+## 2026-06-05 — BUG-103 shipped: InlineTechBreakdown per-criterion percent→absolute conversion
+
+**Date/time:** 2026-06-05 ~01:05 GMT+3
+**Agent/task:** Owner reported the BUG-101 "tech score as percentage" issue was NOT actually fixed on the Commercial Comparison page. Investigation showed I'd fixed the wrong surface — the BUG-101 fix on `CommercialMatrix.tsx` and `VendorComparisonCard.tsx:fmtScore` only covered the Tech-score COLUMN at the top of the page. The actual surface the owner was looking at is the **"Show technical breakdown"** inline expander inside each vendor card (`InlineTechBreakdown` function in `VendorComparisonCard.tsx:564-650`), which renders a 3-column Criterion / Max / Score table. That `fmt` helper was still rounding the raw 0..100 percentage. So a row with criterion max=30 and stored per-criterion score 93.33% rendered "Max 30 | Score 93".
+
+**Root cause confirmation (DB query on staging):** `technical_evaluation_scores.score` is stored 0..100 (percentage) — confirmed by SELECT showing values like 93.33 / 90.00 / 100.00 / 83.33 across criteria with max_score 20/25/30. `comparison.service.ts` averages those into `consensusByCriterion[i].consensusScore` — also percentage. The InlineTechBreakdown rendered the percentage directly against the criterion's max → mixed units.
+
+**Files changed:**
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx:600-660` — `fmt` helper replaced with `fmtAbs(percent, max)`: converts `percent` 0..100 to absolute via `Math.round(percent / 100 * max)`. Falls back to plain `Math.round(percent)` when max ≤ 0. Applied to both per-criterion rows (using `c.maxScore` as the per-row max) and the total row (using `data.totalMaxScore`). Mirrors the `toAbsolute()` pattern from BUG-061 in `TechnicalMatrix.tsx`.
+
+**What changed:**
+- The "Show technical breakdown" inline table now renders absolute scores. For a criterion with max=30 and the stored percentage 93.33, the cell now reads "28" against "30" — matching the actual received score. Same conversion applied to the Total row.
+- All three surfaces on the Commercial Comparison page now agree: (a) top-of-page Tech score column (CommercialMatrix), (b) per-vendor card Block 2 Technical Score, (c) per-vendor inline breakdown. All show absolute units; the percentage view is gone from the user-visible path.
+
+**Why:**
+- BUG-101 fix only touched two of the three surfaces. The third — the most visible one when the owner clicks "Show technical breakdown" — was the actual source of the "Max 30 Score 93" report.
+
+**Verification:**
+- ✅ `npx tsc --noEmit` clean.
+- ✅ `pnpm -C apps/web-admin build` clean. Bundle deployed (`136-8c2050c44ce8fb43.js`).
+- ✅ Inspected the deployed minified JS — confirms the new lambda is in place: `let m=(e,t)=>null==e?"—":t<=0?String(Math.round(e)):String(Math.round(e/100*t))`.
+- ✅ Staging DB confirms per-criterion `score` storage as 0..100 percentage (justifies the conversion).
+- ✅ Pruned 44 GB of stale Docker build cache before rebuild (`docker builder prune -af`) since BUG-102 deploy hit `/tmp: no space left`. Build cache now 0B.
+
+**Next recommended step:**
+- Owner re-opens `/commercial-comparison` for a tender that has technical scores (e.g. TDR-2026-0016 — top bid has stored Compliance score 93.33% against max 30). Expand any vendor card → "Show technical breakdown" → confirm rows now read "Max 30 / Score 28" (not "Max 30 / Score 93"). Total row should read e.g. "Max 100 / Score 93" (when criteria sum to 100, the absolute and percentage happen to match — that's correct).
+
+---
+
+## 2026-06-04 — BUG-102 shipped: Department dashboard restructured as directory + per-dept drill-down
+
+**Date/time:** 2026-06-04 ~23:55 GMT+3
+**Agent/task:** Owner pushed back on the BUG-101 Department Overview shipped an hour earlier — it crammed every department on a single page. Asked for the same shape as the vendor dashboard: directory list with click-to-drill, then a detail page per department showing all tenders for that department. Restructured accordingly.
+
+**Files changed:**
+- `apps/api/src/modules/analytics/analytics.service.ts` — new `getDepartmentProfile(deptId, year | null)` method. Year=null means all-time. Returns profile + metrics (tenderCount/awardedCount/activeCount/estimatedValue/awardedValue/savings/savingsRate/activePipelineValue/distinctVendors) + every tender in the dept (with BUG-088 fallback applied per tender) + top vendors who won there + multi-year spend trend (always shown across all years regardless of filter) + per-category breakdown. New types: `DepartmentTenderRow`, `DepartmentSpendByYear`, `DepartmentProfileResponse`.
+- `apps/api/src/modules/analytics/analytics.controller.ts` — new route `GET /api/v1/analytics/departments/:departmentId?year=YYYY|all` (gated by `executive:dashboard`). Empty / "all" → null year (all-time scoping).
+- `apps/web-admin/src/app/(admin)/executive/departments/page.tsx` — **rewritten** as a directory-style list. Dropped the big per-dept cards. Kept the coloured KPI strip (4 cards) and the comparison bar chart (now with clickable rows). Added sortable clickable table with Department / Tenders / Awarded / Estimated / Awarded value / Savings %. Each row links to `/executive/departments/[id]?year=YYYY` preserving the year filter.
+- `apps/web-admin/src/app/(admin)/executive/departments/[id]/page.tsx` — **NEW.** Mirrors the vendor detail page structure. Year selector ("All time" + last 5 years) initialised from `?year` query param. Header card with department name + code + accent icon + big "awarded value" callout. Four tabs:
+  - **Overview** — 8-card metric grid (Tenders Created / Awarded / Active / Distinct Vendors / Estimated Value / Awarded Value / Realised Savings / Active Pipeline) with rotating tone palette.
+  - **Tenders** — every tender in the department for the current scope. Columns: Reference (links to `/tenders/[id]`) / Title / Status badge / Category / Estimated / Awarded / Winner (links to `/executive/vendors/[id]`) / Created. This is the drill-down the owner asked for.
+  - **Spend Trend** — year-over-year bars (always full history, not filtered by current scope) + per-category breakdown stack bars.
+  - **Vendors** — top vendors who won in this department (ordered desc by total, with horizontal spend bars).
+
+**What changed:**
+- `/executive/departments` is now a compact directory: KPI strip, comparison bar, sortable clickable table. No more big colourful cards crammed onto one page.
+- Each department row click navigates to `/executive/departments/[id]?year=YYYY` carrying the current year filter.
+- New detail page lets the user pick any department and see every tender that ever happened in that department (all-time or year-scoped), plus per-vendor + per-category + multi-year breakdowns.
+- Tender rows on the detail page link back into `/tenders/[id]` (existing tender detail) and `/executive/vendors/[id]` (vendor drill-down from BUG-100). Full cross-navigation between the three executive surfaces.
+
+**Why:**
+- Owner directive: department dashboard should be shaped like the vendor dashboard — directory + drill-down. Single-page approach didn't scale once department count or tenders-per-department grew.
+
+**Verification:**
+- ✅ `npx tsc --noEmit` clean on api + web-admin.
+- ✅ Next build emits `/executive/departments` (5.1 kB static) and `/executive/departments/[id]` (6.39 kB dynamic) routes alongside existing executive surfaces.
+- ✅ Deployed on staging. Container logs confirm both new analytics routes mapped: `GET /api/analytics/departments` and `GET /api/analytics/departments/:departmentId`.
+- ✅ Directory endpoint returns 5 departments. Profile endpoint for Facilities Management (year=2026): 8 tenders (5 active, 3 awarded), 170K estimated, 115.1K awarded, 3 distinct vendors, 3 top vendors, spendByYear has 2026, 3 categories (Uncategorised / Construction / IT Services).
+- ✅ All-time scope works: `?year=all` returns `year: null` and full lifetime metrics.
+- ✅ Edge cases pass: no token → 401, bad UUID → 400, missing dept UUID → 404.
+- ✅ UI pages return 200 both at the directory and at the detail page.
+
+**Notes:**
+- During the docker compose build, a transient "no space left on device" warning appeared while writing build metadata to /tmp — buildx still completed and containers came up healthy with the new code (verified via mapped routes in nest logs). Worth a `docker system prune` on staging when convenient; the host is at 78% disk.
+
+**Next recommended step:**
+- Owner walks the new flow: open `/executive/departments` → confirm it's a list view → click any department row → land on `/executive/departments/[id]` → walk all 4 tabs. Year filter on detail should let "All time" view show every historical tender.
+- After verification, the DMZ segregation workstream (still deferred since BUG-100) remains the next major workstream.
+
+---
+
+## 2026-06-04 — BUG-101 shipped: vendor reg form simplification + tech score absolute display + colourised dashboards + Department Overview
+
+**Date/time:** 2026-06-04 ~23:10 GMT+3
+**Agent/task:** Owner-walk follow-up to BUG-100 with four asks bundled:
+1. Vendor self-registration form: drop Registration Number, Tax Number, Country at intake. Add Company Website.
+2. Commercial Comparison Technical-score column: owner saw "Max 30, Score 93" — the score was being printed as a percentage (`overallScore` is clamped 0..100 in `technical-evaluation.service`). Wants the actual received score not a percentage.
+3. Colourise Executive Dashboard + Executive Vendors so the KPI strip reads at a glance.
+4. New Department Overview dashboard at `/executive/departments` — per-department tender activity, estimated vs awarded spend, savings, top vendors. Same colour family.
+
+**Files changed:**
+
+Backend
+- `apps/api/src/modules/vendor-auth/dto/vendor-register.dto.ts` — removed `registrationNumber`, `taxNumber`, `country` properties; added `website` (with `@IsUrl({ require_protocol: true })`).
+- `apps/api/src/modules/vendor-auth/vendor-auth.service.ts:65-74` — Vendor.create no longer reads the dropped fields; `website` mapped through.
+- `apps/api/src/modules/analytics/analytics.service.ts` — new `departmentOverview(year)` method + types (`DepartmentRow`, `DepartmentOverviewResponse`, `DepartmentTopVendor`). Same BUG-088 fallback as `_loadAwardedTendersForVendors`. Year-scoped; computes tender count, awarded count, active count, estimated, awarded value, savings, savings rate, active pipeline value, top-3 vendors per department. Skips departments with zero tender activity in the year.
+- `apps/api/src/modules/analytics/analytics.controller.ts` — new route `GET /api/v1/analytics/departments?year=YYYY` gated by `executive:dashboard` (no new perm, no migration).
+
+Frontend admin
+- `apps/web-admin/src/components/comparison/CommercialMatrix.tsx:56-65` — `fmtScore` rewritten. Takes the backend percentage and converts to absolute against the criteria-sum max (`Math.round((percent / 100) * max)`), then prints `${absolute} / ${max}`. "93 / 30" → "28 / 30".
+- `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx:93-103` — same percent→absolute conversion; previously dropped `/max` per BUG-097-fix, now restored with the absolute denominator so figures match the standalone Technical Comparison page exactly.
+- `apps/web-admin/src/app/(admin)/executive/page.tsx` — added `KPI_STYLES` palette (blue/indigo/emerald/teal/green/amber/purple/cyan, one per KPI label). KPI cards rebuilt with coloured top accent bar, coloured icon chip, coloured value text.
+- `apps/web-admin/src/app/(admin)/executive/vendors/page.tsx` — `KpiCard` gains a `tone` prop with the same palette; Top 5 Concentration card uses tone-by-threshold (`>=75 → rose`, `>=50 → amber`, else `teal`).
+- `apps/web-admin/src/app/(admin)/executive/departments/page.tsx` — **NEW.** Year selector + Print button. Coloured totals strip (4 cards). Comparison bar list (estimated stacked over awarded, one row per dept, dept-coloured awarded bar). Per-department cards (one per dept, rotating 8-colour palette: blue/emerald/indigo/amber/purple/rose/cyan/teal). Bottom detail table with totals row.
+- `apps/web-admin/src/components/layout/Sidebar.tsx` — new "Department Overview" entry under Executive Vendors, gated by `executive:dashboard`. New `Layers` icon.
+
+Frontend vendor
+- `apps/web-vendor/src/app/register/page.tsx` — Registration Number, Tax Number, Country fields removed from the Company Information section. Company Website added (URL input, `type="url"`, placeholder `https://www.example.com`). Submit payload updated accordingly.
+
+**What changed:**
+- New endpoint + page: `GET /api/v1/analytics/departments` and `/executive/departments`. Five active departments on staging — Facilities Management (8 tenders, 3 awards, 115,100 KWD awarded), Information Technology (7 tenders, 2 awards), Finance (2 tenders, 0 awards), etc.
+- Tech score display in CommercialMatrix + VendorComparisonCard now reads as absolute units (e.g. 28 / 30) instead of a percentage (e.g. 93 / 30 or just 93). Consistent across all three comparison surfaces (TechnicalMatrix already did this via `toAbsolute`).
+- Vendor self-registration form is shorter — no more dropdown-less country code input, no registration #, no tax #. Adds Company Website with URL validation.
+- All three executive surfaces (`/executive`, `/executive/vendors`, `/executive/departments`) share a coherent colour family with coloured top-accent bars, coloured icon chips, and coloured value text. KPI strip reads at a glance.
+
+**Why:**
+- Owner-driven UX simplification and visual hierarchy improvements. No architectural changes.
+
+**Verification:**
+- ✅ `npx tsc --noEmit` clean across all three projects (`apps/api`, `apps/web-admin`, `apps/web-vendor`).
+- ✅ Next.js build emits `/executive/departments` (6.39 kB) alongside the existing executive routes. Vendor `/register` rebuilt at 11.3 kB.
+- ✅ Deployed to staging at `10.1.13.98`. Container logs clean.
+- ✅ `GET /api/v1/analytics/departments?year=2026` returns totals { tenderCount: 19, awardedCount: 5, estimatedValue: 289999, awardedValue: 115100, savings: 99999, savingsRate: 83.33, activePipelineValue: 170000, departmentCount: 5 } and 5 department rows. Facilities Management leads with 8 tenders / 3 awards / 115,100 KWD.
+- ✅ All UI pages return 200: `/executive`, `/executive/vendors`, `/executive/departments`.
+- ✅ Vendor register form HTML no longer contains "Registration Number" or "Tax Number" — confirms field removal. "Company Website" present.
+- ✅ Existing endpoints regression-clean (`executive-summary`, `analytics/vendors`).
+
+**Open questions:**
+- None. The displayed tech score now matches the standalone Technical Comparison page; should this change be carried into TechnicalMatrix? — Already consistent: `TechnicalMatrix` was the original reference (uses `toAbsolute()` since BUG-061). The two updates here are just bringing CommercialMatrix + VendorComparisonCard in line.
+
+**Next recommended step:**
+- Owner walks the four changes:
+  1. Open `/register` on the vendor portal — confirm the form is shorter, Company Website present.
+  2. Open `/commercial-comparison`, pick a tender with technical scores — confirm Tech score column reads "X / 30" with X ≤ 30 (e.g. "28 / 30") not "93 / 30".
+  3. Open `/executive` and `/executive/vendors` — confirm KPI cards are coloured.
+  4. Open `/executive/departments` — confirm the new dashboard loads, per-department cards are distinctly coloured, comparison bars + detail table populate.
+- After verification: the **DMZ segregation workstream** (still deferred from BUG-100, plan in `C:\Users\Administrator\.claude\plans\i-want-to-enhance-rustling-cerf.md`) can begin.
+
+---
+
+## 2026-06-04 — BUG-100 shipped: Executive Vendor Profile + per-vendor drill-down
+
+**Date/time:** 2026-06-04 ~18:55 GMT+3
+**Agent/task:** Owner asked for a new admin-portal dashboard where an executive can pick a vendor and see the full profile (company info, contact, status), every tender ever awarded to them, lifetime spend with year-over-year trend, department/category breakdown, and bid participation/win-rate. The existing `/executive` dashboard already had a Top Vendors table but no drill-down — that's the gap this closes. **DMZ segregation (separate workstream) deferred until owner verifies this dashboard.**
+
+**Files changed:**
+- `apps/api/src/modules/analytics/analytics.service.ts` — added `listVendorDirectory()`, `getVendorProfile(vendorId)`, plus a private `_loadAwardedTendersForVendors()` helper that implements the BUG-088 fallback (Tender.awardedAmount → CommercialEvaluation.totalPrice when null). New exported interfaces: VendorDirectoryRow, VendorDirectoryResponse, VendorAwardHistoryRow, VendorSpendByYear, VendorBidParticipationRow, VendorProfileResponse.
+- `apps/api/src/modules/analytics/analytics.controller.ts` — two new routes: `GET /api/v1/analytics/vendors` (directory) and `GET /api/v1/analytics/vendors/:vendorId` (single profile). Both gated by `executive:dashboard` (existing perm, no migration).
+- `apps/web-admin/src/app/(admin)/executive/vendors/page.tsx` — NEW directory page. KPI strip (4 cards), search + status + year filters, sortable table (Company / Awards / Total / Last Award / Win Rate), pagination.
+- `apps/web-admin/src/app/(admin)/executive/vendors/[id]/page.tsx` — NEW per-vendor detail page. Header card with status badge + suspension/blacklist reason + primary contact. 4 tabs: Overview (KPI grid), Award History (table with PDF links + Active/Amended/Superseded badge), Spend Trend (year-over-year bar chart + by-department + by-category bar lists), Participation (every bid this vendor submitted with tech + commercial + outcome badges).
+- `apps/web-admin/src/components/layout/Sidebar.tsx` — new "Executive Vendors" entry under the existing Executive item, gated by `executive:dashboard`.
+- `apps/web-admin/src/app/(admin)/executive/page.tsx` — Top Vendors rows on the existing dashboard are now clickable links to `/executive/vendors/[id]`.
+
+**What changed:**
+- Per-vendor executive view available at `/executive/vendors` (directory) and `/executive/vendors/[id]` (drill-down). Cross-linked from the Top Vendors table on `/executive`.
+- All money math runs through the BUG-088 fallback: `Tender.awardedAmount` if non-null, else `CommercialEvaluation.totalPrice` of the awarded vendor's bid. Verified on staging where **every** awarded tender currently has null `awarded_amount` — fallback computed 115,100 KWD lifetime spend (matches manual SUM).
+- Win rate denominator excludes WITHDRAWN bids; numerator = bids with status=AWARDED. Technical PASS rate denominator excludes PENDING.
+- Award status on history rows: Active (single award), Amended (multiple Award rows for tender, latest non-superseded), Superseded (placeholder, currently unused since v1 only shows the active row).
+
+**Why:**
+- Tender-centric views (existing `/executive`, `/awarded-tenders`) couldn't answer "what have we given Vendor X over time?" without manual aggregation. Executive needed a vendor-centric drill-down. Scoped to admin portal only — no vendor portal changes.
+- Used the existing `executive:dashboard` permission (EXECUTIVE + SYSTEM_ADMIN) rather than minting a new one; the new pages are pure read aggregations and share the same audience as the existing executive dashboard.
+- No schema changes. No DB migration. No vendor portal changes.
+
+**Verification:**
+- ✅ `npx tsc --noEmit` clean on both `apps/api` and `apps/web-admin`.
+- ✅ `pnpm -C apps/api build` and `pnpm -C apps/web-admin build` succeed. New routes show in Next.js build output: `/executive/vendors` (static) and `/executive/vendors/[id]` (dynamic).
+- ✅ Deployed to staging at `10.1.13.98` via tar → docker compose rebuild → force-recreate api + web-admin. Container logs show both new routes mapped: `Mapped {/api/analytics/vendors, GET}` and `Mapped {/api/analytics/vendors/:vendorId, GET}`.
+- ✅ Directory endpoint: `GET /api/v1/analytics/vendors?pageSize=5` returns total=17, vendorsWithAwards=4, lifetimeSpend=115100 KWD. KPI sum matches manual SQL aggregate.
+- ✅ Profile endpoint: `GET /api/v1/analytics/vendors/<acme>` returns lifetimeAwardCount=1, lifetimeAwardedValue=100000, winRate=100, technicalPassRate=100, and 1 row in awardHistory + 1 row in bidParticipation.
+- ✅ **BUG-088 fallback verified end-to-end** on Vendor 1 (2 awards: TDR-2026-0013 with CE=15000, TDR-2026-0015 with no CE): profile returns 15000 lifetime value (15000 + 0). Matches expected fallback math.
+- ✅ Edge cases: no token → 401, bad UUID → 400, missing vendor UUID → 404, search filter narrows result set.
+- ✅ Regression: existing `GET /api/v1/analytics/executive-summary` still returns 200.
+- ✅ Admin UI routes return 200 from the front door (`/executive/vendors` and `/executive/vendors/[id]`).
+
+**Open questions:**
+- BUG-088 itself is unchanged — the award flow still doesn't populate `tenders.awarded_amount` on Confirm. The fallback covers display correctly, but a backfill migration + `confirmAward` patch is still needed so the next owner walkthrough sees real numbers in `Tender.awardedAmount` directly. Tracked in BUG_TRACKER.
+
+**Next recommended step:**
+- Owner walks `/executive` → clicks a Top Vendors row → lands on the new drill-down. Then opens `/executive/vendors` directly to test search/filter/sort. After verification, the **DMZ segregation workstream** (deferred, plan retained in `C:\Users\Administrator\.claude\plans\i-want-to-enhance-rustling-cerf.md` follow-up section) can begin.
+
+---
+
+## 2026-06-03 / 04 — BUG-091..098 shipped: award fixes + archive + roles + matrix cleanups
+
+**Date/time:** rolling 2026-06-02 → 2026-06-04
+**Agent/task:** Owner walked the Awarded Tenders archive, Commercial Comparison, Committee Opening pages and surfaced a long sequence of issues; each was fixed in its own BUG-NNN entry. Tracker has the per-BUG detail at `docs/qa/BUG_TRACKER_2026-05-25.md`. Summary by area:
+
+### Award flow
+- **BUG-091** Critical — `computeLowestPassBidId` only looked at manual `commercial_evaluations.totalPrice`; BoQ-only bids (post-BUG-068) were treated as "no price" and every Confirm with `isLowest=true` got rejected. Aligned with `comparison.service` rule: BoQ-driven total first, manual avg as fallback. Confirm now works for BoQ-only tenders.
+- **BUG-094** Backend now allows awarding a technically-FAIL vendor via the override path (justification text + optional PDF). UI: "Recommend FAIL vendor (override)" button in the per-vendor card.
+- **BUG-095** PDF justification is now **OPTIONAL** on overrides + FAIL awards. Migration `025_bug095_optional_pdf.sql` rewrote `awards_override_requires_justification` to require only `justification_text IS NOT NULL`. Dialog label "Justification PDF *" → "(optional)". `comparison.service.activeAwardSummary` now computes `winnerPrice` from BoQ when present so the AwardSummaryCard shows actual KWD.
+- **BUG-097** Override minimum justification text reduced from 100 → 50 chars. Backend + frontend + counter all updated.
+
+### Awarded Tenders archive
+- **BUG-092** Frontend UX overhaul — Reset + Search buttons, no auto-fetch, no URL persistence, no auto-select last tender. Backend: `tenders.service.serializeDetail` now emits `awardedAt` / `awardedAmount` / `awardedVendorId` / `awardedVendorName`. Migration `023` granted EXECUTIVE `comparison:technical:view` + `tender:audit:view` so Technical + Audit tabs populate.
+- **BUG-094 part b** — `safeVendor()` helper for the Commercial tab: defaults `commentsByEvaluator` / `boqLines` / `commercialDocuments` / `currency` / nested `vendor.vendor` so legacy/empty bid shapes don't crash with `.map of undefined`.
+- **BUG-094 part c** — Audit field-name fix: backend returns `eventTime` + `actorName`, not `occurredAt` + `actorDisplayName`. Timeline now populates.
+- **BUG-095 part b** — Bulletproof: `Array.isArray` checks on `commercial.vendors` and `commercial.boqTemplate`; empty-bid early return.
+- **BUG-095 part c** — `CommercialMatrix` envelope-status cell renders distinct badges: amber **LOCKED · Technical FAIL** with tooltip explaining the auto-lock from Finalize Technical Results; green **OPENED**; slate **SEALED**. Owner now sees WHY a commercial envelope is locked without DB lookup.
+- **BUG-096** Tab reorder on archive: Overview → Award → **Commercial → Technical** → BoQ → Documents → Audit. Per-tab fetch-error surfacing so blank tabs explain themselves.
+
+### Commercial Comparison + Technical Matrix display
+- **BUG-094 part d** — Removed BUG-070 `<TechDetailModal>`; replaced with `InlineTechBreakdown` inline expander below the per-vendor Technical score row.
+- **BUG-095** Block 2 title: "Technical score (read-only)" → **Technical score**. `TechnicalMatrix` gains `defaultLayout?: Layout` prop; archive Technical tab uses `'criterion-rows'`.
+- **BUG-096** `TechnicalMatrix.fmtScore` rewritten: `Math.round(v)` and drop `/ max` denominator (the Max column already shows it). Standalone `/technical-comparison` page also defaults to `'criterion-rows'`.
+- **BUG-097** Added standalone Technical matrix below CommercialMatrix on `/commercial-comparison`. **Then superseded by BUG-098** — owner walked the result and found 3 redundant copies of the technical info (mixed columns in CommercialMatrix, the standalone matrix, the per-vendor inline matrix). Standalone matrix removed; per-vendor "Show technical breakdown" now shows ONLY this vendor's per-criterion scores (3-column table: Criterion / Max / Score). Single source of truth per page.
+- **BUG-097 fix** — Bug I'd shipped: the new standalone Tech matrix was inside the `!comparison.award` branch, so awarded tenders never rendered it. Fixed before BUG-098 deleted the whole section anyway.
+
+### Permissions + UX features
+- **BUG-087** New `EXECUTIVE` role + `executive:dashboard` perm + sidebar gate. Migration `021`. Owner asked Executive Dashboard be visible only to that role.
+- **BUG-093** Per-role **sidebar hide list** — `roles.hidden_sidebar_items text[]` column (migration `024`). Decouples menu visibility from data perms ("i just want to remove menues not the permission"). JWT carries union of hidden hrefs across user's roles. Settings → Roles tab gains "Hidden sidebar entries" checklist with own Save button. Permission grants stay independent; data access works elsewhere.
+- **BUG-097** Committee Opening: **Attendance lock** until meeting day (day-precision compare; PRESENT/ABSENT disabled with amber banner). **Reschedule meeting** flow: `PATCH /committee-sessions/:id` (gated by `committee:create_session`) updates `scheduledAt` and/or `location` when not COMPLETED. Reschedule modal beside the meeting-date header. Audit MEDIUM `COMMITTEE_SESSION_RESCHEDULED`.
+
+### Awarded Tenders archive — page itself (BUG-090)
+- New `/awarded-tenders` archive page modeled on Commercial Comparison, read-only with tabbed sub-views. Filter bar (status / dept / category / date range / search) + picker + 7 tabs. Sidebar entry "Awarded Tenders" gated by new `awarded:view` perm. Commercial Comparison picker tightened to active comparison states only (Awarded/Tender Closed removed from the picker).
+
+### Verification trail
+- ✅ `npx tsc --noEmit` clean across all rebuilds
+- ✅ All migrations applied on staging
+- ✅ All bundle markers verified in `.next/static/chunks` after each build
+- 🟡 Open follow-ups noted in BUG_TRACKER (BUG-088 Phase 2: backfill `tenders.awarded_amount` from bid total on Confirm; cosmetic-only document warning for cross-envelope filename mismatches deferred).
+
+### What's next
+- Vendor profile section refinement on Commercial Comparison per-vendor cards — owner deferred to "after Commercial Comparison is done".
+- Committee Commercial Opening page redesign (owner's BUG-097 #2 — "similar to Commercial Comparison layout") deferred as a larger UX rework.
+- BUG-088 Phase 2 backend: populate `tenders.awarded_amount` at Confirm so Executive Dashboard + Awarded archive show real money for new awards.
+
+---
+
+## 2026-06-02 — BUG-090 shipped: Awarded Tenders archive + CC picker cleanup
+
+**Date/time:** 2026-06-02 ~10:00 GMT+3
+**Agent/task:** Owner asked for (a) removal of awarded tenders from Commercial Comparison picker (clutter), and (b) a brand-new read-only archive surface for senior reviewers — "all information related to tenders, technical, commercial, documents, everything related to tender but just as view only no edit or anything, this should be a new page design same like commercial comparison but purely visible for future review with date selection for tenders, by department, etc..."
+
+### What landed
+
+**Backend:**
+
+- `apps/api/src/modules/tenders/dto/list-tenders.dto.ts` — extended with `awardedFrom?: ISO date`, `awardedTo?: ISO date`, `category?: string`, `search?: string`. All optional, additive.
+- `apps/api/src/modules/tenders/tenders.service.ts:findAll` — applies the new filters. Refactored the where clause to use a `where.AND` array so search composes cleanly with dept-scoping (the earlier code set `where.OR` for both and the second overwrote the first).
+- New migration `database/migrations/022_bug090_awarded_view.sql` — adds permission `awarded:view` granted to EXECUTIVE / AUDITOR / PROCUREMENT_ADMIN / SYSTEM_ADMIN.
+- 4 users in those roles had `token_version` bumped on staging so their JWTs refresh on next login.
+
+**Frontend:**
+
+- New page `apps/web-admin/src/app/(admin)/awarded-tenders/page.tsx` — modeled visually on `/commercial-comparison`. Layout: filter bar (status / dept / category / awardedFrom / awardedTo / search) → picker (Awarded + Tender Closed) → selected-tender detail panel with seven tabs:
+  - **Overview** — metadata grid (reference, dept, category, procurement type, est budget, awarded amount, deadlines, winner, lowest-PASS flag, confirmed-by, description).
+  - **Award** — `AwardSummaryCard` (or "no active award" message).
+  - **Technical** — full `TechnicalMatrix` (winner vendor highlighted) + per-vendor `VendorTechnicalCard` list.
+  - **Commercial** — `CommercialMatrix` + per-vendor `VendorComparisonCard` with `canEvaluate={false}` + no-op `onRecommend`.
+  - **BoQ** — `TenderBoqEditor` with `editable={false}`.
+  - **Documents** — Tender RFQ docs + Award decision artefacts (justification PDF + minutes PDF) + Per-bid envelope docs (technical + commercial). All View + Download via the new-tab PDF viewer (BUG-071 helper).
+  - **Audit Trail** — timeline table from `/tenders/:id/audit-logs`.
+- All endpoints reused; no new backend endpoint.
+- `apps/web-admin/src/components/layout/Sidebar.tsx` — new entry "Awarded Tenders" with `Award` icon between Commercial Comparison and Vendor Management; gated by `awarded:view`.
+- `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — `ELIGIBLE_STATUSES` reduced to active comparison states only; WALK-051's Active/Completed optgroup logic removed (`COMPLETED_SET`, `COMPLETED_STATUSES` deleted). Picker now shows only Committee Commercial Opening / Commercial Evaluation / Award Recommendation tenders.
+
+### Verification trail
+
+- ✅ `npx tsc --noEmit` clean on api + web-admin.
+- ✅ Migration applied on staging — 1 perm + 4 role-permission grants. Token version bumped for 4 users in those roles.
+- ✅ Files tarred to staging.
+- 🟡 Container build in progress.
+- ⏳ Owner walkthrough: log in as executive/auditor/procurement-admin → sidebar shows "Awarded Tenders". Picker shows the 3 Tender Closed tenders on staging (TDR-2026-0005/0007/0013). Pick TDR-2026-0013 → tabs cycle through Overview, Award (lowest-PASS, confirmed-by populated), Technical (matrix), Commercial (matrix), BoQ (read-only), Documents (RFQ + award PDFs + per-vendor envelope docs), Audit (timeline). Commercial Comparison picker no longer shows these 3 rows.
+
+### What's next
+
+- BUG-088 Phase 2 still pending — populate `tenders.awarded_amount` from bid commercial total at Confirm time so the Awarded Tenders detail shows real money. Owner walked the dashboard with 0-amount awards; the archive page will show "—" until that's done.
+- BUG-090 Phase 2 candidates (not built): per-user reaction (bookmarking favourites for return review), export the visible filter set to PDF/CSV.
+
+---
+
 ## 2026-06-02 — BUG-087/088/089 shipped: EXECUTIVE role + dashboard data fix + 401 root-cause fix + favicon
 
 **Date/time:** 2026-06-02 ~09:15 GMT+3

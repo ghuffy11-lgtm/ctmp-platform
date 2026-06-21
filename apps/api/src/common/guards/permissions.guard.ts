@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
+import { PERMISSIONS_KEY, ANY_PERMISSION_KEY } from '../decorators/permissions.decorator';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -11,10 +11,17 @@ export class PermissionsGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!required?.length) return true;
+    // BUG-111 (2026-06-06): OR-of-perms via @RequireAnyPermission.
+    const requiredAny = this.reflector.getAllAndOverride<string[]>(ANY_PERMISSION_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (!required?.length && !requiredAny?.length) return true;
 
     const { user } = context.switchToHttp().getRequest();
-    if (!user?.permissions) return false;
-    return required.every((p) => user.permissions.includes(p));
+    const userPerms: string[] = user?.permissions ?? [];
+    if (required?.length && !required.every((p) => userPerms.includes(p))) return false;
+    if (requiredAny?.length && !requiredAny.some((p) => userPerms.includes(p))) return false;
+    return true;
   }
 }

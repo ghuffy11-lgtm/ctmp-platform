@@ -8,9 +8,13 @@ import {
   HttpStatus,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -30,6 +34,8 @@ export class VendorAuthController {
   constructor(private readonly vendorAuthService: VendorAuthService) {}
 
   @Public()
+  // BUG-151 (2026-06-22): per-IP rate-limit for anonymous registration.
+  @Throttle({ short: { limit: 2, ttl: 60_000 }, long: { limit: 10, ttl: 3_600_000 } })
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ operationId: 'registerVendor', summary: 'Vendor self-registration with CAPTCHA' })
@@ -40,7 +46,32 @@ export class VendorAuthController {
     });
   }
 
+  // BUG-137 (2026-06-19): anonymous registration-document upload. Returns
+  // a pending documentId that the vendor then references in POST /register.
+  // 10 MB max, PDF-only. CAPTCHA is enforced at submit-register time, not
+  // here, so the form can upload incrementally.
   @Public()
+  // BUG-151 (2026-06-22): per-IP rate-limit for the anonymous PDF upload.
+  // 5/min + 30/hour caps the bot-flood vector identified in the pre-launch
+  // security review (the in-memory pending-doc map is bounded by GC at
+  // submit-register time, but uncapped upload could otherwise saturate disk).
+  @Throttle({ short: { limit: 5, ttl: 60_000 }, long: { limit: 30, ttl: 3_600_000 } })
+  @Post('registration-documents/upload')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    operationId: 'uploadRegistrationDocument',
+    summary: 'Vendor uploads a registration document PDF; returns pending documentId valid for 15 minutes',
+  })
+  uploadRegistrationDocument(@UploadedFile() file: any) {
+    return this.vendorAuthService.uploadRegistrationDocument(file);
+  }
+
+  @Public()
+  // BUG-151 (2026-06-22): per-IP login throttle. Per-account lockout already
+  // exists in the service (5/15min) but a single IP rotating across many
+  // vendor emails was uncapped pre-fix.
+  @Throttle({ short: { limit: 5, ttl: 60_000 }, long: { limit: 30, ttl: 600_000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: 'loginVendor', summary: 'Vendor login with email/password' })
@@ -49,6 +80,9 @@ export class VendorAuthController {
   }
 
   @Public()
+  // BUG-151 (2026-06-22): throttle verify-email so token-state probing is
+  // expensive when a token leaks via referer / support paste / etc.
+  @Throttle({ short: { limit: 5, ttl: 60_000 } })
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: 'verifyVendorEmail', summary: 'Verify vendor email address' })
@@ -57,6 +91,10 @@ export class VendorAuthController {
   }
 
   @Public()
+  // BUG-151 (2026-06-22): aggressive throttle on forgot-password. Per-email
+  // cooldown (60s) is enforced inside the service. CAPTCHA on the DTO.
+  // Both layers exist so bot flooding hits 429 BEFORE any DB or SMTP work.
+  @Throttle({ short: { limit: 3, ttl: 60_000 }, long: { limit: 10, ttl: 3_600_000 } })
   @Post('forgot-password')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ operationId: 'vendorForgotPassword', summary: 'Request password reset email' })
@@ -68,6 +106,8 @@ export class VendorAuthController {
   }
 
   @Public()
+  // BUG-151 (2026-06-22): throttle reset-password (token-state probe defence).
+  @Throttle({ short: { limit: 5, ttl: 60_000 } })
   @Post('reset-password')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ operationId: 'vendorResetPassword', summary: 'Reset password with token' })
@@ -76,6 +116,9 @@ export class VendorAuthController {
   }
 
   @Public()
+  // BUG-151 (2026-06-22): aggressive throttle on MFA verify. The 6-digit
+  // TOTP is otherwise brute-forcible inside the 5-min temp-token window.
+  @Throttle({ short: { limit: 5, ttl: 60_000 }, long: { limit: 20, ttl: 3_600_000 } })
   @Post('mfa/verify')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ operationId: 'verifyVendorMfa', summary: 'Verify vendor MFA code' })

@@ -31,8 +31,13 @@ interface CommercialComparisonResponse {
 /**
  * Phase D (BUG-041). Post-Confirm correction. Creates a new Award row that
  * supersedes the active one via superseded_by_award_id (master plan F7).
- * Amendments are by definition an override — text + PDF always required.
- * Both rows remain visible forever in the audit trail.
+ *
+ * BUG-114 (2026-06-09): supporting PDF is now OPTIONAL per owner directive
+ * overriding master-plan §F7 "Override always requires text + PDF". Reason
+ * text remains mandatory (100-char min). See dated amendment block in
+ * IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md.
+ *
+ * Both Award rows remain visible forever in the audit trail.
  */
 export function AmendAwardDialog({ open, tenderId, currentVendorName, onClose, onAmended }: Props) {
   const [eligible, setEligible] = useState<EligibleBid[]>([]);
@@ -77,9 +82,9 @@ export function AmendAwardDialog({ open, tenderId, currentVendorName, onClose, o
 
   if (!open) return null;
 
-  const overrideMissingText = justification.trim().length < 100;
-  const overrideMissingPdf = !pdfDocumentId;
-  const canSubmit = !!newBidId && !overrideMissingText && !overrideMissingPdf && !amending && !uploading;
+  const overrideMissingText = justification.trim().length < 20;
+  // BUG-114 (2026-06-09): PDF is optional. Reason is mandatory.
+  const canSubmit = !!newBidId && !overrideMissingText && !amending && !uploading;
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const next = e.target.files?.[0] ?? null;
@@ -123,7 +128,14 @@ export function AmendAwardDialog({ open, tenderId, currentVendorName, onClose, o
       const token = getAccessToken();
       await post(
         `/tenders/${tenderId}/award/amend`,
-        { newBidId, justificationText: justification.trim(), justificationDocumentId: pdfDocumentId },
+        {
+          newBidId,
+          justificationText: justification.trim(),
+          // BUG-114: omit the field entirely when no PDF attached so the
+          // backend's @IsOptional path is taken (instead of a `null` that
+          // would fail @IsString validation).
+          ...(pdfDocumentId ? { justificationDocumentId: pdfDocumentId } : {}),
+        },
         token,
       );
       onAmended();
@@ -162,7 +174,8 @@ export function AmendAwardDialog({ open, tenderId, currentVendorName, onClose, o
             <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
             <p className="text-amber-900">
               Amending a confirmed award is HIGH-RISK and audit-logged at CRITICAL severity.
-              The original award stays visible forever. Both written justification AND a PDF are required.
+              The original award stays visible forever. Written justification is required;
+              attaching a supporting PDF is optional but strongly recommended.
             </p>
           </div>
 
@@ -201,18 +214,18 @@ export function AmendAwardDialog({ open, tenderId, currentVendorName, onClose, o
             <textarea
               value={justification}
               onChange={e => setJustification(e.target.value)}
-              placeholder="Explain why the original award is being changed. Minimum 100 characters."
+              placeholder="Explain why the original award is being changed. Minimum 20 characters."
               rows={5}
               className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-bg focus:outline-none focus:ring-2 focus:ring-accent resize-y"
             />
-            <p className={`text-xs mt-1 ${justification.trim().length < 100 ? 'text-text-secondary' : 'text-success'}`}>
-              {justification.trim().length} / 100 characters minimum
+            <p className={`text-xs mt-1 ${justification.trim().length < 20 ? 'text-text-secondary' : 'text-success'}`}>
+              {justification.trim().length} / 20 characters minimum
             </p>
           </div>
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1.5">
-              Supporting PDF <span className="text-danger">*</span>
+              Supporting PDF <span className="text-text-secondary font-normal normal-case">(optional)</span>
             </label>
             <label className="flex items-center gap-3 px-4 py-3 border border-dashed border-border rounded-lg cursor-pointer hover:bg-bg/40 transition-colors">
               <input

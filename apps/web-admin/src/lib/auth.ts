@@ -29,7 +29,24 @@ export interface TokenPayload {
   sub: string;
   username: string;
   permissions: string[];
+  // BUG-093 (2026-06-02): sidebar entries (by href) the user's roles hide
+  // regardless of permissions. Sidebar.tsx filters by this.
+  hiddenSidebarItems?: string[];
+  // BUG-107 Piece 4 (2026-06-05): per-role custom labels for sidebar entries.
+  // Key = sidebar href, value = custom label. Sidebar.tsx uses these to
+  // override the hardcoded `navItems` label at render time.
+  sidebarLabelOverrides?: Record<string, string>;
   exp: number;
+}
+
+export function getHiddenSidebarItems(token: string): string[] {
+  const payload = decodeToken(token);
+  return payload?.hiddenSidebarItems ?? [];
+}
+
+export function getSidebarLabelOverrides(token: string): Record<string, string> {
+  const payload = decodeToken(token);
+  return payload?.sidebarLabelOverrides ?? {};
 }
 
 export function decodeToken(token: string): TokenPayload | null {

@@ -45,6 +45,9 @@ enum TenderStatus {
   COMMERCIAL_SEALED
   COMMITTEE_COMMERCIAL_OPENING
   COMMERCIAL_EVALUATION
+  // BUG-115 (2026-06-09): negotiation phase between Commercial Evaluation
+  // and Award Recommendation. Multi-round, no deadline. See master plan §10.
+  NEGOTIATION
   AWARD_RECOMMENDATION
   AWARDED
   TENDER_CLOSED
@@ -302,6 +305,9 @@ model User {
   changedVendorStatuses   VendorStatusHistory[]
   updatedSystemSettings   SystemSetting[]
   requestedReportExportJobs ReportExportJob[] @relation("ReportExportJobRequestedBy")
+  // BUG-115 (2026-06-09): a user can launch + close negotiation rounds.
+  launchedNegotiationRounds NegotiationRound[] @relation("NegotiationRoundLaunchedBy")
+  closedNegotiationRounds   NegotiationRound[] @relation("NegotiationRoundClosedBy")
 
   @@map("users")
 }
@@ -329,6 +335,16 @@ model Role {
   name        String   @db.VarChar(255)
   description String?  @db.Text
   isSystem    Boolean  @default(false) @map("is_system")
+  // BUG-093 (2026-06-02): admin-configured sidebar entries to hide for users
+  // holding this role. Independent of permissions — perms still gate data
+  // access. List of sidebar `href` values, e.g. ['/technical-comparison'].
+  hiddenSidebarItems String[] @default([]) @map("hidden_sidebar_items")
+  // BUG-107 (2026-06-05) Piece 4: per-role sidebar label rename. JSON object
+  // keyed by sidebar href → custom label, e.g. {"/tenders":"Procurement Cases"}.
+  // Sidebar reads override at render time with fallback to hardcoded label.
+  // Union semantics: when a user holds multiple roles, the first non-empty
+  // override per href wins (sorted by role granted_at ascending).
+  sidebarLabelOverrides Json @default("{}") @map("sidebar_label_overrides")
   createdAt   DateTime @default(now()) @map("created_at")
 
   rolePermissions  RolePermission[]
@@ -463,6 +479,12 @@ model VendorUser {
   askedClarifications           TenderClarification[]         @relation("ClarificationAskedByVendorUser")
   actorAuditLogs                AuditLog[]                    @relation("AuditLogActorVendorUser")
   recipientNotificationLogs     NotificationLog[]             @relation("NotificationLogRecipientVendorUser")
+  // BUG-115 (2026-06-09): vendor user who submitted a negotiation round.
+  submittedNegotiationSubmissions BidNegotiationSubmission[]  @relation("BidNegotiationSubmissionSubmittedBy")
+  // BUG-137 (2026-06-19): supporting documents uploaded by this vendor user.
+  uploadedBidSupportingDocs     BidSupportingDocument[]       @relation("BidSupportingDocUploadedBy")
+  // BUG-147 (2026-06-21): vendor can now reply on their own threads.
+  clarificationReplies          TenderClarificationReply[]    @relation("ClarificationReplyByVendorUser")
 
   @@map("vendor_users")
 }
@@ -570,6 +592,13 @@ model Tender {
   currency              String?          @db.Char(3)
   visibility            TenderVisibility @default(PUBLIC)
   status                TenderStatus     @default(DRAFT)
+  // BUG-132 (2026-06-14): set when admin puts a tender on Hold so Resume
+  // can return it to where it was. Cleared on resume + on cancel.
+  previousStatus        TenderStatus?    @map("previous_status")
+  // BUG-137 (2026-06-19): when true, bidders must attach ≥1 supporting
+  // document PDF (certificates, letters, etc.) on top of the technical +
+  // commercial envelopes. Default false.
+  requiresSupportingDocuments Boolean    @default(false) @map("requires_supporting_documents")
   submissionOpenAt      DateTime?        @map("submission_open_at")
   submissionCloseAt     DateTime?        @map("submission_close_at")
   clarificationCloseAt  DateTime?        @map("clarification_close_at")
@@ -600,6 +629,8 @@ model Tender {
   notificationLogs      NotificationLog[]       @relation("NotificationLogTender")
   technicalCriteria     TenderTechnicalCriterion[]
   boqItems              TenderBoqItem[]
+  // BUG-115 (2026-06-09): negotiation rounds belong to a tender.
+  negotiationRounds     NegotiationRound[]
 
   @@map("tenders")
 }
@@ -643,6 +674,11 @@ model TenderVendor {
   vendorId   String   @map("vendor_id") @db.Uuid
   invitedBy  String?  @map("invited_by") @db.Uuid
   invitedAt  DateTime @default(now()) @map("invited_at")
+  // BUG-120 (2026-06-10): per-invitation ad-hoc emails (BCC alongside
+  // the vendor's registered users) + dedupe flag so we don't re-send
+  // on a second publish or a follow-up invite.
+  extraNotificationEmails String[] @default([]) @map("extra_notification_emails")
+  notifiedAt              DateTime? @map("notified_at")
 
   tender          Tender  @relation(fields: [tenderId], references: [id], onDelete: Cascade)
   vendor          Vendor  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
@@ -706,15 +742,20 @@ model AwardMinutes {
 }
 
 model TenderClarificationReply {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  clarificationId  String   @map("clarification_id") @db.Uuid
-  repliedByUserId  String   @map("replied_by_user_id") @db.Uuid
-  answer           String   @db.Text
-  isPublic         Boolean  @default(false) @map("is_public")
-  createdAt        DateTime @default(now()) @map("created_at")
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clarificationId        String   @map("clarification_id") @db.Uuid
+  // BUG-147 (2026-06-21): a reply may now come from EITHER an internal user
+  // (admin / engineer / procurement officer) OR a vendor user (the asker
+  // replying back). Exactly one of the two id columns is set per row.
+  repliedByUserId        String?  @map("replied_by_user_id") @db.Uuid
+  repliedByVendorUserId  String?  @map("replied_by_vendor_user_id") @db.Uuid
+  answer                 String   @db.Text
+  isPublic               Boolean  @default(false) @map("is_public")
+  createdAt              DateTime @default(now()) @map("created_at")
 
-  clarification  TenderClarification @relation(fields: [clarificationId], references: [id], onDelete: Cascade)
-  repliedByUser  User                @relation(fields: [repliedByUserId], references: [id])
+  clarification        TenderClarification @relation(fields: [clarificationId], references: [id], onDelete: Cascade)
+  repliedByUser        User?               @relation(fields: [repliedByUserId], references: [id])
+  repliedByVendorUser  VendorUser?         @relation("ClarificationReplyByVendorUser", fields: [repliedByVendorUserId], references: [id])
 
   @@map("tender_clarification_replies")
 }
@@ -932,10 +973,40 @@ model Bid {
   technicalEvaluations    TechnicalEvaluation[]
   commercialEvaluations   CommercialEvaluation[]
   bidBoqItems             BidBoqItem[]
+  // BUG-115 (2026-06-09): one bid can be invited into many negotiation rounds.
+  negotiationInvitations  NegotiationInvitation[]
+  // BUG-137 (2026-06-19): zero or more supporting docs (certificates, etc.)
+  // attached to the bid. Required by tender flag at submit time.
+  supportingDocuments     BidSupportingDocument[]
   auditLogs               AuditLog[]              @relation("AuditLogBid")
 
   @@unique([tenderId, vendorId, isAlternative])
   @@map("bids")
+}
+
+// BUG-137 (2026-06-19): optional supporting documents (certificates, letters,
+// etc.) that a bidder attaches alongside the technical + commercial envelopes.
+// Frozen (lockedAt set) on bid submit.
+model BidSupportingDocument {
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bidId                    String   @map("bid_id") @db.Uuid
+  originalFilename         String   @map("original_filename") @db.VarChar(255)
+  storageKey               String   @map("storage_key") @db.Text
+  mimeType                 String   @map("mime_type") @db.VarChar(128)
+  fileSize                 BigInt   @map("file_size")
+  checksumSha256           String   @map("checksum_sha256") @db.Char(64)
+  uploadedByVendorUserId   String?  @map("uploaded_by_vendor_user_id") @db.Uuid
+  uploadedAt               DateTime @default(now()) @map("uploaded_at")
+  lockedAt                 DateTime? @map("locked_at")
+
+  bid             Bid         @relation(fields: [bidId], references: [id], onDelete: Cascade)
+  uploadedByUser  VendorUser? @relation("BidSupportingDocUploadedBy", fields: [uploadedByVendorUserId], references: [id])
+
+  // BUG-138 (2026-06-19): dropped the (bidId, checksumSha256) unique index —
+  // it was blocking legitimate multi-upload when a vendor reuses the same
+  // PDF. Migration 042 drops the underlying SQL index too.
+  @@index([bidId])
+  @@map("bid_supporting_documents")
 }
 
 model BidEnvelope {
@@ -1247,6 +1318,11 @@ model SystemSetting {
   description String?  @db.Text
   updatedBy   String?  @map("updated_by") @db.Uuid
   updatedAt   DateTime @default(now()) @map("updated_at")
+  // BUG-107 (2026-06-05): for secrets like smtp.password, the plaintext
+  // `value` column stays NULL and the encrypted payload lives in
+  // encrypted_value (AES-256-GCM, key from env SETTINGS_ENCRYPTION_KEY).
+  isEncrypted     Boolean @default(false) @map("is_encrypted")
+  encryptedValue  Bytes?  @map("encrypted_value")
 
   updatedByUser User? @relation(fields: [updatedBy], references: [id])
 
@@ -1282,6 +1358,11 @@ model TenderTechnicalCriterion {
   weight      Decimal? @db.Decimal(5, 2)
   mandatory   Boolean  @default(false)
   sortOrder   Int      @default(0) @map("sort_order")
+  // BUG-111 (2026-06-06): which evaluator role scores this criterion.
+  // 'TECHNICAL' = only TECHNICAL_EVALUATOR (perm: technical:evaluate);
+  // 'PROCUREMENT' = only procurement-side (perm: technical:evaluate:procurement);
+  // 'EITHER' = either may score (default, back-compat for pre-BUG-111 rows).
+  evaluatorRole String  @default("EITHER") @map("evaluator_role") @db.VarChar(32)
   createdAt   DateTime @default(now()) @map("created_at")
 
   tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
@@ -1314,6 +1395,8 @@ model TenderBoqItem {
 
   tender      Tender       @relation(fields: [tenderId], references: [id], onDelete: Cascade)
   bidBoqItems BidBoqItem[]
+  // BUG-115 (2026-06-09): per-line negotiated prices reference the template line.
+  bidNegotiationBoqItems BidNegotiationBoqItem[]
 
   @@unique([tenderId, itemNo])
   @@index([tenderId, sortOrder])
@@ -1378,4 +1461,93 @@ model ReportExportJob {
 
   @@index([requestedBy, enqueuedAt])
   @@map("report_export_jobs")
+}
+
+// =============================================================================
+// NEGOTIATION (BUG-115, 2026-06-09)
+// Multi-round, no-deadline negotiation phase between Commercial Evaluation
+// and Award Recommendation. Original bids never overwritten; each round's
+// submissions are new rows referencing the parent Bid. See plan + master
+// plan §10 amendment.
+// =============================================================================
+
+enum NegotiationInvitationStatus {
+  INVITED
+  SUBMITTED
+
+  @@map("negotiation_invitation_status")
+}
+
+model NegotiationRound {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenderId      String       @map("tender_id") @db.Uuid
+  roundNumber   Int          @map("round_number")
+  launchedBy    String       @map("launched_by") @db.Uuid
+  launchedAt    DateTime     @default(now()) @map("launched_at")
+  launchReason  String       @map("launch_reason") @db.Text
+  closedAt      DateTime?    @map("closed_at")
+  closedBy      String?      @map("closed_by") @db.Uuid
+  closeReason   String?      @map("close_reason") @db.Text
+
+  tender         Tender                  @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  launchedByUser User                    @relation("NegotiationRoundLaunchedBy", fields: [launchedBy], references: [id])
+  closedByUser   User?                   @relation("NegotiationRoundClosedBy",   fields: [closedBy],   references: [id])
+  invitations    NegotiationInvitation[]
+
+  @@unique([tenderId, roundNumber])
+  @@index([tenderId, roundNumber])
+  @@map("negotiation_rounds")
+}
+
+model NegotiationInvitation {
+  id         String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roundId    String                        @map("round_id") @db.Uuid
+  bidId      String                        @map("bid_id") @db.Uuid
+  invitedAt  DateTime                      @default(now()) @map("invited_at")
+  status     NegotiationInvitationStatus   @default(INVITED)
+
+  round      NegotiationRound          @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  bid        Bid                       @relation(fields: [bidId],   references: [id], onDelete: Restrict)
+  submission BidNegotiationSubmission?
+
+  @@unique([roundId, bidId])
+  @@index([bidId])
+  @@index([roundId])
+  @@map("negotiation_invitations")
+}
+
+model BidNegotiationSubmission {
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invitationId             String   @unique @map("invitation_id") @db.Uuid
+  submittedAt              DateTime @default(now()) @map("submitted_at")
+  submittedByVendorUserId  String?  @map("submitted_by_vendor_user_id") @db.Uuid
+  totalPrice               Decimal? @map("total_price") @db.Decimal(15, 3)
+  currency                 String   @default("KWD") @db.Char(3)
+  commercialPdfStorageKey  String   @map("commercial_pdf_storage_key") @db.Text
+  commercialPdfSha256      String   @map("commercial_pdf_sha256") @db.Char(64)
+  commercialPdfFilename    String   @map("commercial_pdf_filename") @db.VarChar(255)
+  remarks                  String?  @db.Text
+
+  invitation              NegotiationInvitation     @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  submittedByVendorUser   VendorUser?               @relation("BidNegotiationSubmissionSubmittedBy", fields: [submittedByVendorUserId], references: [id])
+  boqItems                BidNegotiationBoqItem[]
+
+  @@map("bid_negotiation_submissions")
+}
+
+model BidNegotiationBoqItem {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  submissionId      String        @map("submission_id") @db.Uuid
+  tenderBoqItemId   String        @map("tender_boq_item_id") @db.Uuid
+  status            BidBoqStatus  @default(BIDDING)
+  unitPrice         Decimal?      @map("unit_price") @db.Decimal(15, 3)
+  remarks           String?       @db.Text
+
+  submission    BidNegotiationSubmission @relation(fields: [submissionId],    references: [id], onDelete: Cascade)
+  tenderBoqItem TenderBoqItem            @relation(fields: [tenderBoqItemId], references: [id], onDelete: Restrict)
+
+  @@unique([submissionId, tenderBoqItemId])
+  @@index([submissionId])
+  @@index([tenderBoqItemId])
+  @@map("bid_negotiation_boq_items")
 }

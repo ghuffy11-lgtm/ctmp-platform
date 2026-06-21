@@ -7,6 +7,7 @@ import { LogOut } from 'lucide-react';
 import { clearTokens, getAccessToken } from '@/lib/auth';
 import { get } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { useIdleTimeout } from '@/lib/use-idle-timeout';
 
 const NAV = [
   { href: '/dashboard',      label: 'Dashboard' },
@@ -20,6 +21,16 @@ interface MeResponse {
   vendor: { companyName: string; status: string };
 }
 
+// BUG-107 Pieces 2 + 3 (2026-06-05): vendor portal reads system name + logo
+// from the public branding endpoint. Both fall back gracefully if unset.
+interface BrandingResponse {
+  systemName: string;
+  vendorPortalName: string;
+  hasVendorLogo: boolean;
+  hasReportLogo: boolean;
+}
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+
 const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
   APPROVED:   { label: 'Verified',   tone: 'text-emerald-700 bg-emerald-100' },
   PENDING:    { label: 'Pending',    tone: 'text-amber-700 bg-amber-100' },
@@ -29,16 +40,25 @@ const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
 };
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
+  // BUG-112 (2026-06-07) Piece 4: enforce configured idle timeout
+  // on every authenticated vendor page.
+  useIdleTimeout();
   const pathname = usePathname();
   const router = useRouter();
   const [company, setCompany] = useState<{ name: string; status: string } | null>(null);
+  const [branding, setBranding] = useState<BrandingResponse>({ systemName: 'CTMP', vendorPortalName: 'CTMP', hasVendorLogo: false, hasReportLogo: false });
 
   useEffect(() => {
     const token = getAccessToken();
-    if (!token) return;
-    get<MeResponse>('/vendor-auth/me', token)
-      .then(res => setCompany({ name: res.vendor.companyName, status: res.vendor.status }))
-      .catch(() => { /* shell still renders without vendor chip */ });
+    if (token) {
+      get<MeResponse>('/vendor-auth/me', token)
+        .then(res => setCompany({ name: res.vendor.companyName, status: res.vendor.status }))
+        .catch(() => { /* shell still renders without vendor chip */ });
+    }
+    // BUG-107: public endpoint — no auth needed.
+    get<BrandingResponse>('/public-branding')
+      .then(setBranding)
+      .catch(() => { /* keep defaults */ });
   }, []);
 
   function handleLogout() {
@@ -56,12 +76,25 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       <nav className="fixed top-0 left-0 right-0 z-50 border-b border-slate-900/10 bg-white/90 backdrop-blur-2xl">
         <div className="max-w-screen-2xl mx-auto px-6 lg:px-8 py-4 flex items-center justify-between gap-6">
           <Link href="/dashboard" className="flex items-center gap-3 shrink-0">
-            <div className="w-9 h-9 bg-electric-500 rounded-2xl flex items-center justify-center text-[#0A1428] font-bold text-2xl leading-none">
-              V
-            </div>
+            {/* BUG-107 Piece 3: render uploaded vendor logo when present; fall back to the V tile. */}
+            {branding.hasVendorLogo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`${API_BASE}/api/v1/branding/vendor_logo`}
+                alt={branding.systemName}
+                className="h-9 max-w-[160px] object-contain"
+              />
+            ) : (
+              <div className="w-9 h-9 bg-electric-500 rounded-2xl flex items-center justify-center text-[#0A1428] font-bold text-2xl leading-none">
+                V
+              </div>
+            )}
             <div className="heading-font tracking-tighter leading-none hidden sm:block">
-              <div className="text-2xl font-semibold">VENDOR</div>
-              <div className="text-electric-500 text-[10px] tracking-[4px] font-medium mt-0.5">CONNECT</div>
+              {/* BUG-108: vendor portal name (separate from system_name) — falls back to system_name when unset. */}
+              <div className="text-2xl font-semibold">
+                {(branding.vendorPortalName || branding.systemName || 'CTMP').toUpperCase()}
+              </div>
+              <div className="text-electric-500 text-[10px] tracking-[4px] font-medium mt-0.5">VENDOR PORTAL</div>
             </div>
           </Link>
 

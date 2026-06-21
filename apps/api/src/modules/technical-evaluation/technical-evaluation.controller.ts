@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
-import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { RequirePermissions, RequireAnyPermission } from '../../common/decorators/permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { TechnicalEvaluationService } from './technical-evaluation.service';
 import { EvaluateBidDto } from './dto/evaluate-bid.dto';
@@ -22,21 +22,22 @@ export class TechnicalEvaluationController {
   }
 
   @Get('tenders/:tenderId/technical-evaluations')
-  @RequirePermissions('technical:evaluate')
+  // BUG-111 (2026-06-06): list + submit are open to either evaluator role.
+  @RequireAnyPermission('technical:evaluate', 'technical:evaluate:procurement')
   @ApiOperation({ operationId: 'listTechnicalEvaluations', summary: 'List technical evaluations for a tender' })
   findAll(@Param('tenderId') tenderId: string) {
     return this.technicalEvaluationService.findAll(tenderId);
   }
 
   @Post('bids/:bidId/technical-evaluations')
-  @RequirePermissions('technical:evaluate')
-  @ApiOperation({ operationId: 'submitTechnicalEvaluation', summary: 'Submit technical evaluation score' })
+  @RequireAnyPermission('technical:evaluate', 'technical:evaluate:procurement')
+  @ApiOperation({ operationId: 'submitTechnicalEvaluation', summary: 'Submit technical evaluation score (per-criterion role check inside service)' })
   evaluate(
     @Param('bidId') bidId: string,
     @Body() dto: EvaluateBidDto,
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: any,
   ) {
-    return this.technicalEvaluationService.evaluate(bidId, dto, userId);
+    return this.technicalEvaluationService.evaluate(bidId, dto, user);
   }
 
   @Post('tenders/:tenderId/finalize-technical-results')
@@ -47,8 +48,8 @@ export class TechnicalEvaluationController {
   }
 
   @Get('tenders/:tenderId/technical-criteria')
-  @RequirePermissions('technical:evaluate')
-  @ApiOperation({ operationId: 'listTechnicalCriteria', summary: 'Get evaluation criteria configured for tender' })
+  @RequireAnyPermission('technical:evaluate', 'technical:evaluate:procurement')
+  @ApiOperation({ operationId: 'listTechnicalCriteria', summary: 'Get evaluation criteria (caller filters client-side by their role)' })
   listCriteria(@Param('tenderId') tenderId: string) {
     return this.technicalEvaluationService.listCriteria(tenderId);
   }

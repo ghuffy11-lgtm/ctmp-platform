@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
-import PDFDocument from 'pdfkit';
+// BUG-105 (2026-06-05): pdfkit's CommonJS export is `module.exports = PDFDocument`
+// (no `default` key), but @types/pdfkit declares it as a var, so the previous
+// `import PDFDocument from 'pdfkit'` compiled to `pdfkit_1.default` which is
+// undefined at runtime — every PDF export failed with "default is not a
+// constructor". TS `import = require()` syntax binds the real CommonJS export.
+import PDFDocument = require('pdfkit');
 import { PrismaService } from '../../database/prisma.service';
+import { BrandingService } from '../system-settings/branding.service';
+import { SystemSettingsService } from '../system-settings/system-settings.service';
 
 interface RenderInput {
   reportCode: string;
@@ -18,7 +25,12 @@ interface ReportRow {
 
 @Injectable()
 export class ReportRendererService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // BUG-107 (2026-06-05): branding service for logo embed + system name read.
+    private readonly branding: BrandingService,
+    private readonly settings: SystemSettingsService,
+  ) {}
 
   async render(input: RenderInput): Promise<Buffer> {
     const dataset = await this.collectDataset(input);
@@ -177,20 +189,83 @@ export class ReportRendererService {
   }
 
   private async awardHistory() {
+    // BUG-105 (2026-06-05): the renderer used to read t.awardedAmount directly,
+    // but on staging that column is NULL for every awarded tender (BUG-088 —
+    // confirmAward never populated it). The download looked empty in the money
+    // column. Apply the same fallback AnalyticsService._resolveAwardedAmount
+    // uses: fall back to the awarded vendor's bid's latest CommercialEvaluation
+    // total when the tender column is null.
+    // BUG-115 (2026-06-09): two additional columns — `Original Price` and
+    // `Negotiation Savings %` — when the awarded bid went through negotiation.
+    // The existing `Awarded Amount` column now reflects the negotiated price
+    // (via the same resolver chain analytics uses).
     const tenders = await this.prisma.tender.findMany({
       where: { awardedAt: { not: null } },
-      include: { awardedVendor: { select: { companyName: true } } },
+      include: {
+        awardedVendor: { select: { companyName: true } },
+        bids: {
+          where: { isAlternative: false },
+          select: {
+            vendorId: true,
+            commercialEvaluations: {
+              select: { totalPrice: true, createdAt: true },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+            negotiationInvitations: {
+              select: {
+                round: { select: { roundNumber: true } },
+                submission: { select: { totalPrice: true } },
+              },
+            },
+          },
+        },
+      },
       orderBy: { awardedAt: 'desc' },
     });
     return {
-      columns: ['Reference', 'Title', 'Awarded Vendor', 'Awarded Amount', 'Awarded At'],
-      rows: tenders.map(t => ({
-        Reference: t.reference,
-        Title: t.title,
-        'Awarded Vendor': t.awardedVendor?.companyName ?? '',
-        'Awarded Amount': t.awardedAmount ? Number(t.awardedAmount) : null,
-        'Awarded At': t.awardedAt?.toISOString() ?? '',
-      })),
+      columns: [
+        'Reference',
+        'Title',
+        'Awarded Vendor',
+        'Awarded Amount',
+        'Original Price',
+        'Negotiation Savings %',
+        'Awarded At',
+      ],
+      rows: tenders.map(t => {
+        const awardedBid = t.awardedVendorId
+          ? t.bids.find(b => b.vendorId === t.awardedVendorId)
+          : undefined;
+        // Original price = latest CommercialEvaluation total (used as the
+        // pre-negotiation baseline). Falls back to tender.awardedAmount when
+        // no CE row exists (legacy).
+        const originalPrice = awardedBid?.commercialEvaluations?.[0]?.totalPrice != null
+          ? Number(awardedBid.commercialEvaluations[0].totalPrice)
+          : (t.awardedAmount != null ? Number(t.awardedAmount) : null);
+        // Latest negotiation submission (newest round first).
+        const submitted = (awardedBid?.negotiationInvitations ?? [])
+          .filter((i: any) => i.submission?.totalPrice != null)
+          .sort((a: any, b: any) => b.round.roundNumber - a.round.roundNumber);
+        const negotiated = submitted.length > 0 ? Number(submitted[0].submission!.totalPrice) : null;
+        // Awarded Amount = negotiated when present, else BUG-088 fallback.
+        let amount: number | null = negotiated != null
+          ? negotiated
+          : (t.awardedAmount != null ? Number(t.awardedAmount) : null);
+        if (amount == null && originalPrice != null) amount = originalPrice;
+        const savingsPercent = (negotiated != null && originalPrice != null && originalPrice > 0)
+          ? Number((((originalPrice - negotiated) / originalPrice) * 100).toFixed(2))
+          : null;
+        return {
+          Reference: t.reference,
+          Title: t.title,
+          'Awarded Vendor': t.awardedVendor?.companyName ?? '',
+          'Awarded Amount': amount,
+          'Original Price': originalPrice,
+          'Negotiation Savings %': savingsPercent,
+          'Awarded At': t.awardedAt?.toISOString() ?? '',
+        };
+      }),
     };
   }
 
@@ -239,7 +314,10 @@ export class ReportRendererService {
 
   private async renderXlsx(input: RenderInput, dataset: { columns: string[]; rows: ReportRow[] }): Promise<Buffer> {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'CTMP';
+    // BUG-107 Piece 2: workbook.creator is the configurable system name.
+    const branding = await this.settings.getPublicBranding();
+    workbook.creator = branding.systemName;
+    workbook.company = branding.systemName;
     workbook.created = new Date();
 
     const sheet = workbook.addWorksheet(input.reportName.slice(0, 31));
@@ -255,12 +333,34 @@ export class ReportRendererService {
   }
 
   private async renderPdf(input: RenderInput, dataset: { columns: string[]; rows: ReportRow[] }): Promise<Buffer> {
+    // BUG-107 Piece 2/3: resolve branding for header (logo + system name)
+    // before opening the PDF stream so we can embed both atomically.
+    const branding = await this.settings.getPublicBranding();
+    const logoBuffer = branding.hasReportLogo ? await this.branding.readBuffer('report_logo') : null;
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ size: 'A4', margin: 36, layout: 'landscape' });
       const chunks: Buffer[] = [];
       doc.on('data', (c: Buffer) => chunks.push(c));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
+
+      // BUG-107 Piece 3: branding header — logo on the left, system name on
+      // the right of the report title. Falls back to text-only if no logo.
+      if (logoBuffer) {
+        try {
+          doc.image(logoBuffer, 36, 30, { fit: [120, 40] });
+          doc.fontSize(9).fillColor('#94A3B8').text(branding.systemName, 160, 36, { align: 'left' });
+          doc.fillColor('#0F172A');
+          doc.moveDown(2);
+        } catch {
+          // logo decode failed — render text header only
+          doc.fontSize(11).fillColor('#475569').text(branding.systemName, { align: 'left' });
+          doc.fillColor('#0F172A');
+        }
+      } else {
+        doc.fontSize(11).fillColor('#475569').text(branding.systemName, { align: 'left' });
+        doc.fillColor('#0F172A');
+      }
 
       doc.fontSize(18).text(input.reportName, { align: 'left' });
       doc.fontSize(10).fillColor('#475569').text(`Generated: ${new Date().toISOString()}`);

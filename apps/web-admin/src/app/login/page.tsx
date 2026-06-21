@@ -1,9 +1,18 @@
 'use client';
 
-import { useId, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { post } from '@/lib/api';
-import { setTokens } from '@/lib/auth';
+import { Suspense, useEffect, useId, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { post, get, assetUrl } from '@/lib/api';
+import { setTokens, getHiddenSidebarItems } from '@/lib/auth';
+
+// BUG-106 (2026-06-05): when the user's role hides /dashboard (currently
+// EXECUTIVE via roles.hidden_sidebar_items), land them on /executive instead.
+// Generic check against the JWT's hiddenSidebarItems list — works for any
+// future role that hides Dashboard.
+function landingPath(accessToken: string): string {
+  const hidden = getHiddenSidebarItems(accessToken);
+  return hidden.includes('/dashboard') ? '/executive' : '/dashboard';
+}
 import { Building2, AtSign, Lock, Eye, EyeOff, ArrowRight, Info } from 'lucide-react';
 
 interface LoginResponse {
@@ -14,7 +23,23 @@ interface LoginResponse {
 }
 
 export default function LoginPage() {
+  // BUG-112 (2026-06-07) Piece 4: Suspense wrapper required because the
+  // inner component reads `?reason=` via useSearchParams, which Next 15
+  // App Router only allows inside a Suspense boundary.
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // BUG-112 (2026-06-07) Piece 4: banner shown when the user was kicked
+  // out by the idle-timeout hook (`reason=timeout`) or by the 401
+  // interceptor (`reason=expired`).
+  const signoutReason = searchParams.get('reason');
   const usernameId = useId();
   const passwordId = useId();
   const mfaCodeId = useId();
@@ -26,6 +51,19 @@ export default function LoginPage() {
   const [mfaToken, setMfaToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // BUG-107 Piece 2 + BUG-108: admin login renders the dedicated admin_logo
+  // (not the vendor logo). Defaults to the Building2 icon if no logo uploaded.
+  const [systemName, setSystemName] = useState<string>('CTMP');
+  const [hasAdminLogo, setHasAdminLogo] = useState(false);
+
+  useEffect(() => {
+    get<{ systemName: string; hasAdminLogo: boolean }>('/public-branding')
+      .then((b) => {
+        setSystemName(b.systemName || 'CTMP');
+        setHasAdminLogo(!!b.hasAdminLogo);
+      })
+      .catch(() => { /* keep defaults */ });
+  }, []);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -38,7 +76,7 @@ export default function LoginPage() {
         setMfaRequired(true);
       } else {
         setTokens(res.accessToken, res.refreshToken);
-        router.push('/dashboard');
+        router.push(landingPath(res.accessToken));
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -57,7 +95,7 @@ export default function LoginPage() {
         code: mfaCode,
       });
       setTokens(res.accessToken, res.refreshToken);
-      router.push('/dashboard');
+      router.push(landingPath(res.accessToken));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'MFA verification failed');
     } finally {
@@ -79,14 +117,29 @@ export default function LoginPage() {
       </div>
 
       <div className="relative w-full max-w-[440px] flex flex-col items-center">
-        {/* Logo and branding */}
+        {/* Logo and branding — BUG-107 Piece 2/3 */}
         <div className="flex flex-col items-center mb-6 gap-2 text-center">
-          <div className="w-16 h-16 bg-white/10 rounded-xl flex items-center justify-center border border-white/20 backdrop-blur-sm mb-2">
-            <Building2 className="w-10 h-10 text-on-primary" />
+          <div className="w-16 h-16 bg-white/10 rounded-xl flex items-center justify-center border border-white/20 backdrop-blur-sm mb-2 overflow-hidden">
+            {hasAdminLogo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={assetUrl('/branding/admin_logo')} alt={systemName} className="w-full h-full object-contain" />
+            ) : (
+              <Building2 className="w-10 h-10 text-on-primary" />
+            )}
           </div>
-          <h1 className="text-headline-md text-on-primary tracking-tight font-semibold">CTMP Admin</h1>
+          <h1 className="text-headline-md text-on-primary tracking-tight font-semibold">{systemName} Admin</h1>
           <p className="text-label-md text-on-primary-container uppercase tracking-widest opacity-80">Enterprise Procurement</p>
         </div>
+
+        {signoutReason && (
+          <div className="w-full mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-body-sm text-center">
+            {signoutReason === 'timeout'
+              ? 'You were signed out due to inactivity. Please sign in again.'
+              : signoutReason === 'expired'
+                ? 'Your session has expired. Please sign in again.'
+                : 'Please sign in to continue.'}
+          </div>
+        )}
 
         {/* Auth card */}
         <div className="w-full bg-white rounded-xl shadow-2xl p-8 md:p-10 border border-outline-variant/30">

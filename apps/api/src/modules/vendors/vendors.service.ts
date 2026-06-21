@@ -1,7 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { VendorStatus, AuditRiskLevel } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { VendorDocumentStorageService } from './vendor-document-storage.service';
 import { UpdateVendorDto } from './dto/update-vendor.dto';
 
 interface ListVendorsArgs {
@@ -32,6 +33,7 @@ export class VendorsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly docStorage: VendorDocumentStorageService,
   ) {}
 
   async findAll(args: ListVendorsArgs) {
@@ -209,6 +211,102 @@ export class VendorsService {
   async update(id: string, dto: UpdateVendorDto) {
     // TODO: audit log
     throw new Error('Not implemented');
+  }
+
+  // BUG-137 (2026-06-19): vendor registration documents — list, view, download.
+  async listDocuments(vendorId: string) {
+    const vendor = await this.prisma.vendor.findUnique({
+      where: { id: vendorId },
+      select: { id: true },
+    });
+    if (!vendor) throw new NotFoundException('Vendor not found');
+    const docs = await this.prisma.vendorDocument.findMany({
+      where: { vendorId },
+      orderBy: { uploadedAt: 'asc' },
+      select: {
+        id: true,
+        documentType: true,
+        originalFilename: true,
+        mimeType: true,
+        fileSize: true,
+        checksumSha256: true,
+        expiryDate: true,
+        uploadedAt: true,
+      },
+    });
+    return {
+      vendorId,
+      items: docs.map(d => ({
+        id: d.id,
+        documentType: d.documentType,
+        filename: d.originalFilename,
+        mimeType: d.mimeType,
+        fileSize: Number(d.fileSize),
+        checksumSha256: d.checksumSha256,
+        expiryDate: d.expiryDate?.toISOString() ?? null,
+        uploadedAt: d.uploadedAt.toISOString(),
+      })),
+    };
+  }
+
+  async getDocument(
+    vendorId: string,
+    documentId: string,
+    user: any,
+    mode: 'view' | 'download',
+  ) {
+    const doc = await this.prisma.vendorDocument.findUnique({
+      where: { id: documentId },
+      select: {
+        id: true,
+        vendorId: true,
+        documentType: true,
+        originalFilename: true,
+        storageKey: true,
+        mimeType: true,
+        fileSize: true,
+        checksumSha256: true,
+      },
+    });
+    if (!doc || doc.vendorId !== vendorId) throw new NotFoundException('Document not found');
+
+    // Authorisation: either an admin user with vendor:view OR the vendor's
+    // own vendor user.
+    const isVendor = !!user?.vendorId;
+    if (isVendor) {
+      if (user.vendorId !== vendorId) throw new ForbiddenException('Not your document');
+    } else {
+      const perms: string[] = user?.permissions ?? [];
+      if (!perms.includes('vendor:view')) {
+        throw new ForbiddenException('vendor:view permission required');
+      }
+    }
+
+    // Audit BEFORE streaming so a failed stream doesn't drop the audit row.
+    // HIGH severity — registration docs may contain PII.
+    await this.audit.log({
+      eventType: mode === 'view' ? 'VENDOR_DOCUMENT_VIEWED' : 'VENDOR_DOCUMENT_DOWNLOADED',
+      entityType: 'VendorDocument',
+      entityId: documentId,
+      vendorId,
+      actorUserId: isVendor ? undefined : (user?.id ?? undefined),
+      actorVendorUserId: isVendor ? (user?.id ?? undefined) : undefined,
+      afterValue: {
+        documentType: doc.documentType,
+        filename: doc.originalFilename,
+        sha256: doc.checksumSha256,
+      },
+      riskLevel: AuditRiskLevel.HIGH,
+    });
+
+    const { stream, size, mimeType } = await this.docStorage.stream(doc.storageKey);
+    return {
+      filename: doc.originalFilename,
+      mimeType: doc.mimeType || mimeType,
+      fileSize: Number(doc.fileSize) || size,
+      checksumSha256: doc.checksumSha256,
+      stream,
+    };
   }
 
   private mapVendor(v: any) {

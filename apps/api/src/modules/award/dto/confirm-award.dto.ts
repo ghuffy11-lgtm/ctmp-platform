@@ -10,10 +10,13 @@ export class ConfirmAwardDto {
   @IsBoolean()
   isLowest: boolean;
 
-  @ApiPropertyOptional({ description: 'Written justification — REQUIRED when isLowest=false (min 100 chars).' })
+  // BUG-149 (2026-06-21): owner reduced the minimum from 100 → 20 chars.
+  // (Pre-BUG-149 the UI text said 50 but the DTO enforced 100 — the two
+  // are now aligned at 20.)
+  @ApiPropertyOptional({ description: 'Written justification — REQUIRED when isLowest=false (min 20 chars).' })
   @IsString()
   @IsOptional()
-  @MinLength(100)
+  @MinLength(20)
   justificationText?: string;
 
   @ApiPropertyOptional({ description: 'Document id from POST /award/justification-document — REQUIRED when isLowest=false.' })

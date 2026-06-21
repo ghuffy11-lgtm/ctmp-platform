@@ -19,6 +19,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: 'include',
   });
 
+  // BUG-112 (2026-06-07) Piece 4: matching the admin client, redirect to
+  // /login?reason=expired on a 401 unless we're already on the login
+  // endpoint (so a bad password doesn't trigger a redirect loop).
+  if (res.status === 401 && typeof window !== 'undefined' && !path.startsWith('/vendor-auth/login')) {
+    const { clearTokens } = await import('./auth');
+    clearTokens();
+    if (!window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login?reason=expired';
+    }
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: res.statusText }));
     const raw = body.message;

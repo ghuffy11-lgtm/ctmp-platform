@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { get, post } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import {
-  User, Globe, Lock, ChevronRight, Building2, CornerDownLeft,
+  User, Lock, ChevronRight, Building2, CornerDownLeft,
   Search, MessageSquare, Download, RefreshCw, CheckCircle2, SearchX,
   FileText, Calendar, Clock, Printer,
 } from 'lucide-react';
@@ -46,7 +46,9 @@ interface ClarificationReply {
   id: string;
   clarificationId: string;
   reply: string;
-  visibility: 'PRIVATE_TO_VENDOR' | 'GENERAL_PUBLIC';
+  // BUG-145 (2026-06-19): visibility kept on the wire for backwards-compat but
+  // every reply is now private to the asking vendor; UI no longer surfaces it.
+  visibility?: 'PRIVATE_TO_VENDOR' | 'GENERAL_PUBLIC';
   repliedAt: string;
   repliedByName?: string;
 }
@@ -60,7 +62,6 @@ interface ClarificationListResponse {
 
 type ClarificationTab = 'ALL' | 'OPEN' | 'ANSWERED';
 type SortOrder = 'NEWEST' | 'OLDEST';
-type ReplyVisibility = 'PRIVATE_TO_VENDOR' | 'GENERAL_PUBLIC';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -126,7 +127,6 @@ interface ThreadCardProps {
 
 function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }: ThreadCardProps) {
   const [reply, setReply] = useState('');
-  const [visibility, setVisibility] = useState<ReplyVisibility>('PRIVATE_TO_VENDOR');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -142,11 +142,8 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
     setSubmitError(null);
     try {
       const token = getAccessToken();
-      await post(
-        `/clarifications/${clarification.id}/reply`,
-        { reply, isPublic: visibility === 'GENERAL_PUBLIC' },
-        token,
-      );
+      // BUG-145 (2026-06-19): every reply is private to the asking vendor.
+      await post(`/clarifications/${clarification.id}/reply`, { reply }, token);
       setReply('');
       onReplied();
     } catch (err) {
@@ -172,11 +169,8 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-0.5">
                 <span className="text-sm font-semibold text-text-primary">{vendorLabel}</span>
-                {clarification.replies.some(r => r.visibility === 'GENERAL_PUBLIC') ? (
-                  <Globe className="w-3.5 h-3.5 text-text-secondary" aria-label="Public reply" />
-                ) : (
-                  <Lock className="w-3.5 h-3.5 text-text-secondary" aria-label="Private" />
-                )}
+                {/* BUG-145 (2026-06-19): every reply is private; the public-vs-private chip is no longer meaningful. */}
+                <Lock className="w-3.5 h-3.5 text-text-secondary" aria-label="Private" />
               </div>
               <p className="text-sm text-text-secondary truncate">{clarification.question}</p>
             </div>
@@ -238,16 +232,10 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
                 <span className="text-xs font-semibold text-text-primary">
                   {r.repliedByName ?? 'Procurement Officer'}
                 </span>
-                <span className={`ml-auto flex items-center gap-1 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
-                  r.visibility === 'GENERAL_PUBLIC'
-                    ? 'bg-accent/10 text-accent'
-                    : 'bg-border text-text-secondary'
-                }`}>
-                  {r.visibility === 'GENERAL_PUBLIC'
-                    ? <Globe className="w-2.5 h-2.5" />
-                    : <Lock className="w-2.5 h-2.5" />
-                  }
-                  {r.visibility === 'GENERAL_PUBLIC' ? 'Public' : 'Private'}
+                {/* BUG-145 (2026-06-19): every reply is private to the asking vendor. */}
+                <span className="ml-auto flex items-center gap-1 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-border text-text-secondary">
+                  <Lock className="w-2.5 h-2.5" />
+                  Private
                 </span>
               </div>
               <p className="text-sm text-text-secondary leading-relaxed">{r.reply}</p>
@@ -274,39 +262,10 @@ function ThreadCard({ clarification, isExpanded, onToggle, tenderId, onReplied }
             <p className="text-xs text-danger mb-3">{submitError}</p>
           )}
           <div className="flex items-center justify-between flex-wrap gap-3">
-            {/* Visibility toggle */}
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Visibility:</span>
-              <div className="flex bg-bg rounded-lg p-0.5 border border-border">
-                <button
-                  type="button"
-                  onClick={() => setVisibility('PRIVATE_TO_VENDOR')}
-                  className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
-                    visibility === 'PRIVATE_TO_VENDOR'
-                      ? 'bg-card shadow-sm text-text-primary'
-                      : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                >
-                  <span className="flex items-center gap-1">
-                    <Lock className="w-3 h-3" />
-                    Private
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setVisibility('GENERAL_PUBLIC')}
-                  className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
-                    visibility === 'GENERAL_PUBLIC'
-                      ? 'bg-accent text-white shadow-sm'
-                      : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                >
-                  <span className="flex items-center gap-1">
-                    <Globe className="w-3 h-3" />
-                    Public
-                  </span>
-                </button>
-              </div>
+            {/* BUG-145 (2026-06-19): every reply is private to the asking vendor; no toggle. */}
+            <div className="flex items-center gap-2 text-xs text-text-secondary">
+              <Lock className="w-3.5 h-3.5" />
+              <span>Replies are private to the asking vendor.</span>
             </div>
             {/* Submit buttons */}
             <div className="flex gap-2">

@@ -7,6 +7,8 @@ import { PrismaService } from '../../database/prisma.service';
 import { CaptchaService } from '../../common/services/captcha.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
+import { SystemSettingsService } from '../system-settings/system-settings.service';
+import { VendorDocumentStorageService } from '../vendors/vendor-document-storage.service';
 
 // ------------------------------------------------------------------
 // Mock bcrypt
@@ -114,6 +116,10 @@ const configMock = {
 const captchaMock = { validate: jest.fn() };
 const notificationsMock = { sendEmail: jest.fn() };
 const auditMock = { log: jest.fn() };
+// BUG-137 added these constructor deps but the test fixture didn't follow.
+// BUG-144 unblocks the suite by mocking them.
+const settingsMock = { resolveSmtpConfig: jest.fn() };
+const docStorageMock = { write: jest.fn() };
 
 // ------------------------------------------------------------------
 // Suite
@@ -140,6 +146,8 @@ describe('VendorAuthService', () => {
         { provide: CaptchaService, useValue: captchaMock },
         { provide: NotificationsService, useValue: notificationsMock },
         { provide: AuditService, useValue: auditMock },
+        { provide: SystemSettingsService, useValue: settingsMock },
+        { provide: VendorDocumentStorageService, useValue: docStorageMock },
       ],
     }).compile();
 
@@ -155,6 +163,12 @@ describe('VendorAuthService', () => {
       email: 'new@acme.test',
       password: 'CorrectHorseBatteryStaple',
       captchaToken: 'valid-token',
+      // BUG-137 (2026-06-19) + BUG-138 (2026-06-19): only COMMERCIAL_LICENSE
+      // is required after the slot-list trim. Test fixture pre-populates the
+      // pending-document map (see beforeEach) so it resolves.
+      documents: [
+        { type: 'COMMERCIAL_LICENSE', documentId: 'doc-cl-id' },
+      ],
     };
     const ctx = { ipAddress: '10.0.0.1', userAgent: 'test-agent' };
 
@@ -165,6 +179,22 @@ describe('VendorAuthService', () => {
       prismaMock.vendorRegistrationRequest.create.mockResolvedValue({ id: 'reg-id' });
       prismaMock.vendorEmailVerificationToken.create.mockResolvedValue({ id: 'tok-id' });
       (prismaMock as any).vendorUser.create = jest.fn().mockResolvedValue(baseVendorUser);
+      (prismaMock as any).vendorDocument = { create: jest.fn().mockResolvedValue({}) };
+
+      // BUG-137: pre-populate the static pending-document map so the docs
+      // referenced in `dto.documents` resolve in the register() service.
+      const map = (require('./vendor-auth.service').VendorAuthService as any).pendingDocs as Map<string, any>;
+      map.clear();
+      map.set('doc-cl-id', {
+        documentId: 'doc-cl-id', storageKey: 'pending/doc-cl-id-file.pdf',
+        originalFilename: 'CL.pdf', fileSize: 1234, checksumSha256: 'a'.repeat(64),
+        uploadedAt: Date.now(),
+      });
+      map.set('doc-id-id', {
+        documentId: 'doc-id-id', storageKey: 'pending/doc-id-id-file.pdf',
+        originalFilename: 'ID.pdf', fileSize: 5678, checksumSha256: 'b'.repeat(64),
+        uploadedAt: Date.now(),
+      });
     });
 
     it('returns registrationId and PENDING_VERIFICATION status on success', async () => {

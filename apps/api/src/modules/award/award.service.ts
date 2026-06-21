@@ -167,22 +167,119 @@ export class AwardService {
   }
 
   // -------------------------------------------------------------------------
-  // Phase D: server-side lowest-PASS detection (mirrors ComparisonService logic)
+  // BUG-133 (2026-06-14): canonical "what did we award this bid at?" price.
+  // Same priority chain as computeLowestPassBidId so the value persisted to
+  // tender.awarded_amount matches what the comparison surface showed at
+  // award time. Returns null when no source has a price.
+  //
+  // Priority (highest first):
+  //   1. Latest negotiation submission's totalPrice
+  //   2. BoQ-derived total = Σ(unit_price × qty) over BIDDING rows
+  //   3. Manual CommercialEvaluation totalPrice (average across rows; legacy)
+  // -------------------------------------------------------------------------
+  async resolveBidWinningPrice(bidId: string): Promise<number | null> {
+    const bid = await this.prisma.bid.findUnique({
+      where: { id: bidId },
+      include: {
+        commercialEvaluations: { select: { totalPrice: true } },
+        bidBoqItems: {
+          include: { tenderBoqItem: { select: { qty: true } } },
+        },
+        negotiationInvitations: {
+          select: {
+            round: { select: { roundNumber: true } },
+            submission: { select: { totalPrice: true } },
+          },
+        },
+      },
+    });
+    if (!bid) return null;
+
+    // 1. Latest negotiation submission.
+    const submitted = bid.negotiationInvitations
+      .filter((i: any) => i.submission?.totalPrice != null)
+      .sort((a: any, b: any) => b.round.roundNumber - a.round.roundNumber);
+    if (submitted.length > 0) return Number(submitted[0].submission!.totalPrice);
+
+    // 2. BoQ-driven total (BIDDING rows × qty).
+    const biddingLines = bid.bidBoqItems.filter(
+      (i: any) => i.status === 'BIDDING' && i.unitPrice != null,
+    );
+    if (biddingLines.length > 0) {
+      return biddingLines.reduce(
+        (s: number, i: any) => s + Number(i.unitPrice) * Number(i.tenderBoqItem.qty),
+        0,
+      );
+    }
+
+    // 3. Average of CommercialEvaluation totals (legacy / manual entry).
+    const prices = bid.commercialEvaluations
+      .map(e => (e.totalPrice != null ? Number(e.totalPrice) : null))
+      .filter((v): v is number => typeof v === 'number');
+    if (prices.length > 0) {
+      return prices.reduce((s, v) => s + v, 0) / prices.length;
+    }
+
+    return null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase D: server-side lowest-PASS detection (mirrors ComparisonService).
+  //
+  // BUG-091 (2026-06-02): when BUG-068 added BoQ-derived pricing, the comparison
+  // service started using `sum(unit_price * qty)` of BIDDING rows as the bid
+  // total when available, falling back to `commercialEvaluations.totalPrice`
+  // (manual entry) otherwise. The Confirm-award flow's lowest-PASS check stayed
+  // on manual-only, so any tender whose bids have BoQ entries but no manual
+  // entry returned `null` here and every Confirm with `isLowest=true` got
+  // rejected with "Client claimed isLowest but server-computed lowest-PASS bid
+  // differs." Owner hit this as EXECUTIVE on TDR-2026-0016 (2 PASS bids, both
+  // BoQ-only). Aligned to the comparison-service rule: BoQ trumps manual.
   // -------------------------------------------------------------------------
   private async computeLowestPassBidId(tenderId: string): Promise<string | null> {
     const bids = await this.prisma.bid.findMany({
       where: { tenderId, technicalResult: TechnicalResult.PASS },
-      include: { commercialEvaluations: { select: { totalPrice: true } } },
+      include: {
+        commercialEvaluations: { select: { totalPrice: true } },
+        bidBoqItems: {
+          include: { tenderBoqItem: { select: { qty: true } } },
+        },
+        // BUG-115 (2026-06-09): negotiation-latest takes precedence over BoQ
+        // and manual fallback when determining lowest-PASS for award.
+        negotiationInvitations: {
+          select: {
+            round: { select: { roundNumber: true } },
+            submission: { select: { totalPrice: true } },
+          },
+        },
+      },
     });
     const ranked = bids
       .map(b => {
+        // 1. Latest negotiation submission.
+        const submitted = (b as any).negotiationInvitations
+          .filter((i: any) => i.submission?.totalPrice != null)
+          .sort((a: any, c: any) => c.round.roundNumber - a.round.roundNumber);
+        const negotiated = submitted.length > 0 ? Number(submitted[0].submission.totalPrice) : null;
+        // 2. BoQ-driven total (BIDDING rows × qty).
+        const biddingLines = b.bidBoqItems.filter(
+          (i: any) => i.status === 'BIDDING' && i.unitPrice != null,
+        );
+        const boqTotal = biddingLines.length > 0
+          ? biddingLines.reduce(
+              (s: number, i: any) => s + Number(i.unitPrice) * Number(i.tenderBoqItem.qty),
+              0,
+            )
+          : null;
+        // 3. Manual fallback (BUG-053 path).
         const prices = b.commercialEvaluations
           .map(e => (e.totalPrice != null ? Number(e.totalPrice) : null))
           .filter((v): v is number => typeof v === 'number');
-        const avg = prices.length > 0
+        const manualAvg = prices.length > 0
           ? prices.reduce((s, v) => s + v, 0) / prices.length
           : null;
-        return { bidId: b.id, price: avg };
+        const price = negotiated != null ? negotiated : (boqTotal ?? manualAvg);
+        return { bidId: b.id, price };
       })
       .filter(b => b.price != null)
       .sort((a, b) => (a.price as number) - (b.price as number));
@@ -204,7 +301,9 @@ export class AwardService {
       TenderStatus.AWARD_RECOMMENDATION,
       TenderStatus.COMMITTEE_COMMERCIAL_OPENING,
     ];
-    if (!confirmableStatuses.includes(tender.status)) {
+    // BUG-115 (2026-06-09): NEGOTIATION is also a valid confirm-from state.
+    const confirmableWithNegotiation = [...confirmableStatuses, TenderStatus.NEGOTIATION];
+    if (!confirmableWithNegotiation.includes(tender.status)) {
       throw new BadRequestException(`Cannot Confirm award when tender is ${tender.status}`);
     }
 
@@ -231,16 +330,26 @@ export class AwardService {
       select: { id: true, vendorId: true, technicalResult: true },
     });
     if (!bid) throw new NotFoundException('Bid not found on this tender');
-    if (bid.technicalResult !== TechnicalResult.PASS) {
-      throw new BadRequestException('Only technically-PASS bids can be awarded.');
-    }
+
+    // BUG-094 (2026-06-02): owner directive — allow awarding a technically-FAIL
+    // vendor with text + PDF justification. Previously this threw outright.
+    // The master plan's PASS-only constraint was for the default path; the
+    // override path now extends to FAIL too. Same justification gates as a
+    // non-lowest pick: written rationale (min 20 chars per BUG-149) AND
+    // attached PDF.
+    const isFailBid = bid.technicalResult !== TechnicalResult.PASS;
 
     // Server re-verifies isLowest claim (client can't lie about it).
     const serverLowest = await this.computeLowestPassBidId(tenderId);
-    const isActuallyLowest = serverLowest === dto.bidId;
+    const isActuallyLowest = serverLowest === dto.bidId && !isFailBid;
     if (dto.isLowest && !isActuallyLowest) {
+      // FAIL bids can never be "lowest" because lowest-PASS excludes FAIL by
+      // definition. Refuse the lowest=true claim explicitly so the client
+      // takes the override path.
       throw new BadRequestException(
-        'Client claimed isLowest but server-computed lowest-PASS bid differs. Refresh and try again.',
+        isFailBid
+          ? 'Cannot award a technically-FAIL vendor as lowest-PASS. Set isLowest=false and provide justification.'
+          : 'Client claimed isLowest but server-computed lowest-PASS bid differs. Refresh and try again.',
       );
     }
 
@@ -249,25 +358,37 @@ export class AwardService {
     let justificationPdfFilename: string | null = null;
 
     if (!isActuallyLowest) {
-      // Override path: text + PDF required (master plan F2).
-      if (!dto.justificationText || dto.justificationText.trim().length < 100) {
-        throw new BadRequestException('Override award requires written justification (min 100 chars).');
-      }
-      if (!dto.justificationDocumentId) {
-        throw new BadRequestException('Override award requires an attached PDF justification.');
-      }
-      AwardService.gcPending();
-      const pending = AwardService.pendingJustifications.get(dto.justificationDocumentId);
-      if (!pending) {
+      // Override path: text justification required. BUG-095 (2026-06-02): PDF
+      // is now OPTIONAL per owner directive ("Please remove mandatory pdf
+      // upload, just keep it optional"). Text rationale remains mandatory.
+      // BUG-149 (2026-06-21): owner reduced min from 50 → 20 chars. Mirrors
+      // the DTO @MinLength(20) — both gates now agree.
+      if (!dto.justificationText || dto.justificationText.trim().length < 20) {
         throw new BadRequestException(
-          'Justification PDF reference is invalid or expired. Re-upload the PDF and try again.',
+          isFailBid
+            ? 'Awarding a technically-FAIL vendor requires written justification (min 20 chars).'
+            : 'Override award requires written justification (min 20 chars).',
         );
       }
-      justificationPdfStorageKey = pending.storageKey;
-      justificationPdfSha256 = pending.sha256;
-      justificationPdfFilename = pending.filename;
-      AwardService.pendingJustifications.delete(dto.justificationDocumentId);
+      if (dto.justificationDocumentId) {
+        AwardService.gcPending();
+        const pending = AwardService.pendingJustifications.get(dto.justificationDocumentId);
+        if (!pending) {
+          throw new BadRequestException(
+            'Justification PDF reference is invalid or expired. Re-upload the PDF and try again.',
+          );
+        }
+        justificationPdfStorageKey = pending.storageKey;
+        justificationPdfSha256 = pending.sha256;
+        justificationPdfFilename = pending.filename;
+        AwardService.pendingJustifications.delete(dto.justificationDocumentId);
+      }
     }
+
+    // BUG-133 (2026-06-14): resolve and persist the winning price on the
+    // tender so analytics doesn't have to recompute it. Read outside the
+    // transaction — the bid's price-source data is immutable at this point.
+    const awardedAmount = await this.resolveBidWinningPrice(bid.id);
 
     const award = await this.prisma.$transaction(async tx => {
       const created = await tx.award.create({
@@ -292,12 +413,21 @@ export class AwardService {
           status: TenderStatus.AWARDED,
           awardedVendorId: bid.vendorId,
           awardedAt: new Date(),
+          awardedAmount,
         },
       });
       // Mark winning bid as AWARDED. Other bids remain at their current status.
       await tx.bid.update({
         where: { id: bid.id },
         data: { status: BidStatus.AWARDED },
+      });
+      // BUG-115 (2026-06-09): auto-close any open negotiation round on award.
+      // The audit log entry is written by the outer scope (so the prisma
+      // transaction stays focused). audit.log runs outside the tx and is
+      // already best-effort in this codebase.
+      await tx.negotiationRound.updateMany({
+        where: { tenderId, closedAt: null },
+        data: { closedAt: new Date(), closedBy: userId, closeReason: 'Auto-closed by award confirmation.' },
       });
       return created;
     });
@@ -363,7 +493,8 @@ export class AwardService {
     });
     if (!tender) throw new NotFoundException('Tender not found');
 
-    const vendorPortalUrl = this.config.get<string>('vendor.portalUrl') ?? 'https://vn.hadiclinic.com.kw:4201';
+    // BUG-144 (2026-06-19): use the registered app.vendorPortalUrl key.
+    const vendorPortalUrl = this.config.get<string>('app.vendorPortalUrl') ?? '';
     const confirmedByUser = await this.prisma.user.findUnique({
       where: { id: award.confirmedBy },
       select: { displayName: true },
@@ -528,15 +659,26 @@ export class AwardService {
       throw new BadRequestException('New awarded bid must be technical PASS.');
     }
 
+    // BUG-114 (2026-06-09): PDF is now OPTIONAL per owner directive
+    // overriding master-plan §F7. When provided, the same 15-min
+    // pending-reference lookup runs; when omitted, no PDF columns
+    // are populated on the new Award row. Reason text remains mandatory
+    // (enforced by DTO @MinLength(100)).
     AwardService.gcPending();
-    const pending = AwardService.pendingJustifications.get(dto.justificationDocumentId);
-    if (!pending) {
-      throw new BadRequestException(
-        'Justification PDF reference is invalid or expired. Re-upload the PDF and try again.',
-      );
+    let pending: PendingJustification | undefined;
+    if (dto.justificationDocumentId) {
+      pending = AwardService.pendingJustifications.get(dto.justificationDocumentId);
+      if (!pending) {
+        throw new BadRequestException(
+          'Justification PDF reference is invalid or expired. Re-upload the PDF and try again.',
+        );
+      }
     }
 
-    // Amendments always carry justification text + PDF.
+    // BUG-133 (2026-06-14): persist the amended winning price.
+    const awardedAmount = await this.resolveBidWinningPrice(bid.id);
+
+    // Amendments always carry justification text; PDF optional (BUG-114).
     const result = await this.prisma.$transaction(async tx => {
       const newAward = await tx.award.create({
         data: {
@@ -545,9 +687,9 @@ export class AwardService {
           recommendedBidId: bid.id,
           isLowest: false, // amendments are by definition an override
           justificationText: dto.justificationText.trim(),
-          justificationPdfStorageKey: pending.storageKey,
-          justificationPdfSha256: pending.sha256,
-          justificationPdfFilename: pending.filename,
+          justificationPdfStorageKey: pending?.storageKey ?? null,
+          justificationPdfSha256: pending?.sha256 ?? null,
+          justificationPdfFilename: pending?.filename ?? null,
           notifyWinner: false,
           notifyLosers: false,
           confirmedBy: userId,
@@ -559,7 +701,7 @@ export class AwardService {
       });
       await tx.tender.update({
         where: { id: tenderId },
-        data: { awardedVendorId: bid.vendorId, awardedAt: new Date() },
+        data: { awardedVendorId: bid.vendorId, awardedAt: new Date(), awardedAmount },
       });
       await tx.bid.updateMany({
         where: { id: existingAward.recommendedBidId },
@@ -571,7 +713,10 @@ export class AwardService {
       });
       return newAward;
     });
-    AwardService.pendingJustifications.delete(dto.justificationDocumentId);
+    // BUG-114: only purge the pending reference when a PDF was actually used.
+    if (dto.justificationDocumentId) {
+      AwardService.pendingJustifications.delete(dto.justificationDocumentId);
+    }
 
     await this.audit.log({
       eventType: 'AWARD_AMENDED',
@@ -676,9 +821,21 @@ export class AwardService {
     }
 
     if (dto.approved) {
+      // BUG-133 (2026-06-14): persist the winning price. Look up the
+      // recommended bid via tender.awardedVendorId (set in recommend()).
+      let awardedAmount: number | null = null;
+      if (tender.awardedVendorId) {
+        const recommendedBid = await this.prisma.bid.findFirst({
+          where: { tenderId, vendorId: tender.awardedVendorId },
+          select: { id: true },
+        });
+        if (recommendedBid) {
+          awardedAmount = await this.resolveBidWinningPrice(recommendedBid.id);
+        }
+      }
       const updated = await this.prisma.tender.update({
         where: { id: tenderId },
-        data: { status: TenderStatus.AWARDED, awardedAt: new Date() },
+        data: { status: TenderStatus.AWARDED, awardedAt: new Date(), awardedAmount },
       });
       await this.audit.log({
         eventType: 'AWARD_APPROVED',

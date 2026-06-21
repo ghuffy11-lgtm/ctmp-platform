@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import HCaptcha from '@hcaptcha/react-hcaptcha';
-import { MailCheck } from 'lucide-react';
+import { MailCheck, Upload, FileText, X, Loader2 } from 'lucide-react';
 import { post } from '@/lib/api';
 import { AuthShell } from '@/components/layout/AuthShell';
 import { Input, Textarea } from '@/components/ui/Input';
@@ -13,12 +13,37 @@ import { ErrorBanner } from '@/components/ui/Empty';
 const HCAPTCHA_SITE_KEY =
   process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY ?? '10000000-ffff-ffff-ffff-000000000001';
 
+// BUG-137 (2026-06-19): vendor registration documents. Must match the backend
+// catalogue in apps/api/src/modules/vendor-auth/vendor-document-types.ts.
+interface VendorDocType {
+  code: string;
+  label: string;
+  required: boolean;
+  multi: boolean;
+  maxFiles?: number;
+}
+// BUG-138 (2026-06-19): trimmed to 3 slots per owner directive.
+const VENDOR_DOC_TYPES: VendorDocType[] = [
+  { code: 'COMMERCIAL_LICENSE',   label: 'Commercial License',         required: true,  multi: false },
+  { code: 'AUTHORISATION_LETTER', label: 'Authorisation Letter',       required: false, multi: false },
+  { code: 'OTHER',                label: 'Other supporting documents', required: false, multi: true, maxFiles: 5 },
+];
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+interface UploadedDoc {
+  documentId: string;
+  filename: string;
+  fileSize: number;
+}
+
 export default function VendorRegisterPage() {
+  // BUG-101 (2026-06-04): owner simplified the registration form — drop
+  // Registration Number / Tax Number / Country (collected later at approval if
+  // needed). Add Company Website.
   const [form, setForm] = useState({
     companyName: '',
-    registrationNumber: '',
-    taxNumber: '',
-    country: '',
+    website: '',
     address: '',
     phone: '',
     contactEmail: '',
@@ -32,9 +57,66 @@ export default function VendorRegisterPage() {
   const [loading, setLoading] = useState(false);
   const captchaRef = useRef<HCaptcha>(null);
 
+  // BUG-137 (2026-06-19): per-type uploaded documents. Each slot stores a
+  // list (multi types allow >1; non-multi keep length ≤1 by design).
+  const [docs, setDocs] = useState<Record<string, UploadedDoc[]>>({});
+  const [docUploading, setDocUploading] = useState<Record<string, boolean>>({});
+
   function update<K extends keyof typeof form>(key: K, value: string) {
     setForm(prev => ({ ...prev, [key]: value }));
   }
+
+  async function handleDocFile(typeCode: string, file: File) {
+    if (file.type !== 'application/pdf') {
+      setError('Only PDF files are accepted.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File exceeds 10 MB limit.');
+      return;
+    }
+    setError(null);
+    setDocUploading(prev => ({ ...prev, [typeCode]: true }));
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch(`${API_BASE}/api/v1/vendor-auth/registration-documents/upload`, {
+        method: 'POST',
+        body,
+      });
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+      const data = await res.json();
+      const uploaded: UploadedDoc = {
+        documentId: data.documentId,
+        filename: data.filename,
+        fileSize: data.fileSize,
+      };
+      setDocs(prev => {
+        const cur = prev[typeCode] ?? [];
+        const typeDef = VENDOR_DOC_TYPES.find(t => t.code === typeCode);
+        if (typeDef?.multi) {
+          return { ...prev, [typeCode]: [...cur, uploaded] };
+        }
+        return { ...prev, [typeCode]: [uploaded] };
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setDocUploading(prev => ({ ...prev, [typeCode]: false }));
+    }
+  }
+
+  function removeDoc(typeCode: string, documentId: string) {
+    setDocs(prev => ({
+      ...prev,
+      [typeCode]: (prev[typeCode] ?? []).filter(d => d.documentId !== documentId),
+    }));
+  }
+
+  // BUG-137: submit is disabled until every required slot has at least one
+  // uploaded file.
+  const requiredDocsMissing = VENDOR_DOC_TYPES.filter(t => t.required && !(docs[t.code]?.length));
+  const canSubmit = requiredDocsMissing.length === 0 && captchaToken.trim().length > 0 && !loading;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,19 +124,26 @@ export default function VendorRegisterPage() {
       setError('Complete the CAPTCHA before submitting');
       return;
     }
+    if (requiredDocsMissing.length > 0) {
+      setError(`Upload required documents: ${requiredDocsMissing.map(t => t.label).join(', ')}`);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
+      // BUG-137 (2026-06-19): pack uploaded docs into the register payload.
+      const documents = Object.entries(docs).flatMap(([type, list]) =>
+        list.map(d => ({ type, documentId: d.documentId })),
+      );
       await post('/vendor-auth/register', {
         companyName: form.companyName,
-        registrationNumber: form.registrationNumber || undefined,
-        taxNumber: form.taxNumber || undefined,
-        country: form.country || undefined,
+        website: form.website || undefined,
         address: form.address || undefined,
         phone: form.phone || undefined,
         email: form.contactEmail,
         password: form.password,
         captchaToken,
+        documents,
       });
       setSuccess(true);
     } catch (err) {
@@ -103,21 +192,11 @@ export default function VendorRegisterPage() {
             required
           />
           <Input
-            label="Registration Number"
-            value={form.registrationNumber}
-            onChange={e => update('registrationNumber', e.target.value)}
-          />
-          <Input
-            label="Tax Number"
-            value={form.taxNumber}
-            onChange={e => update('taxNumber', e.target.value)}
-          />
-          <Input
-            label="Country"
-            value={form.country}
-            onChange={e => update('country', e.target.value)}
-            maxLength={2}
-            placeholder="KW"
+            label="Company Website"
+            type="url"
+            value={form.website}
+            onChange={e => update('website', e.target.value)}
+            placeholder="https://www.example.com"
           />
           <Input
             label="Phone"
@@ -167,6 +246,79 @@ export default function VendorRegisterPage() {
           />
         </Section>
 
+        {/* BUG-137 (2026-06-19): registration documents. Owner needs Commercial
+            License + Authorised Representative ID before approval. Other types
+            are optional. */}
+        <Section title="Required Documents">
+          <div className="md:col-span-2 space-y-3">
+            <p className="text-[11px] text-slate-900/60 leading-relaxed">
+              Upload PDF copies of your company documents. Only PDF files up to 10 MB are accepted.
+              Documents are reviewed by procurement before your account is approved.
+            </p>
+            {VENDOR_DOC_TYPES.map(t => {
+              const uploaded = docs[t.code] ?? [];
+              const uploading = !!docUploading[t.code];
+              const canAddMore = t.multi
+                ? uploaded.length < (t.maxFiles ?? 5)
+                : uploaded.length === 0;
+              return (
+                <div key={t.code} className="border border-slate-900/15 rounded-xl p-4 bg-white">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {t.label}{' '}
+                      {t.required ? (
+                        <span className="text-[10px] uppercase font-bold text-rose-600 ml-1">Required</span>
+                      ) : (
+                        <span className="text-[10px] uppercase font-semibold text-slate-500 ml-1">Optional</span>
+                      )}
+                    </p>
+                    {canAddMore && (
+                      <label className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-900/20 hover:bg-slate-100 cursor-pointer">
+                        {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                        {uploading ? 'Uploading…' : (t.multi && uploaded.length > 0 ? 'Add another' : 'Upload PDF')}
+                        <input
+                          type="file"
+                          accept="application/pdf,.pdf"
+                          className="hidden"
+                          disabled={uploading}
+                          onChange={e => {
+                            const f = e.target.files?.[0];
+                            if (f) handleDocFile(t.code, f);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  {uploaded.length === 0 ? (
+                    <p className="text-[11px] text-slate-500 italic">No file uploaded yet.</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {uploaded.map(d => (
+                        <li key={d.documentId} className="flex items-center justify-between text-xs bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
+                          <span className="flex items-center gap-1.5 truncate">
+                            <FileText className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                            <span className="truncate text-slate-900">{d.filename}</span>
+                            <span className="text-slate-500 ml-1">({(d.fileSize / 1024).toFixed(0)} KB)</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeDoc(t.code, d.documentId)}
+                            className="text-slate-500 hover:text-rose-600 p-0.5"
+                            aria-label="Remove"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-900/55 mb-4">
             Verify you are human
@@ -195,7 +347,7 @@ export default function VendorRegisterPage() {
               Cancel
             </Button>
           </Link>
-          <Button type="submit" size="md" disabled={loading}>
+          <Button type="submit" size="md" disabled={!canSubmit}>
             {loading ? 'Submitting…' : 'Submit Registration'}
           </Button>
         </div>
