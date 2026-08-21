@@ -36,8 +36,9 @@ Do this in the same turn as the work, not "later". Alongside it:
 - **Decisions** (a chosen approach, a rejected alternative, a constraint discovered) go to
   `docs/decisions/DECISION_LOG.md`, newest at the top.
 - **Every completed or blocked task** gets an entry in `agents/handoffs/HANDOVER.md`, newest first.
-  This repository has **no `.git` directory** — the handover log *is* the change history. Nothing
-  else records what happened.
+  Git records *what* changed; the handover records *why*, what was verified, and how to roll it
+  back. Both are needed.
+- **Commit and push the work in the same turn.** See § Version control below.
 - **Task status** updates in `agents/backlog/MASTER_TASK_TRACKER.md`.
 
 ---
@@ -107,6 +108,40 @@ The full list is in `docs/AI_DECISION_LOG.md` §1. The ones most easily broken b
 
 ---
 
+## Version control
+
+The repository is under git and synced to GitHub. Before 2026-08-21 it was not, and the working
+tree had drifted two months ahead of the remote — do not let that recur.
+
+| | |
+|---|---|
+| Remote | `github.com/ghuffy11-lgtm/ctmp-platform` |
+| Branch | `main` — the only branch; `master` and `develop` were retired on 2026-08-21 |
+| Author | `HadiClinic IT <it@hadiclinic.com.kw>` (repo-local config) |
+
+**Commit as you go.** A change that is deployed but uncommitted is invisible to everyone else, and
+the box is no longer the only copy. Push to `main` when the work is done and verified.
+
+**Two quirks of this machine:**
+
+- Repository files are owned by `claude` while shells run as `root`, so git refuses with *"detected
+  dubious ownership"* until the exception exists. It is already set; if it is ever lost:
+  `git config --global --add safe.directory /mnt/repo/ctmp-platform`
+- `gh` tokens on this box have expired before. `gh auth login -h github.com` is an interactive
+  device-code flow, so **the owner has to run it** — you cannot complete it for them.
+
+**Never commit secrets.** `.gitignore` covers `.env`, `.env.local`, `.env.bak*`, `*.tsbuildinfo`,
+`node_modules`, `.next` and `dist`. Only `.env.example` templates belong in the repository. Check
+`git diff --cached --name-only` before committing if anything under `infrastructure/docker/` is
+involved.
+
+**History is not a backup of the build box, and the box is not a superset of history.** The
+2026-08-21 sync found 39 files that existed only in git, including migration `008` and an
+audit-chain RCA. They were deleted on the owner's instruction and remain recoverable at `b37170f`.
+Do not assume either side is complete — check.
+
+---
+
 ## Where everything lives
 
 | Need | File |
@@ -116,7 +151,7 @@ The full list is in `docs/AI_DECISION_LOG.md` §1. The ones most easily broken b
 | Tables, columns, FKs, dev/prod drift | `docs/DATABASE_SCHEMA.md` |
 | Decisions, refactors, do-not-touch | `docs/AI_DECISION_LOG.md` |
 | Full decision records | `docs/decisions/DECISION_LOG.md` |
-| Change history (no git here) | `agents/handoffs/HANDOVER.md` |
+| Why a change was made, and how to roll it back | `agents/handoffs/HANDOVER.md` |
 | Task tracker | `agents/backlog/MASTER_TASK_TRACKER.md` |
 | Agent ownership + guardrails | `AGENTS.md` |
 | Production operations, deploy | `docs/runbooks/` |

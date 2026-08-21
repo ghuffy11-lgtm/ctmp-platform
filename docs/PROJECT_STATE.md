@@ -21,6 +21,24 @@ same day by two owner-reported fixes to the Arabic screens.
 
 ---
 
+## Version control
+
+**Under git and synced to GitHub since 2026-08-21.** Before that the repository was not a git
+working copy at all and the build box was the only copy of the codebase.
+
+| | |
+|---|---|
+| Remote | `github.com/ghuffy11-lgtm/ctmp-platform` |
+| Branch | `main` — the only branch. `master` (stale since 2026-05-17) and `develop` were deleted on 2026-08-21; both were fully contained in `main`, so no commit was lost |
+| Sync commit | `d9c647b` — 173 files, +16,060 / −20,289, covering 2026-06-22 → 2026-08-21 |
+
+The sync deleted 39 files that existed only in git — including migration
+`008_audit_chain_rebake_2026-05-23.sql`, its repair script, an audit-chain RCA and three Playwright
+specs — on the owner's instruction, taking the build box as source of truth. All remain recoverable
+at commit `b37170f`.
+
+---
+
 ## Deployment state
 
 | Environment | URL | Schema | Images |

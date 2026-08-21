@@ -6,6 +6,51 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-21 — Repository put under git and synced to GitHub
+
+**Date/time:** 2026-08-21
+
+The build box was never a git working copy. Two months of production work existed only on this
+machine and inside the running containers.
+
+**What was found on the remote:** `master` (16 commits, stale since 2026-05-17) and `develop`
+(120 commits, tip 2026-06-22). `develop` fully contained `master`. The working tree differed from
+`develop` by 173 files.
+
+**Critically, the box was not a superset of git.** 39 files existed only on the remote, including
+`database/migrations/008_audit_chain_rebake_2026-05-23.sql`, `apps/api/scripts/rebake-audit-chain.js`,
+`agents/reviews/AUDIT_CHAIN_BREAK_RCA_2026-05-23.md` and three Playwright specs (1,160 lines). The
+owner chose to take the build box as source of truth, so those were deleted in the sync commit.
+They remain recoverable at `b37170f`.
+
+**Two documentation errors this exposed, both corrected:**
+- `docs/DATABASE_SCHEMA.md` claimed migrations `008` and `040` "never existed". `040` never did;
+  **`008` did** — a deliberate documentation-only no-op marker. Fixed.
+- The provenance note on `docs/specs/IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md` listed several
+  files as "never created" which were in fact in git. Root cause of both: the August audit examined
+  only the build box and treated it as the whole truth.
+
+**Sequence:**
+1. `git init`, remote added, `.gitignore` extended with `*.tsbuildinfo`.
+2. Dry-run of the staged set through a throwaway git dir outside the repo — confirmed no `.env`,
+   no `.env.bak*`, no keys, no `node_modules`.
+3. `git reset --mixed origin/develop` to layer the working tree on real history without touching a
+   single file. **Never force-pushed.**
+4. Commit `d9c647b` pushed to `develop`.
+5. `main` created at the same commit, set as GitHub default, then `master` and `develop` deleted —
+   both verified as ancestors of `main` first, so no commit was orphaned.
+
+**Result:** one branch, `main`, local and remote identical, working tree clean.
+
+**`CLAUDE.md` updated** — it previously told every session "this repository has no `.git` directory
+— the handover log *is* the change history", which is now false and would have been actively
+misleading. Replaced with a § Version control section: commit as you go, the `safe.directory` quirk
+(files owned by `claude`, shells run as `root`), the fact that `gh auth login` is interactive and
+only the owner can complete it, and the warning that neither the box nor git history is a superset
+of the other.
+
+---
+
 ## 2026-08-21 — System architecture diagrams added to `docs/ARCHITECTURE.md`
 
 **Date/time:** 2026-08-21
