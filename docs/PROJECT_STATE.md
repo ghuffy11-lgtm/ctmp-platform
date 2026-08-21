@@ -109,6 +109,7 @@ Deployed together: migrations `054` + `055` and all three images.
 | **Money precision** — `tenders.awarded_amount`, `tenders.budget_estimate`, `commercial_evaluations.total_price` widened `numeric(15,2)` → `numeric(16,3)` so contract values hold fils. Applied to production while it still had **zero tenders**, so no value was ever rounded in production | migration `055` |
 | **Arabic KPI tiles no longer link into English** — `interactive` was accepted but never read by three components, so `interactive={false}` had been silently ignored since 2026-08-13. Gated every outbound link; verified by counting anchors per page **and per tab** | `ctmp-web-admin:prod-20260821b` |
 | **Arabic month names + a missed `Status` header** — Arabic dates read `21 May 2026`; now `21 مايو 2026` using the Gulf month set the dashboard already used. English still formats via `toLocaleDateString` so it cannot drift | `ctmp-web-admin:prod-20260821c` |
+| **`VendorDirectory`'s dead `interactive` prop removed** — it was accepted and never read. Removing it rather than wiring it: all three links there are label-driven and every target has an Arabic version, so gating them would have *removed* working navigation. The compiler then caught the English route still passing the prop — which an inert prop would have hidden | `ctmp-web-admin:prod-20260821d` |
 
 **Owner's position on the two Arabic follow-ups (2026-08-21):** the wording is accepted as-is and
 changes will be raised as needed; the Arabic names will be entered by the owner directly and are not
@@ -154,13 +155,6 @@ Still outstanding from before, unrelated to the Arabic work:
 
 ### Known gaps and deliberate non-features
 
-- **`VendorDirectory` still accepts an `interactive` prop it never reads.** Audited 2026-08-21:
-  the prop is mentioned twice (destructure + type) and used in no logic. Nothing leaks today because
-  every link in that component is label-driven (`labels.profileHrefBase`, `labels.dashboardHref`),
-  so the Arabic page already links to Arabic targets. But this is the *exact* defect that made KPI
-  tiles navigate to English for eight days unnoticed. Either wire it or delete it — do not leave a
-  prop that lies about what it does. `ExecutiveDashboard`, `DepartmentOverview`, `DepartmentProfile`
-  and `VendorProfile` all read it correctly as of 2026-08-21.
 - **There is no scheduler.** Nothing auto-transitions a tender when its deadline passes. The
   deadline filter hides expired tenders from vendors, but an admin still closes tenders by hand.
   This is the single biggest "looks broken but isn't" item for a newcomer.

@@ -11,5 +11,5 @@ import { VendorDirectory } from '@/components/executive/VendorDirectory';
 import { VENDOR_DIR_EN } from '@/components/executive/labels';
 
 export default function VendorDirectoryPage() {
-  return <VendorDirectory labels={VENDOR_DIR_EN} dir="ltr" interactive />;
+  return <VendorDirectory labels={VENDOR_DIR_EN} dir="ltr" />;
 }

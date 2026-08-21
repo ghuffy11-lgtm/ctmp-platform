@@ -6,6 +6,35 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-21 — `VendorDirectory`'s dead `interactive` prop removed (PROD)
+
+**Date/time:** 2026-08-21
+
+Last of the four components carrying the defect that made Arabic KPI tiles navigate to English for
+eight days: a prop that is accepted and never read.
+
+**Removed rather than wired up.** All three links in `VendorDirectory` are label-driven
+(`labels.dashboardHref`, `labels.profileHrefBase`) and resolve to `/executive-ar/*` in Arabic. Every
+target has an Arabic version, so Arabic rows already open the Arabic vendor profile correctly.
+Gating them on `interactive` would have **removed working navigation**, not fixed anything. The prop
+was vestigial — a comment now records why it is absent and what to do if an English-only link is
+ever added here.
+
+**The removal immediately paid for itself:** the build failed because
+`app/(admin)/executive/vendors/page.tsx` was still passing `interactive`. An inert prop accepts that
+silently; a removed one makes the compiler say so. Fixed in the same change.
+
+**Verified on dev by counting anchors, before and after:** Arabic 39 links, rows → 
+`/executive-ar/vendors/[id]`, one deliberate "English" escape hatch — identical to before, which is
+the correct outcome for removing a no-op. English 40 links with all 36 drill-downs intact.
+
+**Deployed:** dev then production, `ctmp-web-admin:prod-20260821d`. web-admin only — no migration,
+no API change, no vendor image. Rollback: `ctmp-web-admin:rollback-20260821`.
+
+Closes the last open item under Known gaps in `docs/PROJECT_STATE.md`.
+
+---
+
 ## 2026-08-21 — Repository put under git and synced to GitHub
 
 **Date/time:** 2026-08-21

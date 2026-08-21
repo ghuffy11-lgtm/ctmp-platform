@@ -92,15 +92,21 @@ function fmtPct(v: number): string {
 
 // 2026-08-13: parameterised so /executive-ar/vendors renders the same
 // implementation in Arabic. English defaults reproduce the previous behaviour.
+// This component deliberately has NO `interactive` prop, unlike its siblings.
+// It used to accept one and never read it — a switch wired to nothing — which is
+// the same fault that let Arabic KPI tiles navigate to English pages unnoticed
+// for eight days (see HANDOVER 2026-08-21). It is not needed here: all three
+// links below are label-driven (`labels.dashboardHref`, `labels.profileHrefBase`)
+// and every target has an Arabic equivalent, so Arabic rows correctly open the
+// Arabic vendor profile. Gating them would REMOVE working navigation. If a link
+// to an English-only screen is ever added here, add the prop back and actually
+// read it — do not re-add a prop that does nothing.
 export function VendorDirectory({
   labels,
   dir = 'ltr',
-  interactive = true,
 }: {
   labels: VendorDirLabels;
   dir?: 'ltr' | 'rtl';
-  /** false in Arabic: the per-vendor profile page is English-only for now. */
-  interactive?: boolean;
 }) {
   const currentYear = new Date().getFullYear();
   const [q, setQ] = useState('');
