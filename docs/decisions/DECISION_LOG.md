@@ -18,463 +18,69 @@ Related files:
 
 ## Decisions
 
-### 2026-05-30 — Locked walkthrough resolution sequence + per-theme commit cadence
+### 2026-08-21 - Money columns widened to numeric(16,3); KWD carries fils
 
-Date: 2026-05-30
-Decision: Lock a per-theme commit cadence + an impact-first sequence for clearing the 2026-05-29 walkthrough tracker. Hold Theme 3 (WALK-053 + WALK-055) until every other 🔴 / 🟡 item reaches a terminal status.
+Decision:
 
-Context: After Themes 1 and 2 of the post-Confirm refinement work shipped (BUG-052..055), the WALKTHROUGH_TRACKER_2026-05-29.md still carried ~39 open items spread across 11 themes. Owner directive: "lets start fixing all the issues which we documented in WALKTHROUGH_TRACKER_2026-05-29 file, let theme 3 to be after we finish all these issues." Sequence + cadence had to be locked once to avoid per-theme negotiation overhead.
+`tenders.awarded_amount`, `tenders.budget_estimate` and `commercial_evaluations.total_price` were
+widened from `numeric(15,2)` to `numeric(16,3)`. Migration `055`.
+
+Context:
+
+The Kuwaiti Dinar has three decimal places (1 KWD = 1000 fils). BoQ quantities, bid line prices and
+negotiation totals were already `numeric(15,3)`, but the three columns those feed into were
+`numeric(15,2)`. PostgreSQL rounds to nearest on write, silently — so a bid line of `29.998` was
+recorded as a `30.00` contract, and a computed total of `84317.499` as `84317.50`. The error could
+fall either side of the true figure, up to 5 fils, and the Award Minutes PDF printed the rounded
+value as the contract value.
+
+Found during the 2026-08-21 documentation audit, not by a bug report: no award had yet landed on a
+fils value, so nothing stored had actually been damaged. One BoQ line on dev already carried fils
+(`29.998` on `TDR-2026-0025`, not yet awarded).
 
 Options considered:
-  - Strict tracker order (A → B → C → … → J) → rejected: walks the easier items first while critical infrastructure (broken tabs across 3 roles, broken scorecard re-load) waits.
-  - One BUG-NNN per WALK item → rejected: 39 commits across many sessions; high process overhead; longer time-to-first-deploy.
-  - Looser cluster commits (one BUG per 3 themes) → rejected: harder to roll back a single piece if something breaks.
+
+- **Leave it.** Defensible while every award is a round figure, but the failure is silent and by the
+  time it is noticed the affected awards are historical.
+- **Round explicitly in the API** so the behaviour is at least intentional and visible in code.
+  Rejected: it makes the wrong answer official and still leaves CTMP unable to record a contract in
+  fils.
+- **Widen the columns.** Chosen — it was reversible-cost work *only* while no data had been lost.
 
 Outcome:
-  - **Sequence (highest impact + smallest scope risk first):** K (recover truncated WALK-027/028) → D (Tender detail broken tabs, cross-role) → F (Tech Evaluation polish, WALK-026 critical) → A (Dashboard perm gating) → B (Approval Queue) → C (Tender Create criteria cue) → G (Tech Comparison polish) → I (Committee Opening) → E (Vendor portal) → H (Admin role mgmt UI) → J (Shared filter/search, last so it absorbs requirements from all earlier list surfaces).
-  - **Cadence:** one `BUG-NNN` per theme. Hot patches that surface mid-theme attach to the theme's own commit unless owner explicitly splits them off.
-  - **Theme 3 hold:** WALK-053 (unified Tender Summary view) + WALK-055 (overall Phase D flow simplification) explicitly held until all other items close.
 
-Impact: 10 themes shipped end-to-end in one extended session as BUG-056..065 plus a hot-patch BUG-066 for the WALK-057 regression. All 39 captured WALK items (plus the post-verification WALK-056 and WALK-057) now reach ✅ or 🔵 status; only Theme 3 remains held.
-
-Related files:
-  - `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` (directive recorded at top, locked sequence + cadence)
-  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-056..066 entries)
-  - `agents/handoffs/HANDOVER.md` (per-theme handover entries)
-
-### 2026-05-30 — Cross-departmental committee + commercial-evaluator visibility (WALK-041 / BUG-062)
-
-Date: 2026-05-30
-Decision: Extend the BUG-050 / BUG-028 Part B dept-scoping filter so that users assigned to a committee session OR holding a commercial evaluation row for a given tender can read that tender regardless of department.
-
-Context: Owner walkthrough surfaced that committee members and commercial evaluators are operationally **cross-departmental** — a finance person on a committee for a tender outside their home department must still see it. BUG-050's dept filter (`where.departmentId IN [user.depts]`) treated committee/evaluator participation as identical to having no business with the tender at all, forcing the owner to manually re-assign departments as a workaround.
-
-Options considered:
-  - Grant `system:view_all_departments` to COMMERCIAL_COMMITTEE_MEMBER + COMMERCIAL_EVALUATOR → rejected: too blunt, defeats BUG-050 intent for non-committee work and leaks all org-wide tenders to evaluator-only users.
-  - Per-tender invitation list extending tender_vendors-style membership → rejected: duplicates the existing CommitteeMember + CommercialEvaluation tables.
-  - OR-merge an "assigned tenders" inclusion into the dept filter → accepted: small change, reuses authoritative tables.
-
-Outcome (in `apps/api/src/modules/tenders/tenders.service.ts`):
-  - `findAll` filter changed from `where.departmentId = { in: depts }` to `where.OR = [{departmentId in depts}, {committeeSessions has member}, {bids has commercialEvaluation by user}]`.
-  - `findOne` mirrors the same logic: if the dept check fails, look up committee membership + commercial evaluation before throwing NotFound.
-  - SYSTEM_ADMIN / AUDITOR / PROCUREMENT_ADMIN bypass via `system:view_all_departments` unchanged.
-
-Impact: Finance + committee members no longer need to be temporarily re-assigned to a tender's department to view it. Procurement compliance preserved: only ACTUAL committee/evaluator participation opens visibility, not blanket org-wide access.
-
-Related files:
-  - `apps/api/src/modules/tenders/tenders.service.ts`
-  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-062 entry)
-
-### 2026-05-30 — Per-tender audit permission split (WALK-011/015/022 / BUG-056)
-
-Date: 2026-05-30
-Decision: Introduce a narrower `tender:audit:view` permission for the per-tender audit endpoint, distinct from the system-wide `audit:view`.
-
-Context: The Audit Trail tab on the tender detail page (BUG-056) consumes `GET /tenders/:id/audit-logs`. That endpoint was gated on `audit:view`, which only SYSTEM_ADMIN and AUDITOR hold. Procurement / technical / committee staff working on a specific tender couldn't see its own audit history — only the global audit team could. Locked spec rule "Audit logs are append-only and cannot be edited through the application" doesn't require keeping them invisible to operators of the same tender.
-
-Options considered:
-  - Broaden `audit:view` to procurement roles → rejected: that perm also gates the system-wide audit search; broadening it leaks org-wide events.
-  - Drop the gate on the per-tender endpoint entirely → rejected: still want a perm seam so role design can selectively withdraw access (e.g. ex-employees keeping accounts but losing audit view).
-  - Add a narrower `tender:audit:view` perm → accepted.
-
-Outcome (Migration 018):
-  - New permission `tender:audit:view` seeded.
-  - Granted to: SYSTEM_ADMIN, AUDITOR, PROCUREMENT_ADMIN, PROCUREMENT_OFFICER, TECHNICAL_EVALUATOR, APPROVER, COMMERCIAL_EVALUATOR, COMMERCIAL_COMMITTEE_MEMBER (8 roles — everyone who touches a tender).
-  - `audit.controller.ts:getTenderLogs` switched gate from `audit:view` → `tender:audit:view`. System-wide `GET /audit-logs` stays on `audit:view`.
-  - token_version bumped on all 9 affected users.
-
-Impact: Tender Detail → Audit Trail tab works for all internal participants in the tender (officer/manager/engineer all verified 200 post-migration). System-wide audit access remains gated to SYSTEM_ADMIN + AUDITOR.
-
-Related files:
-  - `database/migrations/018_bug056_tender_audit_view_permission.sql`
-  - `apps/api/src/modules/audit/audit.controller.ts`
-  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-056 entry)
-
-### 2026-05-30 — Score normalisation display contract (BUG-061)
-
-Date: 2026-05-30
-Decision: Treat all stored evaluation scores as a 0–100 normalised percentage at the database layer, and scale to absolute units against `maxScore` at the display layer via a `toAbsolute()` helper.
-
-Context: Owner reported the Technical Comparison page showed values like "83.3 / 30" — the score exceeding the max (WALK-032/034). Root cause: backend stores both `overallScore` and per-criterion `score` rows normalised to 0–100 (per `evaluate()` in `technical-evaluation.service.ts`), but the display passed those numbers through `fmtScore(score, max)` as if they were absolute units. With criteria summing to less than 100 (e.g. 30), the display showed "83.3 / 30".
-
-Options considered:
-  - Convert stored values back to absolute on save → rejected: breaks per-criterion weighted-average computation in the backend; the normalised form is necessary for cross-criterion arithmetic.
-  - Display as percentage everywhere ("83.3 / 100") → rejected: owner expects to see absolute scoring units that match the criteria weights they configured.
-  - Add a `toAbsolute(normalised, max)` display helper → accepted: zero schema change, clear contract that "DB is %; display is absolute".
-
-Outcome:
-  - `VendorTechnicalCard.tsx` + `TechnicalMatrix.tsx` both gained a `toAbsolute(normalised, max) = (normalised/100) * max` helper.
-  - Applied to: card header consensus score (vs. `totalMaxScore`), per-evaluator overall score (vs. `totalMaxScore`), matrix per-criterion cells (vs. `c.maxScore`), matrix Total column (vs. `totalMaxScore`).
-
-Impact: Score columns now display in absolute units consistent with the configured weights (e.g. 25.0 / 30) regardless of whether criteria sum to 100 or to a smaller total.
-
-Related files:
-  - `apps/web-admin/src/components/comparison/VendorTechnicalCard.tsx`
-  - `apps/web-admin/src/components/comparison/TechnicalMatrix.tsx`
-  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-061 entry)
-
-### 2026-05-29 — Manual commercial-price entry on Commercial Comparison page (BUG-053)
-
-Date: 2026-05-29
-Decision: Add an inline commercial-total entry control on the Commercial Comparison page's per-vendor card. Authorised callers (any user holding `commercial:evaluate`) record the price manually for now. Auto-extract-from-PDF deferred as a future enhancement. Grant PROCUREMENT_ADMIN the three operational commercial perms (`commercial:view` / `:download` / `:evaluate`) so the procurement-team lead can prepare the comparison jointly with finance ahead of the chairman/committee award meeting.
-
-Context: Owner walking BUG-052 surfaced two gaps in the same breath. (1) The admin app never built a UI for the existing `POST /bids/:bidId/commercial-evaluations` endpoint — the backend module was live since Phase 9 but no page consumed it. So even after BUG-052 granted finance@/committee@ the `commercial:evaluate` perm, there was nowhere to *use* it. (2) After BUG-052 my reading of the locked separation-of-duties rule blocked PROCUREMENT_ADMIN from holding any `commercial:*` perm; owner pointed out that the spec rule names SYSTEM_ADMIN explicitly and procurement managers operationally drive the comparison ("in real life chairman is not going to sit and open the commercial, this is procurement manager and finance"). Both gaps surfaced as the workflow being "broken."
-
-Options considered:
-  - Build a separate `/commercial-evaluation` admin page → rejected: third workflow surface for what is fundamentally pre-comparison prep work; master plan already designates the Commercial Comparison page as the canonical commercial surface.
-  - Put the entry on the Committee Opening page (right after envelopes open) → rejected: chairman/committee role is to open the envelopes ceremonially, not type figures; that's procurement+finance prep work that needs to happen on the same page where the comparison lives.
-  - Ship auto-extract from PDF instead of manual entry → rejected by owner directly: "manual is fine as well … lets do manual first." Captured as a deferred enhancement in memory for a later session.
-  - Keep PROCUREMENT_ADMIN out of commercial perms per BUG-052 → rejected: misreads the spec, which separates SYSTEM_ADMIN, not the procurement lead, and contradicts the operational reality of the procurement function.
-
-Outcome: Migration 016 grants PROCUREMENT_ADMIN the three perms and bumps token_version on all PROCUREMENT_ADMIN holders. VendorComparisonCard gains a `CommercialTotalBlock` sub-component that replaces the Phase-F line-items placeholder: editable amount + Save when caller has `commercial:evaluate` and the envelope is OPENED; current value with Edit affordance once recorded; "Awaiting price entry" amber notice for non-evaluator viewers. Page wires `canEvaluate` from JWT and re-fetches comparison on Save so lowest-PASS auto-highlight fires immediately. Seed script mirrors migration 016. Memory file [[project-future-pdf-price-extraction]] captures the deferred auto-extract enhancement so a future session can pick it up.
-
-Impact: Phase D Confirm flow is exercisable end-to-end on a real tender. Manager and finance jointly prep the comparison; chairman/committee then review and award. End-to-end verified on TDR-2026-0013: manager@ entered 15,000 + 18,500 KWD, `priceCount` went 0→2, `lowestPassBidId` materialised pointing at the lower-priced vendor. admin@ correctly 403's on the same endpoint — spec separation-of-duties preserved for SYSTEM_ADMIN.
-
-Related files:
-  - `database/migrations/016_bug053_procurement_admin_commercial.sql` (NEW)
-  - `apps/web-admin/src/components/comparison/VendorComparisonCard.tsx` — CommercialTotalBlock sub-component
-  - `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` — canEvaluate state + onPriceSaved wiring
-  - `scripts/seed_walkthrough_users.sh` — mirrors 016
-  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-053)
-  - Memory: `project_future_pdf_price_extraction.md` (deferred auto-extract)
-
-### 2026-05-29 — Commercial-flow permission matrix locked (BUG-052)
-
-Date: 2026-05-29
-Decision: Lock the permission grants for the commercial-evaluation + commercial-comparison flow so that (a) SYSTEM_ADMIN has zero commercial visibility, (b) COMMERCIAL_COMMITTEE_MEMBER becomes a full participant who can view + download + enter prices + recommend, (c) COMMERCIAL_EVALUATOR stays as a peer role for outside specialists, and (d) PROCUREMENT_ADMIN remains the sole Confirm authority.
-
-Context: Owner's walkthrough as `finance@` (COMMERCIAL_COMMITTEE_MEMBER) hit a chain of perm errors: the sidebar entry for `/commercial-comparison` did not render (sidebar gates on legacy `commercial:view`, finance had only the new `comparison:commercial:view`); after typing the URL directly, expanding any vendor card returned a 403 "commercial:view permission required" from the bid-documents endpoint; no lowest-PASS auto-highlight because no `commercial_evaluations` rows existed; and no active user held the COMMERCIAL_EVALUATOR role that owns the price-entry permission. The 2026-05-29 handover claimed finance was stacked with COMMERCIAL_EVALUATOR but the DB showed only COMMERCIAL_COMMITTEE_MEMBER (config drift). Master plan §I separates "review/evaluate" from "recommend" from "confirm", and the locked rule "System Admin does NOT receive commercial visibility by default" had been violated by 003-era seeds that granted `commercial:view/download/evaluate` to SYSTEM_ADMIN. Walkthrough captured the issues as WALK-044 to WALK-049.
-
-Options considered:
-  - Keep SYSTEM_ADMIN's commercial perms for staging convenience → rejected: violates spec separation-of-duties; owner has manager@/finance@/committee@ for procurement work.
-  - Grant Confirm to committee members too (full power) → rejected: violates locked rule "Confirm is final. No higher-authority approval layer." and the master-plan PROCUREMENT_ADMIN-as-confirmer model.
-  - Retire COMMERCIAL_EVALUATOR and fold its perms into committee → rejected: loses the ability to bring in an outside finance evaluator who isn't a voting committee member.
-  - Keep committee read-only and route price entry through procurement → rejected: violates owner's WALK-048 expectation that committee members are full participants in commercial review.
-
-Outcome (locked target matrix):
-  - SYSTEM_ADMIN — REVOKE `commercial:view`, `commercial:download`, `commercial:evaluate`, `award:minutes:generate`.
-  - PROCUREMENT_ADMIN — unchanged (`comparison:commercial:view`, `comparison:commercial:recommend`, `comparison:commercial:confirm`, `notification:vendor:trigger`, `award:amend`, `award:minutes:generate`).
-  - COMMERCIAL_EVALUATOR — ADD `commercial:download`, `comparison:commercial:view`, `comparison:commercial:recommend`, `award:minutes:generate`; keeps `commercial:view`, `commercial:evaluate`.
-  - COMMERCIAL_COMMITTEE_MEMBER — ADD `commercial:view`, `commercial:download`, `commercial:evaluate`, `comparison:commercial:recommend`; keeps `comparison:commercial:view`, `commercial:open_committee`, `commercial:view_status`, `committee:record_attendance`, `committee:view_minutes`, `award:minutes:generate`.
-  - PROCUREMENT_OFFICER — unchanged (no commercial perms; separation of duties).
-
-Three companion code changes ship in the same commit so the matrix actually works at runtime:
-  - `apps/api/src/modules/bids/bids.service.ts:391` — `listEnvelopeDocuments` commercial branch now accepts either legacy `commercial:view` OR new `comparison:commercial:view`. This was the source of the "commercial:view permission required" 403 finance hit when expanding a vendor card.
-  - `apps/web-admin/src/components/layout/Sidebar.tsx:43` — `/commercial-comparison` entry switches from `permission: 'commercial:view'` to `anyPermission: ['comparison:commercial:view', 'commercial:view']`, matching the page-level defense-in-depth gate.
-  - Token version bumped on every affected user so caches do not survive the deploy.
-
-Impact: Phase D Confirm flow is now exercisable. Finance/committee can land on the Commercial Comparison page from the sidebar, expand cards, view + download bid PDFs, enter prices on the commercial-evaluation page (which populates `commercialTotal` and triggers the lowest-PASS auto-highlight on Commercial Comparison), and click Recommend to surface the AwardConfirmDialog for the procurement-admin to Confirm. SYSTEM_ADMIN cannot view bid data and cannot regenerate award minutes — procurement team owns those surfaces.
-
-Related files:
-  - `database/migrations/015_phase_perm_matrix_lockdown.sql` (NEW)
-  - `scripts/seed_walkthrough_users.sh`
-  - `apps/api/src/modules/bids/bids.service.ts`
-  - `apps/web-admin/src/components/layout/Sidebar.tsx`
-  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-052)
-  - `docs/qa/WALKTHROUGH_TRACKER_2026-05-29.md` (WALK-044..049 → ✅ Fixed)
-
-### 2026-05-28 — In-app comparison pivot loop closed (Phase G removes legacy XLSX export)
-
-Date: 2026-05-28
-Decision: The legacy `commercial_comparison` report endpoint and its renderer are removed from the Reports module. The in-app Commercial Comparison page (Phase C / BUG-035) is the single canonical surface for comparing commercial offers going forward.
-Context: Master plan §H5 + §H6 (2026-05-27) locked the rule "Commercial Comparison XLSX export REMOVED from Reports module when the new in-app page ships … BUG-033 fix stays working in the interim until the new in-app page is verified live, then removed". Phases A → F shipped end-to-end across 2026-05-27 and 2026-05-28; Phase G is the cleanup that retires the export per that locked rule.
-Options considered:
-  - Keep the XLSX export alongside the in-app page indefinitely → rejected: duplicate surface, audit confusion, and master plan §1 directive against XLSX-as-primary-output.
-  - Remove the report code but leave the legacy `/reports/commercial_comparison/export` 404-ing → accepted (default Nest behaviour for unknown report codes).
-Outcome: Three deletions in the Reports module: catalog entry, switch case, ~20-line render method. The frontend Reports & Analytics card disappears automatically because the page renders the catalog from `GET /reports`. All other report codes (tender_summary, vendor_directory, vendor_activity, bid_submissions, technical_evaluations, award_history, audit_trail) remain functional. BUG-033's Fixed entry now carries a supersession note pointing here.
-Impact: The in-app comparison redesign loop opened by the 2026-05-27 master plan is now fully closed in code. Owner's directive — "I don't want export in Excel or comparison. What's the point of the system if it cannot provide these features?" — is materially honoured.
-Related files:
-  - `apps/api/src/modules/reports/reports.service.ts` (catalog edit)
-  - `apps/api/src/modules/reports/report-renderer.service.ts` (switch case + method removal)
-  - `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-045 → Fixed, BUG-033 supersession note)
-  - `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md` (G.1–G.5 flipped to [x])
-
----
-
-### 2026-05-27 — Implementation-decision locks for in-app comparison redesign (5-point owner sign-off)
-
-Date: 2026-05-27
-Decision: Five implementation choices that were left open in the master plan are now locked, unblocking the start of Phase A coding. Recorded together because owner answered them as a single batch.
-
-1. **Existing-data backfill rules (DEPLOYMENT_GAPS §B.4)** — keep existing data intact:
-   - `evaluation_criteria.weight` for pre-existing rows → equal split (100 / count of criteria per parent tender). No data destroyed; admin re-weights as needed.
-   - `evaluation_criteria.is_mandatory_gate` for pre-existing rows → `FALSE`. No new constraints imposed retroactively.
-   - `committees.required_quorum_count` for pre-existing rows → `NULL`. No quorum enforced on old committees (preserves current behaviour); admin sets per committee as needed.
-   - Pre-redesign awarded tenders → NO `awards` row backfilled. Old award flow's audit trail remains in its original form. New `awards` table only used going forward.
-2. **PDF generation library (DEPLOYMENT_GAPS §C.1)** — `puppeteer`. HTML → PDF rendering. Headless Chromium added to the Docker image (~300 MB increase accepted for iteration speed on the Award Minutes template). Author recommendation accepted.
-3. **PDF storage location (DEPLOYMENT_GAPS §D.1)** — MinIO bucket `ctmp-award-minutes` (consistent with existing bid documents pattern). Versioning ON; retention policy 10 years (compliance). Author recommendation accepted.
-4. **Phase A bundling (DEPLOYMENT_GAPS §K)** — ship the in-app PDF viewer (Phase A / BUG-037) **bundled with the Priority 1 retest-fail patch deploy**. This means: A2/A3 (serializer null), A4 (Days Left), D1 (Save button) ship alongside the full PDF viewer infrastructure (modal + provider + audit + non-PDF upload reject + new view endpoint). Retest D2 401 closes via the full Phase A implementation rather than a quick patch. F4 still defers to Phase G.
-5. **Pre-redesign awarded tenders (DEPLOYMENT_GAPS §H.3)** — show a "Pre-redesign award" placeholder on tenders that hit `Awarded` before this redesign shipped. NO retroactive backfill of `awards` rows — backfilling would risk rewriting historical audit data. New Award Minutes button is only enabled on tenders with an `awards` row (i.e., those awarded after Phase D ships).
-
-Context: After the 2026-05-27 design lock, the master plan and deployment gap analysis identified 5 implementation decisions that the project owner needed to make before code could start. All 5 came back in a single round of answers; this entry records them as locked.
-
-Options considered: Each of the 5 had 2–3 options listed in `DEPLOYMENT_GAPS_2026-05-27.md` sections B.4, C.1, D.1, K, H.3. The chosen options are the author-recommended defaults in 4 of 5 cases; the bundling decision (#4) was the owner's call.
-
-Outcome: Implementation is now unblocked. Phase A coding can begin alongside the retest-fail patch work. The 5 decisions are recorded as immutable inputs to the master plan; future agents must honour them.
+- Precision 16, not 15: `numeric(15,3)` would allow only 12 whole-dinar digits where `numeric(15,2)`
+  allowed 13. `numeric(16,3)` keeps all 13 and adds the fils digit, so no existing value can fall
+  out of range.
+- Widening scale is non-destructive; values gain a trailing zero. All 63 stored values were compared
+  before and after — zero changed numerically.
+- Migration is idempotent (guarded on `numeric_scale = 2`) and was rehearsed with `ROLLBACK` before
+  being applied.
+- **JavaScript float accumulation was investigated and ruled out**, not assumed. The award total is
+  built with `reduce` over `Number(...)`, which is the classic `0.1 + 0.2` trap, so it was measured:
+  across 20,000 randomised BoQ sets at realistic magnitudes the largest deviation from exact
+  integer-fils arithmetic was 1.5e-8 KWD and the third decimal moved in 0 of 20,000 cases. Real but
+  negligible; the column type was the entire problem. Do not "fix" the float arithmetic on the
+  strength of theory alone.
 
 Impact:
-- The next deploy bundle is larger than previously planned — 4 small retest fixes + the full PDF viewer infrastructure (~14 files, 1 migration, 1 new MinIO bucket, 9 new RBAC permissions wired).
-- `puppeteer` joins the API Docker image; rebuilds will be slower until the layer is cached.
-- New `ctmp-award-minutes` MinIO bucket needs to be created on the staging server (DevOps task) before Phase E ships.
-- Pre-redesign awarded tenders display a static placeholder; no behaviour change for users viewing those tenders.
 
-Related files: `docs/specs/IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md` (§6 execution order — Phase A is now bundled with Priority 1), `docs/specs/DEPLOYMENT_GAPS_2026-05-27.md` (sections B.4, C.1, D.1, K, H.3 — to be marked RESOLVED inline), `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md` (Phase A items now start immediately after the 4 standalone retest fixes), `agents/handoffs/HANDOVER.md` (note added).
+- Award Minutes already formatted with `maximumFractionDigits: 3`, so it prints fils correctly with
+  no code change. Same for the Commercial Comparison and awarded-tenders screens.
+- `tenders/[id]` and the vendor tender page deliberately show the *estimated* budget with
+  `maximumFractionDigits: 0`; that is a display choice and the stored value is unaffected.
+- Prisma schema updated to `@db.Decimal(16, 3)` and the API image rebuilt. Verified by writing
+  `84317.499` and `29.998` through Prisma and reading them back intact, inside a transaction that
+  was rolled back.
 
-### 2026-05-27 — Comparison workflow pivots from XLSX export to in-app surfaces
+Related files:
 
-Date: 2026-05-27
-Decision: The platform's core procurement comparison (Technical Comparison, Commercial Comparison) and document review will be performed **inside the web application** rather than via XLSX export. A new locked master plan (`docs/specs/IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md`) defines three surfaces: a redesigned Commercial Comparison page (replaces existing in place), a brand-new Technical Comparison page (read-only consolidated view), and a shared in-app PDF viewer (modal, full-screen). Reports module remains intact for other reports (Tender Summary, Audit Trail, Vendor Activity); only the `commercial_comparison` XLSX export is removed when the new in-app page ships and is verified.
-Context: After the BUG-033 XLSX export fix shipped on 2026-05-26, the project owner reviewed the result and stated: "I don't want export in Excel or comparison. What's the point of the system if it cannot provide these features? I might better create an Excel file and throw this system out." The system was effectively a queue-then-Excel pipeline for the most important committee workflow. This pivot moves comparison, scoring review, and document inspection into the web app where audit logs, permissions, and immutability already apply.
-Options considered:
-- A (chosen): In-app comparison surfaces + on-demand structured PDF Award Minutes. Keeps XLSX for analyst-friendly reports (Audit Trail, Vendor Activity) but removes it from the committee decision path. Reuses spec's existing lifecycle states.
-- B: Keep XLSX exports as primary, add a viewer-only in-app comparison page as a "secondary" view. Cheaper but does not solve the structural complaint and re-creates duplicate truth surfaces.
-- C: Full Excel-replacement using only HTML tables, no PDF anywhere. Loses the paper-trail document procurement teams need for executives and compliance binders.
-Outcome: Locked. Implementation deferred until the 21 still-Open bugs + 5 retest fails are closed (per master plan §6). Eleven new bug-tracker entries (BUG-035 through BUG-045) created as the work breakdown.
-Impact: Major shift in how the platform delivers value. Committee makes the award decision inside the system. All views are audit-logged via a new `document_view_log` table. The new Commercial Comparison page replaces the existing route in place. The existing Committee Opening page hands off attendance via a "Proceed to Comparison" button.
-Related files: `docs/specs/IN_APP_COMPARISON_MASTER_PLAN_2026-05-27.md`, `docs/specs/IN_APP_COMPARISON_FLOWCHART_2026-05-27.md`, `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md`, `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-035 through BUG-045).
-
-### 2026-05-27 — Shared modal PDF viewer pattern (no inline embed, no annotations in v1)
-
-Date: 2026-05-27
-Decision: The platform will use **one shared PDF viewer component** rendered as a **modal overlay** (full-screen, ESC closes). Used wherever a document is reviewed: Commercial Comparison cards, Technical Comparison cards, Technical Evaluation "View Full Proposal" button, and any future surface. File support is **PDF only**, enforced at vendor upload time. The viewer is **view-only** in v1 — no annotations, no private notes, no shared comments. **Every view is audit-logged** via a new `document_view_log` row written by the backend BEFORE the PDF is streamed (failing-open on audit is not permitted).
-Context: Three pages needed a document viewer (Commercial Comparison, Technical Comparison, Technical Evaluation). Three competing UI patterns were on the table: inline-embedded (PDF lives inside the card), split-pane (50% viewer on the right), modal overlay (full-screen). Inline eats too much screen space in a hybrid view; split-pane is good but adds layout complexity and was rejected on simplicity grounds. Office docs (Word/Excel) were considered but rejected — vendors export to PDF for procurement-grade documents, and adding Office support would require server-side conversion (LibreOffice headless) for negligible benefit.
-Options considered:
-- A (chosen): Modal overlay + PDF-only + view-only. Cleanest reading area, simplest implementation, reuses across pages, audit story is clear.
-- B: Inline embedded. Pros: never leaves the comparison context. Cons: eats half the card area; tiny PDFs at viewport sizes < 1440px.
-- C: Split-pane (50% viewer right, comparison left). Pros: compare-while-reading. Cons: heavier layout, mobile-hostile, hard to reuse across three different host pages.
-- D: New tab (current broken BUG-022 approach). Cons: explicitly rejected during retest — owner wants in-app.
-- E: Modal + annotation/note features. Cons: heavier persistence model, scope-creep risk. Deferred to a future version.
-Outcome: Locked. Phase A of the implementation order (first page to ship). Closes retest D2 (View Full Proposal 401) by replacing the broken `/documents` endpoint with `GET /bids/:id/envelopes/:type/documents/:docId/view` that streams inline and audit-logs.
-Impact: Vendors must upload PDF only (enforced at the bid wizard). Backend rejects non-PDF uploads. A new `document_view_log` table receives a row on every view. Permission gates: `viewer:pdf:open` (auto-granted with view of host page) and `viewer:pdf:download` (per-role tunable).
-Related files: master plan §2 section E, flowchart diagram 5, BUG-037, `apps/web-admin/src/components/viewer/PdfViewerModal.tsx` (to be created), `apps/api/src/modules/bids/bids.controller.ts` (to be modified).
-
-### 2026-05-27 — Award decision model: gate-only PASS/FAIL + lowest-PASS auto-preselect + override-with-PDF + quorum-and-chair enforcement
-
-Date: 2026-05-27
-Decision: The award decision is governed by an assembled set of rules locked in the master plan:
-- **PASS/FAIL is gate-only**: a vendor passes if and only if all mandatory-gate criteria pass. Total weighted score is for **ranking PASS vendors**, never for PASS/FAIL determination.
-- **Pre-selection**: page load auto-pre-selects the lowest commercial price among technically-PASS vendors.
-- **Zero-friction default path**: accepting the pre-selected lowest-PASS vendor requires only a single Confirm click; no text, no PDF.
-- **Override path**: picking any non-lowest vendor requires **both** mandatory text justification **and** a mandatory attached PDF document.
-- **Single-winner only**: no split awards across multiple vendors.
-- **Quorum gate**: Confirm button is disabled until (a) a configurable minimum number of committee members are marked PRESENT, AND (b) the Committee Chair (or other configurable required role) is PRESENT.
-- **No higher approval layer**: Committee Confirm is final → tender state moves to `Awarded`.
-- **Vendor notifications default OFF**: opt-in toggles at Confirm time for winner notification and loser notifications, independently.
-- **Amendment workflow**: post-award correction creates a NEW awards row that supersedes the original via `superseded_by_award_id`. Original is never deleted; both remain visible in tender history forever. Requires combined Procurement Manager + System Admin permission by default (tunable later).
-Context: The existing Commercial Comparison page forced awards to lowest price with no override path (BUG-026) and had no quorum/attendance enforcement. The owner's real workflow: Procurement Manager operates the system during a physical committee meeting where executives sit in the room and decide collectively; only the Procurement Manager clicks. The award decision must capture the meeting reality (quorum, chair present, optional override with reasoning, optional vendor notifications, ability to amend mistakes) while keeping the spec's immutability guarantee for awarded tenders (amendments are additive, never destructive).
-Options considered: Each sub-decision had its own option set discussed across questions 8, 9, 12, 13, 16 of the design session. See master plan §2 sections F and G for the round-by-round capture.
-Outcome: Locked. Phase D of the implementation order (after the new comparison pages and PDF viewer are in place). Closes BUG-026 (existing "forced to lowest" complaint).
-Impact: New `awards` table with CHECK constraint enforcing `(is_lowest = TRUE) OR (justification_text + justification_pdf BOTH present)`. New `award_minutes` table for the on-demand Award Minutes PDF (separate decision, same session). New `required_quorum_count` + `required_role_code` columns on `committees`. Two-person rule for `award:amend` permission. Per-tender configurable quorum. Existing tender lifecycle is unchanged (no new states).
-Related files: master plan §2 sections F, G, H · flowchart diagrams 4, 6 · BUG-039, BUG-040, BUG-041, BUG-042 · `apps/api/src/modules/award/` (to be extended) · `apps/web-admin/src/components/comparison/AwardConfirmDialog.tsx` (to be created).
-
-### 2026-05-26 — Vendor portal: light theme only (no dark/light toggle), electric-blue accent retained
-
-Date: 2026-05-26
-Decision: Convert the vendor portal (`apps/web-vendor/`) from the dark navy "VENDOR•CONNECT" aesthetic to a light theme. Single-theme app — no dark/light toggle, no `prefers-color-scheme` switching. Body uses `linear-gradient(135deg, #F8FAFC → #EFF6FF)`; cards use `bg-white/92` with `rgba(15,23,42,0.08)` border; text is `#0F172A` (slate-900). The electric-blue brand accent (`#00B4FF`) is retained for CTAs, focus rings, link hovers, and nav underlines — it reads well on both backgrounds and preserves continuity with the existing redesign.
-Context: User feedback after the 2026-05-24 dark-theme deploy was unequivocal: "I need a light theme, this is way too dark." The dark redesign was code-complete and deployed but rejected on aesthetics. Three options were on the table: (1) full light conversion, (2) dual-mode toggle, (3) hybrid with light bg + dark cards.
-Options considered:
-- A (chosen): Full one-shot rewrite of design tokens. ~16 files. No `prefers-color-scheme` branching. Simpler codebase, faster ship, no theme-state machinery. Accent kept as electric-blue for visual continuity with the just-shipped redesign.
-- B: Dual-mode toggle. Keep dark theme code intact, add light theme via Tailwind `dark:` variants, driven by `html.dark` toggle + localStorage. Higher initial effort. Carries both themes forever. Would require theme-switcher UI.
-- C: Hybrid (white body + dark cards). Lightest change but creates visual dissonance — dark surfaces "floating" on white never look right at scale.
-Outcome: Option A live on staging at `https://vn.hadiclinic.com.kw:4201`. CSS bundle verified: `color-scheme: light`, body gradient `linear-gradient(135deg, #F8FAFC, #EFF6FF)`, zero traces of `#0A1428` navy. Playwright suite passes 17/17 against live URL (one assertion updated — dropped the `html.dark` check, renamed 6 test titles). Build clean (13 routes), type-check clean.
-Impact: All vendor-facing pages render light. The two unreskinned bid pages (`/bids/[bidId]`, `/bids/wizard/[tenderId]`) auto-flipped via the Tailwind legacy alias rename (`bg`/`card` → `#FFFFFF`, `text-primary` → `#0F172A`, `border` → `rgba(15,23,42,0.1)`) — no direct edits needed. Admin portal intentionally untouched (already light-themed). hCaptcha widget switched `theme="dark"` → `theme="light"`.
-Related files: `apps/web-vendor/src/app/globals.css`, `apps/web-vendor/tailwind.config.ts`, `apps/web-vendor/src/app/layout.tsx`, `apps/web-vendor/src/components/ui/{Input,PageHeader,Empty,StatusBadge}.tsx`, `apps/web-vendor/src/components/layout/{PortalShell,AuthShell}.tsx`, 10 page files under `apps/web-vendor/src/app/`, `apps/web-vendor/src/app/register/page.tsx` (hCaptcha theme), `qa/playwright/tests/vendor-portal-redesign.spec.ts`.
-
-### 2026-05-26 — Tender field naming: frontend canonical wins (`procurementType`, `estimatedBudget`)
-
-Date: 2026-05-26
-Decision: When the agreed BUG-008/009/010/011 fix bundle ships, the Prisma model fields `tenderType` and `budgetEstimate` will be renamed to `procurementType` and `estimatedBudget` respectively (keeping the DB column names via `@map("tender_type")` and `@map("budget_estimate")`). The API serializer + CreateTenderDto + UpdateTenderDto + frontend all standardise on the frontend names. No DB migration required — just regenerate Prisma client.
-Context: The frontend code, spec docs, and UI all use `procurementType` and `estimatedBudget`. The Prisma model historically used `tenderType` and `budgetEstimate` (matching the DB column names). This mismatch caused BUG-003 (Procurement Type empty on detail), BUG-011 (PATCH rejected with 400 "property procurementType should not exist"), BUG-002 ancillary (estimatedBudget missing from response). Today's serializer-sweep ships a temporary `procurementType: t.tenderType` map until the full bundle lands.
-Options considered:
-- A (chosen): Rename Prisma fields, keep DB columns. Frontend names win. One-line `@map()` per field; zero migration; zero downtime; immediate consistency for any code reading Prisma client types.
-- B: Rename frontend fields to match Prisma (`tenderType`, `budgetEstimate`). Cheapest backend change but every UI, spec doc, and test now uses non-canonical terms. User-facing terminology drift.
-- C: Rename both (Prisma model + DB columns). True consistency but requires a real migration with downtime risk on the production DB once it has data.
-Outcome: Decision locked. Implementation ships with the BUG-008/9/10/11 bundle (queued, not yet executed). Today's serializer sweep includes the mapping as an interim measure (`procurementType: t.tenderType` in `serializeSummary`).
-Impact: Future tender code is consistent end-to-end on the canonical names. Existing Prisma client consumers (audit service, reports renderer, etc.) need a one-time update once the rename lands. The DB schema is undisturbed.
-Related files: `apps/api/prisma/schema.prisma` (to be updated), `apps/api/src/modules/tenders/dto/{create,update}-tender.dto.ts` (to be updated), `apps/api/src/modules/tenders/tenders.service.ts` (already has the interim map), `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-008 full decision record).
-
-### 2026-05-26 — Tender lifecycle field gating: required-before-Publish, not required-on-Create
-
-Date: 2026-05-26
-Decision: Procurement Type, Category, Estimated Budget, and the existence of ≥1 RFQ document are NOT required to save a tender as Draft. They ARE required before the Publish action succeeds. Server-side `publish()` guard returns 400 listing whichever prerequisite fields are missing. Department selector is editable on the create form AND on the edit form WHILE the tender is in Draft status only — once Internal Review or beyond, Department becomes a read-only label. Estimated Budget is editable in Draft + Internal Review, locked once Approved.
-Context: While walking the bug tracker, the user needed to decide for each missing/restricted field: required from the start, required eventually, or always optional? Two procurement patterns exist: strict (everything required upfront) or progressive (start a Draft early, firm up before Publish). The progressive model wins for procurement officers who need to capture an early skeleton tender and gradually add details as they're known.
-Options considered:
-- A (chosen): Progressive — empty Drafts allowed, gates at status transitions. Publish, Approval, Submission Closed each enforce specific field presence. Matches how procurement teams actually work.
-- B: Strict — every field required at create. Lower-flexibility but ensures no incomplete tenders ever exist. Annoying when drafting from scratch.
-- C: Per-organisation configurable. Out of scope for v1 — over-engineered.
-Outcome: Decision locked across BUG-008 (Procurement Type before Publish), BUG-009 (Department editable in Draft only), BUG-010 (Budget locked after Approval, required before Publish), BUG-012 (≥1 RFQ document required before Publish). To be implemented in the BUG-008/9/10/11 + BUG-012 bundles.
-Impact: Tender creation UX improves — fewer required fields up front. Publish action becomes the firm checkpoint. Audit-clarity benefit: every tender that reaches Publish has a complete record by definition.
-Related files: `apps/api/src/modules/tenders/tenders.service.ts` (publish() gate), `apps/web-admin/src/app/(admin)/tenders/{new,[id]/edit}/page.tsx`, `docs/qa/BUG_TRACKER_2026-05-25.md` (BUG-008/009/010 full records).
-
-### 2026-05-26 — INVITATION_ONLY tender workflow: visibility fixed at create, dedicated panel, ≥3 invited vendors, add-but-no-remove after Publish
-
-Date: 2026-05-26
-Decision: Tender visibility (`PUBLIC` vs `INVITATION_ONLY`) is chosen at the create form and immutable for the tender's life. When INVITATION_ONLY, a "Manage Invited Vendors" panel appears on the tender detail page (only when visibility=INVITATION_ONLY); admin adds vendors there. Publish requires ≥3 invited vendors (procurement-fairness convention — three quotes minimum). After Publish, admins can ADD new invitees (handles "forgot one") but cannot REMOVE existing ones (vendors may have started preparing a bid; removal would be unfair). After Submission Closed, the list is fully frozen.
-Context: BUG-015 surfaced that the DB already has the `TenderVisibility` enum + `tender_vendors` join table, but no UI, no publish gate, no vendor-side filter. Building the full workflow needed several policy decisions: where visibility is set, where vendor selection happens, what the minimum-vendor threshold should be, and whether the invite list is editable post-publish.
-Options considered:
-- Visibility-set-when: at create (chosen) / editable in Draft / chosen at Publish.
-- Vendor-selection-where: dedicated detail panel (chosen) / publish-time modal / wizard step.
-- Min vendors: 3 (chosen — standard competitive-bidding convention) / 1 / 2.
-- Post-publish edit: add-only until close (chosen) / fully frozen at publish / fully editable until close.
-Outcome: Decisions locked into BUG-015 entry. To be implemented as the "Invitation workflow" bundle along with BUG-016 (notification policy).
-Impact: Procurement gets a clean separation of public vs invited tenders. Compliance gets the 3-vendor floor + immutable visibility. Vendors only see tenders they're allowed to bid on (PUBLIC ones for them, or INVITATION_ONLY ones they were invited to).
-Related files: `apps/api/prisma/schema.prisma:58-63, 571, 640-651` (existing infra), `apps/api/src/modules/tenders/tenders.service.ts` (publish gate + new invite endpoints), `apps/web-admin/src/app/(admin)/tenders/{new,[id]}/page.tsx`, `docs/qa/BUG_TRACKER_2026-05-25.md` BUG-015 entry.
-
-### 2026-05-26 — Tender publication notification policy: email all approved vendors (PUBLIC) / invitees at publish (INVITATION_ONLY); no in-app or SMS, no reminders for v1
-
-Date: 2026-05-26
-Decision: When a PUBLIC tender is published, the system emails every vendor with status=APPROVED via the existing notifications module (`TENDER_PUBLISHED_PUBLIC` template). When an INVITATION_ONLY tender is published, only the invited vendors are emailed (`TENDER_INVITATION` template). Post-publish vendor additions (per BUG-015's add-after-publish rule) email the new invitee immediately. Email is the only channel for v1 — no in-app notification badge, no SMS. No deadline-reminder emails for v1 (cron-based reminders deferred).
-Context: BUG-016 was originally a Question — "how do publication notices reach vendors?" The notifications module is built and works (nodemailer + template interpolation + NotificationLog), but `publish()` doesn't enqueue anything today. Needed policy decisions across recipient scope, channels, and reminder cadence.
-Options considered: PUBLIC scope — all approved vendors (chosen) / category-matched / no email. Invited timing — at publish (chosen) / at invite. Channels — email only (chosen) / +in-app / +SMS. Reminders — none (chosen) / one 48h before / two 7d+48h before.
-Outcome: Decisions locked into BUG-016 entry. Implementation queued as part of the Invitation workflow bundle (depends on BUG-015 vendor-selection landing first).
-Impact: Vendors learn of new opportunities through their inbox without needing to poll the portal. Procurement teams know exactly who got the notification via NotificationLog. v1 footprint is small (2 templates + 1 service method); reminders + in-app + SMS can layer in later if usage demands.
-Related files: `apps/api/src/modules/notifications/notifications.service.ts` (existing infra), `apps/api/src/modules/tenders/tenders.service.ts` (publish hook to be added), 2 new template seeds in `database/seeds/`, `docs/qa/BUG_TRACKER_2026-05-25.md` BUG-016 entry.
-
-### 2026-05-26 — RBAC enforcement model: full sidebar permission map + department-scoped data filtering (SYSTEM_ADMIN bypass)
-
-Date: 2026-05-26
-Decision: All 12 admin sidebar items get an explicit `permission` field (today only 2 do). A user without the required permission doesn't see the link. Beyond menu gating, non-admin internal users see only data tied to their `user_departments` membership — the filter applies to tenders/approvals/clarifications/technical-evaluation/committee-sessions/commercial-comparison and to audit-log search. SYSTEM_ADMIN bypasses every filter. Multi-department users see the union of their departments. Empty-scope pages render a friendly empty state ("No items in your scope") rather than hiding the menu item.
-Context: BUG-028 (the last Critical). User report: "I assigned technical evaluator permission, user can view all menu in the side bar … should be restricted to only users permission based on department level." Currently every non-gated menu item is visible to everyone; tender list isn't dept-scoped for internal users. The combination leaks tender information across departments and shows menu items that 403 on click.
-Options considered:
-- Sidebar gates: full per-item map (chosen) / loose (high-sensitivity only).
-- Data scope: tenders + derivatives (chosen) / tenders only / no scope.
-- Empty UX: show menu + empty page (chosen) / hide menu when empty.
-- Department membership: union for multi-dept (chosen, implicit) / require primary dept only.
-Permission map (locked):
-| Item | Permission |
-|---|---|
-| Dashboard | always |
-| Tenders | tender:view |
-| Approvals | tender:approve OR award:approve |
-| Clarifications | clarification:view |
-| Technical Evaluation | technical:evaluate |
-| Committee & Commercial | committee:manage OR commercial:view |
-| Commercial Comparison | commercial:view (already gated) |
-| Vendor Management | vendor:view |
-| Reports | reports:view |
-| Audit Log | audit:view |
-| Security Alerts | audit:view (already gated) |
-| System Configuration | system:configure |
-Outcome: Decisions locked. To be implemented as the largest remaining single bundle.
-Impact: Compliance gap closed (no cross-department tender visibility for internal users without elevated role). UX clearer (menu reflects what the user can actually do). Auditors get a credible answer to "who could have seen this tender?" — the answer is "SYSTEM_ADMIN + users in tender.department".
-Related files: `apps/web-admin/src/components/layout/Sidebar.tsx` (extend `permission` field on 9 items), `apps/api/src/modules/tenders/tenders.service.ts` (findAll dept-scope), new `apps/api/src/common/rbac/dept-scope.helper.ts`, new request-context extension to load `user.departments`, similar findAll edits on 5 other service files. `docs/qa/BUG_TRACKER_2026-05-25.md` BUG-028 entry.
-
-### 2026-05-26 — Award recommendation: any technically-PASS bid eligible, non-lowest pick requires 100+ char justification, flagged in audit + Approval banner
-
-Date: 2026-05-26
-Decision: The Recommend Award action can target any bid that passed technical evaluation (FAIL bids excluded). When the recommended bid is NOT rank-1 by price, the system records `nonLowestPrice=true` + `bypassedLowestBidId` + `priceGapKwd` on the recommendation row, emits a distinct audit event `AWARD_RECOMMENDED_NON_LOWEST` (HIGH risk, separate from `AWARD_RECOMMENDED`), requires a justification ≥100 characters (vs any non-empty justification when picking the lowest), and shows a prominent red banner on the Approvals queue detail panel: "This recommendation is NOT the lowest priced bid (+X KWD above lowest). Review the justification carefully." with the bypassed bids listed.
-Context: BUG-026 — committee needs the flexibility to recommend a non-lowest bidder when quality/capacity/risk justifies the premium, but compliance demands clear documentation when they do. Pure "lowest wins" is too rigid; pure "free choice" is too lax for a public-procurement context.
-Options considered:
-- Eligibility: PASS only (chosen) / top-3 by price / any including FAIL.
-- Non-lowest handling: audit flag + banner (chosen) / no special treatment / dual-approval required.
-- Justification length: 100 chars when non-lowest (chosen) / 100 chars always / no minimum.
-Outcome: Decisions locked into BUG-026 entry. Single-approver model retained (no dual-approval gate added).
-Impact: Committee gets the flexibility procurement law generally allows. Auditors can filter on `AWARD_RECOMMENDED_NON_LOWEST` to find every recommendation that bypassed the cheapest. Approver sees the override clearly before signing off — informed consent on every non-lowest pick.
-Related files: `apps/api/src/modules/award/award.service.ts` (recommend logic + 3 new audit event types), `apps/api/src/modules/award/dto/recommend-award.dto.ts`, `apps/web-admin/src/app/(admin)/commercial-comparison/page.tsx` (Recommend on every PASS row), `apps/web-admin/src/app/(admin)/approvals/page.tsx` (non-lowest banner). Schema migration adds `non_lowest_price`, `bypassed_lowest_bid_id`, `price_gap_kwd` columns to the award recommendations table. `docs/qa/BUG_TRACKER_2026-05-25.md` BUG-026 entry.
-
-### 2026-05-26 — Clarifications visibility: per-reply isPublic (not per-parent), vendor identity redaction on cross-vendor public threads
-
-Date: 2026-05-26
-Decision: Move the `is_public` column from `tender_clarifications` to `tender_clarification_replies` so each reply has its own visibility. A clarification is "visible to other vendors" if ANY of its replies has `isPublic=true`. When another vendor's clarification surfaces on the asking vendor's portal via a public reply, the vendor identity is redacted (vendorName → "Another vendor", vendorId → null); private replies on that thread are never sent to other vendors. Admins see everything unchanged.
-Context: BUG-031 — confidentiality bug. The current backend filter uses `{ isPublic: true }` on the parent clarification, but `isPublic` defaults to true at the parent level → vendors see every other vendor's questions. The admin reply UI already lets you toggle Public/Private per reply but the data model didn't support it — replies inherited from the parent. Fundamental model mismatch.
-Options considered:
-- Model: per-reply visibility (chosen) / per-parent only.
-- Other-vendor exposure: redact identity (chosen) / show vendor name / hide question text entirely.
-- Migration: copy parent flag to all replies, drop parent column (chosen) / keep both fields with reply-overrides-parent semantics.
-Outcome: Decisions locked into BUG-031 entry. One-shot SQL migration scoped (3 lines): `ALTER TABLE … ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT false; UPDATE … SET … FROM parent; ALTER TABLE tender_clarifications DROP COLUMN is_public;`. Backend filter rewrites + frontend "Another vendor" badge to follow.
-Impact: Closes the confidentiality leak. Aligns the data model with the admin UI's per-reply visibility toggle. Vendors get visibility into shared answers without learning who asked — preserves procurement-fairness (everyone sees the same info) without revealing competitive intel (who's bidding).
-Related files: New SQL migration in `database/migrations/`, `apps/api/prisma/schema.prisma` (move isPublic field), `apps/api/src/modules/clarifications/clarifications.service.ts` (findAll rewrite + redaction), `apps/web-admin/src/app/(admin)/clarifications/page.tsx` (confirm reply payload), `apps/web-vendor/src/app/(portal)/clarifications/page.tsx` (render "Another vendor" badge). `docs/qa/BUG_TRACKER_2026-05-25.md` BUG-031 entry.
-
-### 2026-05-26 — Technical evaluators: explicit per-tender assignment + email at TECHNICAL_OPENING + 1-evaluator minimum to finalize
-
-Date: 2026-05-26
-Decision: A new `tender_evaluators` join table (`tenderId, userId, assignedBy, assignedAt`) records which users (from the pool with TECHNICAL_EVALUATOR role) are assigned to score a specific tender. Admin manages this via an "Assign Evaluators" panel on the tender detail page (visible from status=Approved onward). Only assigned evaluators can call `evaluate()` (others get 403). When `openTechnicalEnvelopes()` succeeds, each assigned evaluator gets an email via a new `TECHNICAL_EVALUATION_READY` template. `finalizeTechnicalResults()` requires at least 1 evaluator to have submitted scores (permissive; can be raised later if compliance demands).
-Context: BUG-020 was a Question — "who performs technical evaluation, how are they notified?" The TECHNICAL_EVALUATOR role exists with correct permissions but there's no explicit assignment mechanism. Anyone with the role could score any tender they could see, which after BUG-028 RBAC lands will be only their dept's tenders — but even within a department, formal per-tender assignment is a procurement-defensible model.
-Options considered:
-- Assignment: explicit per-tender (chosen) / implicit by role+dept / reuse committee model.
-- Notification: at TECHNICAL_OPENING (chosen) / at assignment / both.
-- Minimum to finalize: 1 (chosen — permissive) / 2 / 3.
-Outcome: Decisions locked into BUG-020 entry. Implementation queued.
-Impact: Audit clarity ("who was supposed to evaluate, who actually did, when were they told"). Evaluators stop manually polling the portal. Single-evaluator finalisation allowed for v1 but instrumented so the threshold is one-line raise-to-2/3 if compliance later demands.
-Related files: New DB migration (`tender_evaluators` table), `apps/api/src/modules/tenders/tenders.service.ts` (assign/unassign methods + status guards), `apps/api/src/modules/technical-evaluation/technical-evaluation.service.ts` (evaluate() assignment check), new email template `TECHNICAL_EVALUATION_READY`, `apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx` (Assign Evaluators panel). `docs/qa/BUG_TRACKER_2026-05-25.md` BUG-020 entry.
-
-### 2026-05-24 — Carry request context (client IP + User-Agent) via AsyncLocalStorage, not explicit threading
-
-Date: 2026-05-24
-Decision: A NestJS middleware populates Node's `AsyncLocalStorage` with `{ ipAddress, userAgent }` at the start of every HTTP request; `AuditService.log()` reads those values as fallbacks when the caller didn't pass them explicitly. Express `trust proxy` is set to `1` so `req.ip` reflects the real client (leftmost `X-Forwarded-For`) through the on-host nginx hop.
-Context: Reviewing the audit-log viewer after the AUDIT_CHAIN_BREAK rebake exposed two cosmetic-but-important gaps — the Actor column showed UUID prefixes (no `displayName`/`companyName` lookup) and the IP Address / User Agent columns showed `—` for every row (no caller populated them). Fixing the actor name was a single Prisma `include` change. Fixing IP/UA across 37 audit call sites in 15 services was the harder choice.
-Options considered:
-- A (chosen): Middleware + AsyncLocalStorage. ~80 LOC, 3 new files in `apps/api/src/common/request-context/`. Zero changes to any of the 37 audit call sites or to the controllers that invoke them. Background jobs and scripts (BullMQ workers, the rebake script) run outside the context and correctly produce rows with NULL IP/UA — honest, no fabricated values.
-- B: Explicit threading. Add `@Req() req` to every audit-triggering controller method; pass `{ipAddress, userAgent}` into every service method; forward into each `audit.log()` call. ~200–300 LOC of mechanical churn across ~30 files. Easier to grep ("where does this IP come from?") but every future audit call has to remember to thread the args. Test suites for those services would need re-mocking too.
-- C: NestJS Interceptor + `REQUEST`-scoped DI. Cleaner in pure-NestJS terms but request-scoped providers force a new module instance per request and have measurable perf impact, especially when injected high in the dependency graph like `AuditService` is.
-Outcome: Option A is live on staging. Smoke-tested with `POST /reports/tender_summary/export` + custom `X-Forwarded-For: 203.0.113.42`; the resulting `audit_logs` row 74 carries the exact IP and User-Agent values. Boot-time `verifyChain` still returns `ok=true` (74 rows). Two new unit tests cover the explicit-wins-over-context and context-fallback paths; the audit suite is 20/20, the whole api workspace is 79/79.
-Impact: Every `audit.log()` call from within an HTTP request scope automatically attributes the client IP and UA, including the 37 existing call sites that were never updated. The pattern is reusable for any future ambient request data (e.g. trace IDs, tenant scoping). The trade-off — implicit ambient state — is contained to the audit module today; if a second consumer wants the same context (e.g. a request-id logger), the same service injects cleanly. Tests stay deterministic because explicit args always win and the mocked context returns `undefined` by default.
-Related files: `apps/api/src/common/request-context/{request-context.service.ts,request-context.middleware.ts,request-context.module.ts}` (new), `apps/api/src/app.module.ts` (middleware wiring), `apps/api/src/main.ts` (trust proxy = 1), `apps/api/src/modules/audit/audit.service.ts` (consumer), `apps/api/src/modules/audit/audit.service.spec.ts` (fallback + precedence tests), `agents/skills/PROJECT_SKILLS.md` ("Per-Request Context via AsyncLocalStorage").
-
-### 2026-05-23 — One-shot audit_logs hash-chain rebake to repair Date-canonicalize asymmetry
-
-Date: 2026-05-23
-Decision: Run a one-shot Node script (`apps/api/scripts/rebake-audit-chain.js`) inside the running `ctmp-api` container that disables the `audit_logs_no_update` trigger for the duration of a single transaction, rewrites `prev_hash_chain_value` and `hash_chain_value` on the rows from the first broken id forward, re-enables the trigger, and appends an `AUDIT_CHAIN_REBAKE` audit row recording exactly which ids were rewritten and a link to the RCA document. Run only on staging at this time. The hash columns of 66 rows on staging were edited; no other columns were touched.
-Context: The Phase 9 manual testing batch produced 8 `AUDIT_CHAIN_BREAK` security alerts. The RCA (`agents/reviews/AUDIT_CHAIN_BREAK_RCA_2026-05-23.md`) traced the failure to `canonicalize()` in `audit.service.ts` returning `'{}'` for any `Date` (Date has no enumerable own keys), while Prisma's JSONB writer normalises Date to its ISO string via `.toJSON()`. The asymmetry means the write-time hash and the verify-time recomputed hash for any row containing a `Date` in payload disagree. Eight rows on staging matched this pattern. Data was never tampered with — only the *cryptographic proof of integrity* failed to validate. After the canonicalize fix lands, the chain is still broken until the affected rows' hashes are rewritten under the new canonical, because each row's hash also forms the previous-hash input for the next row (cascading break). Two clean paths existed: rebake the chain, or leave the broken rows as a documented exception.
-Options considered:
-- A (chosen): One-shot rebake script, run inside a single Prisma `$transaction`, advisory-lock held, post-rebake in-txn `verifyChain` runs and aborts the txn on any failure. Eight `security_alerts` rows bulk-acknowledged by the SYSTEM_ADMIN user inside the same txn. AUDIT_CHAIN_REBAKE marker row appended via the normal `audit.log()` path so the change itself is hash-chained, dated, attributed, and references the RCA.
-- B: `.toISOString()` defensively at every caller, no rebake, permanent ignore-list in `verifyChain` for the 8 row ids. Cleaner from a "never edit audit_logs" perspective but leaves the canonicalize bug in place (any future contributor passing a Date re-triggers it) and bakes hard-coded row ids into runtime code (a compliance-audit anti-pattern).
-- C: Accept the existing alerts as known-state with a permanent annotation, do nothing structural until pre-production cutover. Zero work today but launches with 8 unresolved CRITICAL alerts in the admin UI.
-- D: Pure-SQL migration (008_audit_chain_rebake.sql) that implements canonicalise + SHA-256 in plpgsql. Risk of byte-for-byte drift from the JS canonicalize is significant; reimplementing JSONB → canonical-JSON exactly is fragile. The Node script reuses the same `canonicalize()` body that production code uses, so drift is impossible by construction.
-Outcome: 66 rows on staging now carry hashes produced under the Date-aware canonicalize. `verifyChain(1000)` returns `ok=true` on subsequent boots. All 8 `AUDIT_CHAIN_BREAK` alerts acknowledged. AUDIT_CHAIN_REBAKE row (id 73) records the operation. The spec invariant "audit logs are append-only and cannot be edited through the application" was deviated from for exactly this one transaction; the deviation is logged here, in the HANDOVER, in the marker row's own metadata, and in the RCA document.
-Impact: Audit-chain tamper-evidence is restored on staging. The bug class is closed: `canonicalize` now special-cases `Date` and `Buffer`, both unit-tested. Any future occurrence (e.g. a developer adding a new audit call site that passes a `Decimal` or `BigInt` not handled by Prisma's JSON serializer) would be a different bug — the RCA pattern for diagnosing it remains the diagnostic script + write-time vs verify-time canonical comparison. For production cutover: this same fix must be deployed *before* the production database accumulates any audit_logs rows under the broken canonicalize. If production has already accumulated such rows, the rebake script can be re-run there with the appropriate SYSTEM_ADMIN user id and equivalent post-rebake validation.
-Related files: `apps/api/src/modules/audit/audit.service.ts` (the fix), `apps/api/src/modules/audit/audit.service.spec.ts` (regression tests), `apps/api/scripts/rebake-audit-chain.js` (the migration tool), `database/migrations/008_audit_chain_rebake_2026-05-23.sql` (documentation-only marker), `agents/reviews/AUDIT_CHAIN_BREAK_RCA_2026-05-23.md` (root-cause), `agents/handoffs/HANDOVER.md` 2026-05-23 entries (operational record), `agents/skills/PROJECT_SKILLS.md` "Audit Payloads Must Use Primitives Only" (forward-looking guidance for callers).
-
-### 2026-05-22 — Vendor portal ingress moved from :443 to :4201 (upstream routing)
-
-Date: 2026-05-22 (same-day revision of the prior entry)
-Decision: Vendor portal HTTPS ingress listens on **port 4201**, not 443. URL is `https://vn.hadiclinic.com.kw:4201/...`. `PUBLIC_API_URL` includes the port. Follows the host's existing per-app-port convention (Citelify :9090, complainmgmt-internal :8443).
-Context: The prior entry (same date) put the vhost on :443. That worked from the server itself (curl from localhost returned 200) but the user could not reach it from their network. Server-side firewall was not the cause — iptables default policy is ACCEPT and there are explicit `ACCEPT tcp dpt:443` rules. The blockage is upstream (corporate firewall / NAT / network path) only exposing certain high ports to this host. The pre-existing Citelify config comment ("Port 443 is reserved for another hadiclinic app") now reads as a hint that nothing upstream forwards :443 here at all.
-Options considered:
-- A (chosen): Move to :4201. Free port adjacent to web-admin (:4200) / web-vendor (:4300), matches the host's per-app-port convention, confirmed reachable by the user.
-- B: Diagnose upstream routing and try to get :443 forwarded. Outside our admin scope (corporate network) and would block Phase 9 sign-off for unknown duration.
-- C: Use another high port (e.g. :8444, :9095). Functionally identical to :4201; :4201 was chosen because it sits in the CTMP port band (42xx) and is more discoverable to anyone reading the docker-compose port mapping.
-- D: Skip HTTPS, just expose :4300 directly. Would not satisfy the hCaptcha hostname check (production key is bound to `vn.hadiclinic.com.kw`, not to `10.1.13.98`).
-Outcome: A. Test URL is `https://vn.hadiclinic.com.kw:4201/register`. hCaptcha hostname check is hostname-only (port-agnostic), so the production site key continues to work.
-Impact:
-- All vendor-portal URLs in docs and test plans gain a `:4201` suffix.
-- `PUBLIC_API_URL` is now `https://vn.hadiclinic.com.kw:4201`; rebuild required if it changes again.
-- :443 on the host is freed and remains unused (the historical "reserved" comment was always aspirational).
-- The same pattern is available for web-admin and any future CTMP frontend (pick another free 4xxx port).
-Supersedes: the prior decision entry of the same date (which left :443 bound). That entry is kept in the log for history.
-Related files: `/etc/nginx/sites-available/ctmp-vendor-tls.conf` (server-only), `infrastructure/docker/.env` (`PUBLIC_API_URL`), `agents/handoffs/HANDOVER.md` (2026-05-22 ~11:35 entry).
-
-### 2026-05-22 — Vendor portal HTTPS via host nginx on :443 with SNI dispatch
-
-Date: 2026-05-22
-Decision: HTTPS ingress for `vn.hadiclinic.com.kw` terminates on the **host** nginx on **port 443** (server_name SNI dispatch), proxying to `ctmp-web-vendor:4300` and `ctmp-api:3000` (`/api/`) over loopback. The vendor portal's `NEXT_PUBLIC_API_URL` was changed to the same hostname to make API calls same-origin.
-Context: Host nginx already fronts other apps but each existing tenant uses its **own** TLS port (Citelify on :9090, complainmgmt-internal on :8443). The Citelify config comment said ":443 is reserved for another hadiclinic app" — but nothing was bound to :443 and no such app exists yet. Wildcard `*.HADICLINIC.COM.KW` cert was already on disk. The positive hCaptcha E2E was blocked because the production hCaptcha key is hostname-bound to `vn.hadiclinic.com.kw`, which had no route.
-Options considered:
-- A (chosen): Use :443 with `server_name vn.hadiclinic.com.kw`. SNI lets future apps coexist on :443 with their own server_name. Same-origin `/api/` proxy avoids browser mixed-content blocking and removes the need for CORS config. URL is the natural `https://vn.hadiclinic.com.kw/...` the team has been writing in docs.
-- B: Follow Citelify's per-app-port pattern (e.g. `https://vn.hadiclinic.com.kw:9095`). Keeps :443 free for the (still hypothetical) reserved app. Drawbacks: every doc/URL gains a `:9095` suffix; hCaptcha dashboard hostname check is hostname-only so it still works, but user-facing UX degrades.
-- C: Put the vendor portal's own nginx container in front (as complainmgmt does with `complainmgmt-nginx-1` on `:8080/:8443`). Adds a layer; host nginx still has to dispatch to it. More moving parts for the same outcome.
-- D: Defer until the "reserved" :443 app surfaces. Pragmatic, but keeps the positive E2E blocked indefinitely.
-Outcome: A. If the historical "reserved app" ever materializes, SNI dispatch on :443 lets both vhosts coexist as long as they pick different server_names; only an actual port-bind conflict would force a refactor.
-Impact:
-- HTTPS now terminates on :443 of the dev host for the first time (host nginx previously served :80 only).
-- Vendor portal calls API as same-origin under one hostname — simpler than the previous cross-origin `http://10.1.13.98:3000` arrangement.
-- `PUBLIC_API_URL` is now an HTTPS URL baked into the web-vendor build; rebuild required to change it again.
-- Other apps on host nginx are untouched (no edit to the `default` vhost; no edit to `citelify-tls.conf`).
-- The Citelify config's "another app reserves :443" comment becomes stale. Consider revising it next time someone touches that file so the comment reflects current state.
-Related files: `/etc/nginx/sites-available/ctmp-vendor-tls.conf` (server-only, not in repo), `infrastructure/docker/.env` (PUBLIC_API_URL), `agents/handoffs/HANDOVER.md` (2026-05-22 entry).
-
-### 2026-05-22 — Dedicated persistent storage deferred to post-completion
-
-Date: 2026-05-22
-Decision: The current storage layout (`STORAGE_DRIVER=local` writing to two Docker named volumes `ctmp_bid_storage` and `ctmp_report_storage` on the shared dev server `10.1.13.98`) is acceptable for pre-launch but **must be replaced with dedicated, wipe-resistant storage post-completion**. Migration, backup policy, restore drill, and full storage-architecture documentation are tracked as a post-launch hardening item (see "Post-Completion / Post-Launch Items" in `agents/backlog/MASTER_TASK_TRACKER.md`).
-Context: The 2026-05-19 decision introduced the `StorageBackend` abstraction (local + S3) but the on-prem deployment runs the local backend. The volumes live under `/mnt/repo/docker/volumes/...` on a multi-tenant dev host. A `docker compose down -v`, `docker volume rm`, or host-side accidental delete would wipe vendor-submitted bid documents and generated reports — artefacts that are legally/audit-sensitive in a procurement system. The user explicitly directed that this hardening be deferred until after project completion to avoid scope creep on the MVP, but recorded so it is not forgotten.
-Options considered:
-- A (chosen): Defer to post-completion. Log the work item in the tracker + decision log + project memory so it surfaces in future sessions. Keep MVP timeline clean.
-- B: Pull into pre-launch hardening. Risks scope creep and delays sign-off. Storage is "good enough for pilot" today.
-- C: Switch `STORAGE_DRIVER=s3` now, point at the already-running `ctmp-minio`, defer the backup/replication story to post-launch. Half-measure — gives object storage semantics but leaves the same single-host data-loss exposure.
-Outcome: A. Recorded in tracker under a new "Post-Completion / Post-Launch Items" heading.
-Impact: No code or infrastructure change today. A documented, durable backlog item for post-launch hardening, with explicit triggers ("pilot vendors uploading non-recoverable bids", "dev-host disk-pressure or multi-tenant event") that would re-prioritize earlier.
-Related files: `agents/backlog/MASTER_TASK_TRACKER.md` (Post-Completion section), `agents/handoffs/HANDOVER.md` (2026-05-22 entry), prior decision "Storage backend abstraction" 2026-05-19.
+```text
+database/migrations/055_money_precision.sql
+apps/api/prisma/schema.prisma
+apps/api/src/modules/award/award.service.ts        (boqTotal, line ~268)
+apps/api/src/modules/award/award-minutes.service.ts (fmt, line ~486)
+```
 
 ### 2026-05-19 — Audit chain race closed by `pg_advisory_xact_lock`, not row lock
 
@@ -856,7 +462,7 @@ Impact:
 
 Related files:
 
-`api-contracts/openapi/ctmp.openapi.yaml`, `ctmp-platform/.spectral.yaml`
+`api-contracts/openapi/ctmp.openapi.yaml`, `.spectral.yaml`
 
 ---
 
@@ -1175,3 +781,45 @@ docs/specs/implementation-spec.md
 agents/backlog/MASTER_TASK_TRACKER.md
 ```
 
+
+### 2026-08-06 - Commercial Terms Are Per Bid, Not Per BOQ Line
+
+Decision:
+
+The five commercial terms a vendor records with an offer — brand/manufacturer, country of origin,
+warranty, delivery period and payment terms — are stored once per bid, not once per BOQ line. They
+are all optional and are never part of a submission precondition.
+
+Context:
+
+The first sketch attached brand/origin/warranty to each BOQ line, matching how the itemized
+comparison is laid out. The owner rejected that as unnecessary data entry: a tender is bought from
+one supplier on one set of terms, so repeating them per line is noise. Delivery is also rarely a
+single number, so it is captured as a range (from + optional to + Weeks/Months) rather than one
+value.
+
+Outcome:
+
+- Seven nullable columns on `bids`, mirrored on `bid_negotiation_submissions` so a round can revise
+  the terms. No side table — the data is 1:1 with its parent and always read with it.
+- A dedicated `PUT /bids/:bidId/commercial-terms`, separate from the BOQ save, because the BOQ
+  endpoint requires a real template and cannot be called on a legacy tender at all.
+- Display formatting lives in `packages/shared-types` for the two web apps and is mirrored in the
+  API for the Award Minutes PDF, because the API cannot take a workspace dependency without
+  regenerating a lockfile the air-gapped build box cannot regenerate.
+
+Impact:
+
+- Vendor bid wizard gains one card; no new wizard step.
+- Admin Commercial Comparison gains a section under the itemized matrix that renders even for
+  tenders with no BOQ template.
+- Award Minutes PDF gains a "Commercial Terms of Offers" table.
+- Any future per-line variant would need a new table, not a column change.
+
+Related files:
+
+```text
+database/migrations/052_bid_commercial_terms.sql
+apps/api/src/modules/bids/commercial-terms.util.ts
+packages/shared-types/src/commercial-terms.ts
+```

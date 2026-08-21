@@ -15,6 +15,13 @@ export class CreateDepartmentDto {
   @MaxLength(255)
   name!: string;
 
+  // Migration 054 (2026-08-13): Arabic name for the Arabic management dashboard.
+  @ApiPropertyOptional({ description: 'Arabic department name; falls back to name when empty', maxLength: 255 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  nameAr?: string;
+
   @ApiPropertyOptional({ description: 'Parent department ID (for hierarchy)' })
   @IsOptional()
   @IsUUID()

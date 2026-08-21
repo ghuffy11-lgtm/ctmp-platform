@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { TenderStatus, TenderVisibility, AuditRiskLevel, BidStatus, EnvelopeStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { vendorTenderViewDenial } from './vendor-access';
 import { AuditService } from '../audit/audit.service';
 import { TenderStorageService } from './tender-storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -81,9 +82,20 @@ export class TendersService {
   // no department scoping, no department-cross visibility via committee/eval
   // membership (none of those apply for anonymous callers).
   async findAllPublic(query: ListTendersDto) {
+    // Owner report 2026-08-07: closed tenders were still advertised on the
+    // public landing page. A tender only leaves PUBLISHED when an admin runs
+    // close-submissions, and nothing in the API does that automatically (there
+    // is no scheduler), so a tender whose deadline passed months ago stayed on
+    // the list with a "Closed" countdown. The submit gate always rejected those
+    // bids, but listing them as opportunities is misleading — so the public
+    // list now keys off the deadline rather than waiting for the status change.
     const where: Prisma.TenderWhereInput = {
       status: { in: [TenderStatus.PUBLISHED, TenderStatus.CLARIFICATION_PERIOD] },
       visibility: TenderVisibility.PUBLIC,
+      OR: [
+        { submissionCloseAt: null }, // no deadline set = still open
+        { submissionCloseAt: { gt: new Date() } },
+      ],
     };
     if (query.category) where.category = query.category;
     if (query.search && query.search.trim().length > 0) {
@@ -188,11 +200,25 @@ export class TendersService {
     // into a forced-logout via the 401 interceptor.
     if (user?.vendorId) {
       andClauses.push(
-        { status: { in: [
-          TenderStatus.PUBLISHED,
-          TenderStatus.CLARIFICATION_PERIOD,
-          TenderStatus.NEGOTIATION,
-        ] } },
+        // Owner report 2026-08-07: hide tenders whose submission window has
+        // closed, instead of waiting for an admin to run close-submissions.
+        // NEGOTIATION is deliberately exempt — a negotiation round happens
+        // AFTER the original deadline, so filtering on it would cut invited
+        // vendors off from submitting their revised offer. Vendors reach
+        // tenders they already bid on through My Bids, and the tender detail
+        // endpoint is unchanged, so nothing they own becomes unreachable.
+        {
+          OR: [
+            { status: TenderStatus.NEGOTIATION },
+            {
+              status: { in: [TenderStatus.PUBLISHED, TenderStatus.CLARIFICATION_PERIOD] },
+              OR: [
+                { submissionCloseAt: null },
+                { submissionCloseAt: { gt: new Date() } },
+              ],
+            },
+          ],
+        },
         {
           OR: [
             { visibility: TenderVisibility.PUBLIC },
@@ -279,19 +305,16 @@ export class TendersService {
 
     // BUG-015 vendor visibility on detail: PUBLIC OR (INVITATION_ONLY + invited).
     // Must also be in PUBLISHED / CLARIFICATION_PERIOD / NEGOTIATION (BUG-127).
+    // Owner report 2026-08-07: this used to throw a flat "Tender not accessible
+    // to vendor", which reads like a permissions fault even when the real
+    // reason is simply that submissions closed. vendorTenderViewDenial names
+    // the actual reason and, where relevant, the date.
     if (user?.vendorId) {
-      const allowedStatuses = [
-        TenderStatus.PUBLISHED,
-        TenderStatus.CLARIFICATION_PERIOD,
-        TenderStatus.NEGOTIATION,
-      ] as TenderStatus[];
-      const isPublicAllowed = tender.visibility === TenderVisibility.PUBLIC;
-      const isInvited =
-        tender.visibility === TenderVisibility.INVITATION_ONLY &&
-        (tender.tenderVendors ?? []).some((tv: any) => tv.vendor.id === user.vendorId);
-      if ((!isPublicAllowed && !isInvited) || !allowedStatuses.includes(tender.status)) {
-        throw new ForbiddenException('Tender not accessible to vendor');
-      }
+      const invited = (tender.tenderVendors ?? []).some(
+        (tv: any) => tv.vendor.id === user.vendorId,
+      );
+      const denial = vendorTenderViewDenial(tender, invited);
+      if (denial) throw new ForbiddenException(denial);
     }
 
     return this.serializeDetail(tender);

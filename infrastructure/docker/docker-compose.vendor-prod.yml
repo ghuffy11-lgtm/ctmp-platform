@@ -1,0 +1,49 @@
+# =============================================================================
+# CTMP — PRODUCTION (vendor server 172.16.4.11 → https://vn.hadiclinic.com.kw:4201)
+#
+# DMZ / public-facing vendor portal. Runs ONLY the Next.js vendor frontend plus
+# a TLS nginx. There is NO database, redis or api here — the API + DB live on the
+# admin server (10.1.27.99). The vendor nginx terminates TLS and:
+#   • /        -> web-vendor:4300  (the vendor UI)
+#   • /api/*   -> https://10.1.27.99:4202  (admin API, same-origin for the browser)
+#
+# Air-gapped host: build the image on the egress box and transfer it
+# (docker save | ssh | docker load), then `up -d --no-build`.
+#
+# Run from infrastructure/docker on the vendor host:
+#   docker compose --env-file .env.vendor-prod \
+#     -f docker-compose.vendor-prod.yml -p ctmp up -d --no-build
+# =============================================================================
+name: ctmp
+
+services:
+  web-vendor:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/web-vendor.Dockerfile
+      args:
+        # Same-origin: the vendor browser calls https://vn.hadiclinic.com.kw:4201/api/*
+        # which nginx proxies to the admin API. hCaptcha site key is baked at build.
+        NEXT_PUBLIC_API_URL: ${VENDOR_PUBLIC_API_URL:?VENDOR_PUBLIC_API_URL required}
+        NEXT_PUBLIC_HCAPTCHA_SITE_KEY: ${HCAPTCHA_SITE_KEY:?HCAPTCHA_SITE_KEY required}
+    container_name: ctmp-web-vendor
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${VENDOR_PUBLIC_API_URL}
+    # No host port — reached only through nginx.
+    # depends_on intentionally omitted: nginx must still start even if the UI
+    # container is restarting.
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ctmp-vendor-nginx
+    restart: unless-stopped
+    ports:
+      - '${VENDOR_TLS_PORT:-4201}:443'
+    volumes:
+      - ./nginx/vn.conf:/etc/nginx/conf.d/default.conf:ro
+      # Real DigiCert wildcard *.hadiclinic.com.kw, transferred into the project
+      # (this host has no /etc/ssl cert convention). Mounted read-only.
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - web-vendor

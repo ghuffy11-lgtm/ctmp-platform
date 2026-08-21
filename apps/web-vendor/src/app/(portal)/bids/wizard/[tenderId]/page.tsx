@@ -7,6 +7,17 @@ import { get, post, put, patch, ApiError } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { FileDropZone } from '@/components/forms/FileDropZone';
+import {
+  CommercialTermsCard,
+  CommercialTermsSummary,
+  draftToCommercialTerms,
+  EMPTY_COMMERCIAL_TERMS_DRAFT,
+  toCommercialTermsDraft,
+  toCommercialTermsPayload,
+  validateCommercialTermsDraft,
+  type CommercialTermsDraft,
+} from '@/components/bids/CommercialTermsCard';
+import type { CommercialTerms } from '@ctmp/shared-types';
 
 interface Tender {
   id: string;
@@ -111,6 +122,11 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
   const [boqTemplate, setBoqTemplate] = useState<BoqTemplateRow[]>([]);
   const [boqLines, setBoqLines] = useState<BoqLineDraft[]>([]);
   const [boqSaving, setBoqSaving] = useState(false);
+  // Migration 052 (2026-08-06): bid-level commercial terms. Saved by the same
+  // Step-2 Save button as the BOQ, but through their own endpoint so they also
+  // work on tenders with no BOQ template.
+  const [terms, setTerms] = useState<CommercialTermsDraft>(EMPTY_COMMERCIAL_TERMS_DRAFT);
+  const [termsError, setTermsError] = useState<string | null>(null);
   const hasRealBoq = useMemo(
     () => boqTemplate.some(r => !(r.itemNo === PLACEHOLDER_ITEM_NO && r.description === PLACEHOLDER_DESCRIPTION)),
     [boqTemplate],
@@ -189,6 +205,14 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
         setTechnicalDocs(tech.documents);
         setCommercialDocs(comm.documents);
 
+        // Migration 052: hydrate the commercial terms; absent on a fresh draft.
+        try {
+          const storedTerms = await get<CommercialTerms>(`/bids/${bidRes.id}/commercial-terms`, token);
+          setTerms(toCommercialTermsDraft(storedTerms));
+        } catch {
+          setTerms(EMPTY_COMMERCIAL_TERMS_DRAFT);
+        }
+
         // BUG-137 (2026-06-19): load existing supporting docs for this bid.
         try {
           const sd = await get<{ items: SupportingDoc[] }>(
@@ -253,6 +277,30 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
     }
   }
 
+  // Migration 052 (2026-08-06): PUT the bid-level commercial terms. Separate
+  // from the BOQ save because a legacy tender has no BOQ endpoint to call, yet
+  // the terms must still be recordable there.
+  async function handleSaveTerms() {
+    if (!bid) return;
+    const problem = validateCommercialTermsDraft(terms);
+    setTermsError(problem);
+    if (problem) throw new Error(problem);
+    const token = getAccessToken();
+    await put(`/bids/${bid.id}/commercial-terms`, toCommercialTermsPayload(terms), token);
+  }
+
+  // Step 2 save: terms always, BOQ only when the tender has a real template.
+  async function handleSaveStep2() {
+    if (!bid) return;
+    setBoqSaving(true);
+    try {
+      await handleSaveTerms();
+      if (hasRealBoq) await handleSaveBoq();
+    } finally {
+      setBoqSaving(false);
+    }
+  }
+
   // BUG-068: validate + PUT vendor's BOQ entries. Allowed any time pre-submit.
   async function handleSaveBoq() {
     if (!bid || !hasRealBoq) return;
@@ -311,6 +359,10 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
       if (hasRealBoq) {
         try { await handleSaveBoq(); } catch { setSubmitting(false); return; }
       }
+      // Migration 052: flush any unsaved commercial terms. Best-effort by
+      // design — they are optional, so a failure here must never stop a
+      // submission that is otherwise valid.
+      try { await handleSaveTerms(); } catch { /* terms stay as last saved */ }
       const result = await post<SubmitReceipt>(`/bids/${bid.id}/submit`, {}, token);
       setReceipt(result);
       // BUG-137 (2026-06-19): Review step's index varies with the dynamic
@@ -430,12 +482,13 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
               setBoqLines={setBoqLines}
               tenderReferenceNumber={tender?.referenceNumber}
               saving={boqSaving}
-              onSaveDraft={async () => { try { await handleSaveBoq(); } catch { /* error already in state */ } }}
+              terms={terms}
+              setTerms={next => { setTerms(next); setTermsError(null); }}
+              termsError={termsError}
+              onSaveDraft={async () => { try { await handleSaveStep2(); } catch { /* error already in state */ } }}
               onPrev={() => goTo(prevStepName)}
               onNext={async () => {
-                if (hasRealBoq) {
-                  try { await handleSaveBoq(); } catch { return; }
-                }
+                try { await handleSaveStep2(); } catch { return; }
                 goTo(nextStepName);
               }}
             />
@@ -482,6 +535,7 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
               hasRealBoq={hasRealBoq}
               boqTemplate={boqTemplate}
               boqLines={boqLines}
+              terms={terms}
               receipt={receipt}
               submitting={submitting}
               onPrev={() => !receipt && goTo(prevStepName)}
@@ -733,6 +787,9 @@ function Step2BoqPricing({
   setBoqLines,
   tenderReferenceNumber,
   saving,
+  terms,
+  setTerms,
+  termsError,
   onSaveDraft,
   onPrev,
   onNext,
@@ -743,6 +800,10 @@ function Step2BoqPricing({
   setBoqLines: (next: BoqLineDraft[]) => void;
   tenderReferenceNumber?: string;
   saving: boolean;
+  // Migration 052 (2026-08-06): bid-level commercial terms.
+  terms: CommercialTermsDraft;
+  setTerms: (next: CommercialTermsDraft) => void;
+  termsError: string | null;
   onSaveDraft: () => Promise<void>;
   onPrev: () => void;
   onNext: () => Promise<void>;
@@ -758,11 +819,20 @@ function Step2BoqPricing({
       <div className="bg-card border border-border rounded-xl p-6 space-y-4">
         <h2 className="text-lg font-bold text-text-primary">Commercial Pricing</h2>
         <p className="text-sm text-text-secondary">
-          This tender has no structured Bill of Quantities. The commercial PDF you upload in the next step is the price record. Click Continue.
+          This tender has no structured Bill of Quantities. The commercial PDF you upload in the next step is the price record.
         </p>
+        {/* Migration 052: the terms are bid-level, so they are enterable here
+            even though there is no BOQ table to price. */}
+        <CommercialTermsCard draft={terms} setDraft={setTerms} error={termsError} disabled={saving} />
         <div className="flex justify-between border-t border-border pt-4">
           <button onClick={onPrev} className="px-4 py-2 border border-border text-text-secondary rounded-lg font-semibold hover:bg-bg">← Back</button>
-          <button onClick={() => onNext()} className="px-5 py-2 bg-accent text-white rounded-lg font-bold hover:opacity-90">Continue →</button>
+          <button
+            onClick={() => onNext()}
+            disabled={saving}
+            className="px-5 py-2 bg-accent text-white rounded-lg font-bold hover:opacity-90 disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Continue →'}
+          </button>
         </div>
       </div>
     );
@@ -966,6 +1036,11 @@ function Step2BoqPricing({
         </table>
       </div>
 
+      {/* Migration 052 (2026-08-06): commercial terms describe the offer as a
+          whole, so they follow the priced BOQ rather than interrupting it
+          (owner feedback 2026-08-06). The CSV round-trip stays line-level. */}
+      <CommercialTermsCard draft={terms} setDraft={setTerms} error={termsError} disabled={saving} />
+
       <div className="flex justify-between border-t border-border pt-4 gap-2 flex-wrap">
         <button
           onClick={onPrev}
@@ -1004,6 +1079,7 @@ function Step4Review({
   hasRealBoq,
   boqTemplate,
   boqLines,
+  terms,
   receipt,
   submitting,
   onPrev,
@@ -1019,6 +1095,8 @@ function Step4Review({
   hasRealBoq: boolean;
   boqTemplate: BoqTemplateRow[];
   boqLines: BoqLineDraft[];
+  // Migration 052 (2026-08-06): read-only echo of the commercial terms.
+  terms: CommercialTermsDraft;
   receipt: SubmitReceipt | null;
   submitting: boolean;
   onPrev: () => void;
@@ -1133,6 +1211,13 @@ function Step4Review({
           </table>
         </div>
       )}
+      {/* Migration 052 (2026-08-06): bid-level commercial terms as they will be
+          read by procurement. Same formatters as the admin comparison. */}
+      <div className="border border-border rounded-lg p-4">
+        <p className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-3">Commercial Terms</p>
+        <CommercialTermsSummary terms={draftToCommercialTerms(terms)} />
+      </div>
+
       {/* BUG-137 (2026-06-19): commercial PDF is now required for every bid. */}
       <ReviewBlock title="Commercial PDF" docs={commercialDocs} optional={false} />
 

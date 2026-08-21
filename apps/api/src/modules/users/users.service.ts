@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { AuditRiskLevel, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateUserDto, UserAuthTypeDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
@@ -10,9 +11,12 @@ const BCRYPT_ROUNDS = 12;
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async findAll() {
@@ -113,9 +117,11 @@ export class UsersService {
 
     await this.validateDepartmentSelection(dto.departmentIds, dto.primaryDepartmentId);
 
+    let roleForWelcome: { name: string; code: string } | null = null;
     if (dto.roleId) {
       const role = await this.prisma.role.findUnique({ where: { id: dto.roleId } });
       if (!role) throw new BadRequestException('roleId does not exist');
+      roleForWelcome = { name: role.name, code: role.code };
     }
 
     const passwordHash = dto.password ? await bcrypt.hash(dto.password, BCRYPT_ROUNDS) : null;
@@ -181,7 +187,54 @@ export class UsersService {
       riskLevel: AuditRiskLevel.HIGH,
     });
 
+    // 2026-06-28: optional welcome email with the role guide. A mail failure
+    // must never fail user creation, so it's best-effort + logged.
+    if (dto.sendWelcomeEmail) {
+      try {
+        await this.notifications.sendRoleWelcome({
+          to: full.email,
+          userName: full.displayName,
+          roleName: roleForWelcome?.name ?? full.roles[0]?.name ?? '',
+          roleCode: roleForWelcome?.code ?? null,
+        });
+      } catch (err) {
+        this.logger.warn(`welcome email to ${full.email} failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
     return full;
+  }
+
+  // 2026-06-28: (re)send the welcome email + role guide to an existing user.
+  async sendWelcome(userId: string, actorUserId?: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        email: true,
+        displayName: true,
+        userRoles: { select: { role: { select: { name: true, code: true } } }, take: 1 },
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    const role = user.userRoles[0]?.role ?? null;
+
+    const result = await this.notifications.sendRoleWelcome({
+      to: user.email,
+      userName: user.displayName,
+      roleName: role?.name ?? '',
+      roleCode: role?.code ?? null,
+    });
+
+    await this.audit.log({
+      eventType: 'USER_WELCOME_SENT',
+      entityType: 'User',
+      entityId: userId,
+      actorUserId,
+      afterValue: { email: user.email, roleCode: role?.code ?? null },
+      riskLevel: AuditRiskLevel.LOW,
+    });
+
+    return { status: (result as { status?: string })?.status ?? 'SENT', email: user.email };
   }
 
   async update(id: string, dto: UpdateUserDto, actorUserId?: string) {

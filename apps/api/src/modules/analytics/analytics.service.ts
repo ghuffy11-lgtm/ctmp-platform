@@ -60,6 +60,10 @@ export interface MonthlyTrendPoint {
 export interface DepartmentBreakdown {
   departmentId: string;
   departmentName: string;
+  // Migration 054 (2026-08-13): Arabic siblings for /executive-ar. Additive —
+  // the English page and every other consumer ignores them. Null means the row
+  // has no Arabic name yet, and the client falls back to the English one.
+  departmentNameAr?: string | null;
   tenderCount: number;
   estimatedValue: number;
   awardedValue: number;
@@ -67,6 +71,7 @@ export interface DepartmentBreakdown {
 
 export interface CategoryBreakdown {
   category: string; // 'Uncategorised' for nulls
+  categoryAr?: string | null;
   tenderCount: number;
   estimatedValue: number;
   awardedValue: number;
@@ -75,6 +80,7 @@ export interface CategoryBreakdown {
 export interface VendorBreakdown {
   vendorId: string;
   vendorName: string;
+  vendorNameAr?: string | null;
   awardCount: number;
   totalAwarded: number;
   /** Percentage of total awarded value in the period. */
@@ -97,6 +103,7 @@ export interface PipelineByStatus {
 export interface DepartmentTopVendor {
   vendorId: string;
   vendorName: string;
+  vendorNameAr?: string | null;
   awardCount: number;
   totalAwarded: number;
 }
@@ -105,6 +112,8 @@ export interface DepartmentRow {
   departmentId: string;
   departmentCode: string;
   departmentName: string;
+  // Migration 054 (2026-08-13): Arabic sibling for /executive-ar/departments.
+  departmentNameAr?: string | null;
   tenderCount: number;
   awardedCount: number;
   activeCount: number;
@@ -123,11 +132,13 @@ export interface DepartmentTenderRow {
   title: string;
   status: string;
   category: string | null;
+  categoryAr?: string | null;
   estimatedBudget: number | null;
   awardedAmount: number | null;
   awardedAt: string | null;
   awardedVendorId: string | null;
   awardedVendorName: string | null;
+  awardedVendorNameAr?: string | null;
   createdAt: string;
 }
 
@@ -144,6 +155,8 @@ export interface DepartmentProfileResponse {
     id: string;
     code: string;
     name: string;
+    // Migration 054 (2026-08-13): Arabic name for /executive-ar.
+    nameAr?: string | null;
   };
   year: number | null; // null = all-time
   metrics: {
@@ -192,6 +205,8 @@ export interface DepartmentOverviewResponse {
 export interface VendorDirectoryRow {
   vendorId: string;
   companyName: string;
+  // Migration 054 (2026-08-13): Arabic sibling for /executive-ar/vendors.
+  companyNameAr?: string | null;
   status: VendorStatus;
   country: string | null;
   awardCount: number;
@@ -236,7 +251,10 @@ export interface VendorAwardHistoryRow {
   tenderReference: string;
   tenderTitle: string;
   departmentName: string | null;
+  // Migration 054 (2026-08-13): Arabic siblings for /executive-ar, additive.
+  departmentNameAr?: string | null;
   category: string | null;
+  categoryAr?: string | null;
   awardedAt: string;
   awardedAmount: number;
   awardId: string | null;
@@ -269,6 +287,8 @@ export interface VendorProfileResponse {
   profile: {
     id: string;
     companyName: string;
+    // Migration 054 (2026-08-13): Arabic name for /executive-ar.
+    companyNameAr?: string | null;
     registrationNumber: string | null;
     taxNumber: string | null;
     country: string | null;
@@ -361,7 +381,7 @@ export class AnalyticsService {
           estimatedBudget: true,
           createdAt: true,
           submissionCloseAt: true,
-          department: { select: { name: true } },
+          department: { select: { name: true, nameAr: true } },
         },
       }),
       this.prisma.tender.findMany({
@@ -397,10 +417,13 @@ export class AnalyticsService {
     const vendorNames = awardedVendorIds.length > 0
       ? await this.prisma.vendor.findMany({
           where: { id: { in: awardedVendorIds } },
-          select: { id: true, companyName: true },
+          select: { id: true, companyName: true, companyNameAr: true },
         })
       : [];
     const vendorNameById = new Map(vendorNames.map(v => [v.id, v.companyName]));
+    const vendorNameArById = new Map(vendorNames.map(v => [v.id, v.companyNameAr]));
+
+    const categoryArByName = await this._categoryArByName();
 
     // Year-scoped & cancellation-excluded awarded subsets.
     const inYearAwarded = (rows: typeof awardedTendersAll, y: number) =>
@@ -556,12 +579,13 @@ export class AnalyticsService {
     // Combined view: tenderCount + estimatedValue from thisYearCreated;
     // awardedValue from awardedThisYear. Keyed by departmentId.
     const byDeptMap = new Map<string, DepartmentBreakdown>();
-    const ensureDept = (id: string, name: string | null) => {
+    const ensureDept = (id: string, name: string | null, nameAr?: string | null) => {
       let b = byDeptMap.get(id);
       if (!b) {
         b = {
           departmentId: id,
           departmentName: name ?? '—',
+          departmentNameAr: nameAr ?? null,
           tenderCount: 0,
           estimatedValue: 0,
           awardedValue: 0,
@@ -569,11 +593,12 @@ export class AnalyticsService {
         byDeptMap.set(id, b);
       } else if (b.departmentName === '—' && name) {
         b.departmentName = name;
+        b.departmentNameAr = nameAr ?? b.departmentNameAr ?? null;
       }
       return b;
     };
     for (const t of thisYearCreated) {
-      const b = ensureDept(t.departmentId, t.department?.name ?? null);
+      const b = ensureDept(t.departmentId, t.department?.name ?? null, t.department?.nameAr ?? null);
       b.tenderCount += 1;
       b.estimatedValue += t.estimatedBudget != null ? Number(t.estimatedBudget) : 0;
     }
@@ -590,7 +615,13 @@ export class AnalyticsService {
     const ensureCat = (cat: string) => {
       let b = byCatMap.get(cat);
       if (!b) {
-        b = { category: cat, tenderCount: 0, estimatedValue: 0, awardedValue: 0 };
+        b = {
+          category: cat,
+          categoryAr: categoryArByName.get(cat) ?? null,
+          tenderCount: 0,
+          estimatedValue: 0,
+          awardedValue: 0,
+        };
         byCatMap.set(cat, b);
       }
       return b;
@@ -617,6 +648,7 @@ export class AnalyticsService {
         v = {
           vendorId: t.awardedVendorId,
           vendorName: vendorNameById.get(t.awardedVendorId) ?? '—',
+          vendorNameAr: vendorNameArById.get(t.awardedVendorId) ?? null,
           awardCount: 0,
           totalAwarded: 0,
           shareOfTotal: 0,
@@ -716,12 +748,12 @@ export class AnalyticsService {
       this.prisma.department.findMany({
         where: { isActive: true },
         orderBy: { name: 'asc' },
-        select: { id: true, code: true, name: true },
+        select: { id: true, code: true, name: true, nameAr: true },
       }),
       // Awarded side: resolver-priced loader (BoQ-aware, BUG-133 / BUG-135).
       this._loadAwardedTendersForVendors(),
       // Vendor names for the top-3 block.
-      this.prisma.vendor.findMany({ select: { id: true, companyName: true } }),
+      this.prisma.vendor.findMany({ select: { id: true, companyName: true, companyNameAr: true } }),
     ]);
     const vendorNameById = new Map(awardedVendorNames.map(v => [v.id, v.companyName]));
 
@@ -729,13 +761,14 @@ export class AnalyticsService {
       vendorMap: Map<string, DepartmentTopVendor>;
     }
     const accByDept = new Map<string, Acc>();
-    const ensureAcc = (deptId: string, code: string, name: string): Acc => {
+    const ensureAcc = (deptId: string, code: string, name: string, nameAr?: string | null): Acc => {
       let acc = accByDept.get(deptId);
       if (!acc) {
         acc = {
           departmentId: deptId,
           departmentCode: code,
           departmentName: name,
+          departmentNameAr: nameAr ?? null,
           tenderCount: 0,
           awardedCount: 0,
           activeCount: 0,
@@ -757,7 +790,7 @@ export class AnalyticsService {
       return acc;
     };
     for (const d of departments) {
-      ensureAcc(d.id, d.code, d.name);
+      ensureAcc(d.id, d.code, d.name, d.nameAr);
     }
 
     // Estimated side: tenderCount + estimatedValue for tenders created this year.
@@ -858,7 +891,7 @@ export class AnalyticsService {
   ): Promise<DepartmentProfileResponse> {
     const department = await this.prisma.department.findUnique({
       where: { id: departmentId },
-      select: { id: true, code: true, name: true },
+      select: { id: true, code: true, name: true, nameAr: true },
     });
     if (!department) {
       throw new NotFoundException(`Department ${departmentId} not found`);
@@ -894,7 +927,7 @@ export class AnalyticsService {
           awardedAmount: true,
           awardedAt: true,
           awardedVendorId: true,
-          awardedVendor: { select: { id: true, companyName: true } },
+          awardedVendor: { select: { id: true, companyName: true, companyNameAr: true } },
           createdAt: true,
         },
         orderBy: { createdAt: 'desc' },
@@ -912,9 +945,11 @@ export class AnalyticsService {
       // Resolver-priced awarded tenders (BoQ-aware), all time. We filter to
       // departmentId + year below.
       this._loadAwardedTendersForVendors(),
-      this.prisma.vendor.findMany({ select: { id: true, companyName: true } }),
+      this.prisma.vendor.findMany({ select: { id: true, companyName: true, companyNameAr: true } }),
     ]);
     const vendorNameById = new Map(awardedVendorNames.map(v => [v.id, v.companyName]));
+    const vendorNameArById = new Map(awardedVendorNames.map(v => [v.id, v.companyNameAr]));
+    const deptCategoryAr = await this._categoryArByName();
 
     // Per-tender row list (for the Tenders tab). We resolve each tender's
     // amount via the loader output when present; otherwise null.
@@ -927,11 +962,13 @@ export class AnalyticsService {
         title: t.title,
         status: t.status,
         category: t.category,
+        categoryAr: t.category ? deptCategoryAr.get(t.category) ?? null : null,
         estimatedBudget: t.estimatedBudget != null ? Number(t.estimatedBudget) : null,
         awardedAmount: loaded ? loaded.awardedAmount : null,
         awardedAt: t.awardedAt ? t.awardedAt.toISOString() : null,
         awardedVendorId: t.awardedVendorId,
         awardedVendorName: t.awardedVendor?.companyName ?? null,
+        awardedVendorNameAr: t.awardedVendor?.companyNameAr ?? null,
         createdAt: t.createdAt.toISOString(),
       };
     });
@@ -975,6 +1012,7 @@ export class AnalyticsService {
       const cur = vendorMap.get(t.awardedVendorId) ?? {
         vendorId: t.awardedVendorId,
         vendorName: vendorNameById.get(t.awardedVendorId) ?? '—',
+        vendorNameAr: vendorNameArById.get(t.awardedVendorId) ?? null,
         awardCount: 0,
         totalAwarded: 0,
       };
@@ -989,7 +1027,13 @@ export class AnalyticsService {
     const ensureCat = (cat: string) => {
       let ce = catMap.get(cat);
       if (!ce) {
-        ce = { category: cat, tenderCount: 0, estimatedValue: 0, awardedValue: 0 };
+        ce = {
+          category: cat,
+          categoryAr: deptCategoryAr.get(cat) ?? null,
+          tenderCount: 0,
+          estimatedValue: 0,
+          awardedValue: 0,
+        };
         catMap.set(cat, ce);
       }
       return ce;
@@ -1049,7 +1093,7 @@ export class AnalyticsService {
     }
 
     return {
-      profile: { id: department.id, code: department.code, name: department.name },
+      profile: { id: department.id, code: department.code, name: department.name, nameAr: department.nameAr ?? null },
       year,
       metrics: {
         tenderCount,
@@ -1172,6 +1216,16 @@ export class AnalyticsService {
    * vendor set, with just enough columns to compute amounts (incl. BUG-088
    * fallback). Returns normalised rows ready for aggregation.
    */
+  // Migration 054: category Arabic names come from the managed table, keyed by
+  // name because tenders.category stores the name rather than an id. Shared by
+  // the executive summary and both profile endpoints so they can't disagree.
+  private async _categoryArByName(): Promise<Map<string, string | null>> {
+    const rows = await this.prisma.tenderCategory.findMany({
+      select: { name: true, nameAr: true },
+    });
+    return new Map(rows.map(c => [c.name, c.nameAr]));
+  }
+
   private async _loadAwardedTendersForVendors(vendorIds?: string[]) {
     const where: Prisma.TenderWhereInput = {
       awardedAt: { not: null },
@@ -1198,7 +1252,7 @@ export class AnalyticsService {
         estimatedBudget: true,
         createdAt: true,
         submissionCloseAt: true,
-        department: { select: { id: true, name: true } },
+        department: { select: { id: true, name: true, nameAr: true } },
         // BUG-088 fallback: load the awarded vendor's bid + its latest
         // CommercialEvaluation total. We only need it when awardedAmount is
         // NULL but we eagerly load it to keep this in a single query.
@@ -1257,6 +1311,7 @@ export class AnalyticsService {
         category: t.category,
         departmentId: t.departmentId,
         departmentName: t.department?.name ?? null,
+        departmentNameAr: t.department?.nameAr ?? null,
         tenderStatus: t.status as TenderStatus,
         awardedAt: t.awardedAt!,
         awardedVendorId: t.awardedVendorId!,
@@ -1306,6 +1361,7 @@ export class AnalyticsService {
         select: {
           id: true,
           companyName: true,
+          companyNameAr: true,
           status: true,
           country: true,
           _count: { select: { bids: { where: { status: { not: BidStatus.WITHDRAWN } } } } },
@@ -1347,6 +1403,7 @@ export class AnalyticsService {
       return {
         vendorId: v.id,
         companyName: v.companyName,
+        companyNameAr: v.companyNameAr ?? null,
         status: v.status,
         country: v.country,
         awardCount,
@@ -1454,6 +1511,8 @@ export class AnalyticsService {
       }),
     ]);
 
+    const vendorCategoryAr = await this._categoryArByName();
+
     // Build award status map: an Award row is "Active" when not superseded,
     // "Superseded" when it is, "Amended" when this is the latest in a chain
     // where prior rows exist. Simplification for v1: distinguish Active vs
@@ -1476,7 +1535,9 @@ export class AnalyticsService {
           tenderReference: t.reference,
           tenderTitle: t.title,
           departmentName: t.departmentName,
+          departmentNameAr: t.departmentNameAr,
           category: t.category,
+          categoryAr: t.category ? vendorCategoryAr.get(t.category) ?? null : null,
           awardedAt: t.awardedAt.toISOString(),
           awardedAmount: t.awardedAmount,
           awardId: active?.id ?? null,
@@ -1531,6 +1592,7 @@ export class AnalyticsService {
       const de = deptMap.get(t.departmentId) ?? {
         departmentId: t.departmentId,
         departmentName: t.departmentName ?? '—',
+        departmentNameAr: t.departmentNameAr ?? null,
         tenderCount: 0,
         estimatedValue: 0,
         awardedValue: 0,
@@ -1542,6 +1604,7 @@ export class AnalyticsService {
       const cat = t.category ?? 'Uncategorised';
       const ce = catMap.get(cat) ?? {
         category: cat,
+        categoryAr: vendorCategoryAr.get(cat) ?? null,
         tenderCount: 0,
         estimatedValue: 0,
         awardedValue: 0,
@@ -1577,6 +1640,8 @@ export class AnalyticsService {
       profile: {
         id: vendor.id,
         companyName: vendor.companyName,
+        // Migration 054 (2026-08-13): Arabic name for /executive-ar.
+        companyNameAr: vendor.companyNameAr ?? null,
         registrationNumber: vendor.registrationNumber,
         taxNumber: vendor.taxNumber,
         country: vendor.country,

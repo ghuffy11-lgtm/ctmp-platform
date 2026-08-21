@@ -15,7 +15,7 @@ export class DepartmentsService {
   async findAll(limit = 100, includeInactive = false) {
     const data = await this.prisma.department.findMany({
       where: includeInactive ? {} : { isActive: true },
-      select: { id: true, name: true, code: true, parentId: true, isActive: true },
+      select: { id: true, name: true, nameAr: true, code: true, parentId: true, isActive: true },
       orderBy: { name: 'asc' },
       take: limit,
     });
@@ -25,7 +25,7 @@ export class DepartmentsService {
   async findOne(id: string) {
     const dept = await this.prisma.department.findUnique({
       where: { id },
-      select: { id: true, name: true, code: true, parentId: true, isActive: true },
+      select: { id: true, name: true, nameAr: true, code: true, parentId: true, isActive: true },
     });
     if (!dept) throw new NotFoundException('Department not found');
     return dept;
@@ -43,9 +43,10 @@ export class DepartmentsService {
         data: {
           code: dto.code,
           name: dto.name,
+          nameAr: dto.nameAr?.trim() || null,
           parentId: dto.parentId ?? null,
         },
-        select: { id: true, name: true, code: true, parentId: true, isActive: true },
+        select: { id: true, name: true, nameAr: true, code: true, parentId: true, isActive: true },
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
@@ -69,7 +70,7 @@ export class DepartmentsService {
   async update(id: string, dto: UpdateDepartmentDto, actorUserId?: string) {
     const before = await this.prisma.department.findUnique({
       where: { id },
-      select: { id: true, name: true, code: true, parentId: true, isActive: true },
+      select: { id: true, name: true, nameAr: true, code: true, parentId: true, isActive: true },
     });
     if (!before) throw new NotFoundException('Department not found');
 
@@ -81,6 +82,8 @@ export class DepartmentsService {
 
     const data: Prisma.DepartmentUpdateInput = { updatedAt: new Date() };
     if (dto.name !== undefined) data.name = dto.name;
+    // Migration 054: blank string clears the Arabic name (falls back to name).
+    if (dto.nameAr !== undefined) data.nameAr = dto.nameAr?.trim() || null;
     if (dto.parentId !== undefined) {
       data.parent = dto.parentId === null
         ? { disconnect: true }
@@ -91,7 +94,7 @@ export class DepartmentsService {
     const after = await this.prisma.department.update({
       where: { id },
       data,
-      select: { id: true, name: true, code: true, parentId: true, isActive: true },
+      select: { id: true, name: true, nameAr: true, code: true, parentId: true, isActive: true },
     });
 
     await this.audit.log({
@@ -110,7 +113,7 @@ export class DepartmentsService {
   async disable(id: string, actorUserId?: string) {
     const before = await this.prisma.department.findUnique({
       where: { id },
-      select: { id: true, name: true, code: true, parentId: true, isActive: true },
+      select: { id: true, name: true, nameAr: true, code: true, parentId: true, isActive: true },
     });
     if (!before) throw new NotFoundException('Department not found');
     if (!before.isActive) return before;
@@ -118,7 +121,7 @@ export class DepartmentsService {
     const after = await this.prisma.department.update({
       where: { id },
       data: { isActive: false, updatedAt: new Date() },
-      select: { id: true, name: true, code: true, parentId: true, isActive: true },
+      select: { id: true, name: true, nameAr: true, code: true, parentId: true, isActive: true },
     });
 
     await this.audit.log({

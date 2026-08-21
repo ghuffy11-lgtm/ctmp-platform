@@ -8,6 +8,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, RefreshCw, Upload, CheckCircle2, FileText, Eye, Download } from 'lucide-react';
 import { get, post } from '@/lib/api';
+import type { CommercialTerms } from '@ctmp/shared-types';
+import {
+  CommercialTermsCard,
+  toCommercialTermsDraft,
+  toCommercialTermsPayload,
+  validateCommercialTermsDraft,
+  type CommercialTermsDraft,
+} from '@/components/bids/CommercialTermsCard';
 import { getAccessToken } from '@/lib/auth';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
@@ -63,9 +71,12 @@ interface Props {
   tenderId: string;
   boqTemplate: BoqTemplateRow[];
   previousBoqLines: PreviousBoqLine[];
+  // Migration 052 (2026-08-06): the bid's own commercial terms, used to
+  // pre-fill the re-pricing form so a round edits rather than retypes them.
+  previousTerms?: CommercialTerms | null;
 }
 
-export function NegotiationSection({ bidId, tenderId, boqTemplate, previousBoqLines }: Props) {
+export function NegotiationSection({ bidId, tenderId, boqTemplate, previousBoqLines, previousTerms }: Props) {
   const [openInvitation, setOpenInvitation] = useState<InvitationDto | null>(null);
   // BUG-128 (2026-06-11): submittedInvitations replaces the prior rounds map.
   // Sourced from the vendor's own /vendor/negotiation/invitations response
@@ -128,6 +139,7 @@ export function NegotiationSection({ bidId, tenderId, boqTemplate, previousBoqLi
           tenderId={tenderId}
           boqTemplate={boqTemplate}
           previousBoqLines={previousBoqLines}
+          previousTerms={previousTerms ?? null}
           onSubmitted={load}
         />
       )}
@@ -266,12 +278,14 @@ function OpenInvitationForm({
   tenderId,
   boqTemplate,
   previousBoqLines,
+  previousTerms,
   onSubmitted,
 }: {
   invitation: InvitationDto;
   tenderId: string;
   boqTemplate: BoqTemplateRow[];
   previousBoqLines: PreviousBoqLine[];
+  previousTerms: CommercialTerms | null;
   onSubmitted: () => void;
 }) {
   const prevByItem = new Map(previousBoqLines.map(l => [l.tenderBoqItemId, l]));
@@ -286,6 +300,11 @@ function OpenInvitationForm({
       };
     }),
   );
+  // Migration 052 (2026-08-06): the vendor may revise the bid-level commercial
+  // terms for this round. Pre-filled from the original bid so they edit rather
+  // than retype; still entirely optional.
+  const [terms, setTerms] = useState<CommercialTermsDraft>(() => toCommercialTermsDraft(previousTerms));
+  const [termsError, setTermsError] = useState<string | null>(null);
   const [remarks, setRemarks] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [pdfDocId, setPdfDocId] = useState<string | null>(null);
@@ -341,6 +360,10 @@ function OpenInvitationForm({
   }
 
   async function handleSubmit() {
+    // Migration 052: same rule the API enforces — surface it inline first.
+    const termsProblem = validateCommercialTermsDraft(terms);
+    setTermsError(termsProblem);
+    if (termsProblem) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -351,6 +374,7 @@ function OpenInvitationForm({
           invitationId: invitation.id,
           commercialPdfDocumentId: pdfDocId,
           remarks: remarks.trim() || undefined,
+          commercialTerms: toCommercialTermsPayload(terms),
           boqLines: lines.map(l => ({
             tenderBoqItemId: l.tenderBoqItemId,
             status: l.status,
@@ -380,6 +404,13 @@ function OpenInvitationForm({
       <p className="text-xs text-amber-900/80 italic">
         {invitation.roundLaunchReason}
       </p>
+
+      {/* Migration 052 (2026-08-06): revise the bid-level commercial terms for
+          this round. Pre-filled from the original bid — anything left as-is is
+          simply re-stated for the round. */}
+      <div className="bg-card rounded-lg">
+        <CommercialTermsCard draft={terms} setDraft={next => { setTerms(next); setTermsError(null); }} error={termsError} disabled={submitting} />
+      </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

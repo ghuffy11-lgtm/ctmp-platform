@@ -22,7 +22,9 @@ const STATUS_MAP: Record<string, StatusConfig> = {
 
 const FALLBACK: StatusConfig = { bg: '#F8FAFC', text: '#64748B', dot: '#94A3B8' };
 
-export function StatusBadge({ status }: { status: string }) {
+// `label` lets a translated page show Arabic text while the colour still keys
+// off the raw status — the palette must not depend on the display language.
+export function StatusBadge({ status, label }: { status: string; label?: string }) {
   const cfg = STATUS_MAP[status] ?? FALLBACK;
   return (
     <span
@@ -30,7 +32,7 @@ export function StatusBadge({ status }: { status: string }) {
       style={{ backgroundColor: cfg.bg, color: cfg.text }}
     >
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.dot }} />
-      {status}
+      {label ?? status}
     </span>
   );
 }

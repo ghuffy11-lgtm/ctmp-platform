@@ -1,0 +1,159 @@
+# =============================================================================
+# CTMP — PRODUCTION (admin server 10.1.27.99 → https://ctmp.hadiclinic.com.kw:4202)
+#
+# Self-contained stack for the admin server. Differs from docker-compose.yml:
+#   • No mailhog  — uses the real internal Exchange SMTP relay (env-configured).
+#   • No minio    — STORAGE_DRIVER=local (named volumes on /dev/sdb).
+#   • No web-vendor — that lives on the vendor server (172.16.4.11), later phase.
+#   • postgres + redis are INTERNAL ONLY (no host ports; 5432 already taken on host).
+#   • A dedicated nginx terminates TLS and is the ONLY published port (4202→443).
+#
+# Run from infrastructure/docker on the host, ALWAYS with --env-file so build-arg
+# interpolation (web-admin) and the :? required-secret guards resolve:
+#
+#   docker compose --env-file .env.admin-prod \
+#     -f docker-compose.admin-prod.yml -p ctmp build
+#   docker compose --env-file .env.admin-prod \
+#     -f docker-compose.admin-prod.yml -p ctmp up -d
+#
+# All images, build cache and named volumes live under the docker data-root
+# (/var/lib/docker on /dev/sdb) — nothing on the / partition.
+# =============================================================================
+name: ctmp
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ctmp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ctmp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ${POSTGRES_DB:-ctmp}
+    # No host port — postgres is reachable only on the compose network.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../database/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-ctmp} -d ${POSTGRES_DB:-ctmp}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ctmp-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    # No host port — internal only.
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/api.Dockerfile
+    container_name: ctmp-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ctmp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ctmp}
+      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET required}
+      VENDOR_JWT_SECRET: ${VENDOR_JWT_SECRET:?VENDOR_JWT_SECRET required}
+      VENDOR_JWT_REFRESH_SECRET: ${VENDOR_JWT_REFRESH_SECRET:?VENDOR_JWT_REFRESH_SECRET required}
+      AD_URL: ${AD_URL:-ldap://ad.local:389}
+      AD_BIND_DN: ${AD_BIND_DN:-}
+      AD_BIND_PASSWORD: ${AD_BIND_PASSWORD:-}
+      # SMTP is configured at runtime through the admin Settings UI (stored in
+      # system_settings); these env vars are only the fallback when the DB has
+      # no value. secure auto-enables on port 465; STARTTLS when SMTP_USER set
+      # (see notifications.service.ts / system-settings.service.ts).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@hadiclinic.com.kw}
+      CAPTCHA_PROVIDER: ${CAPTCHA_PROVIDER:-hcaptcha}
+      CAPTCHA_SECRET_KEY: ${CAPTCHA_SECRET_KEY:-}
+      REPORT_STORAGE_PATH: /data/reports
+      REPORT_WORKER_ENABLED: ${REPORT_WORKER_ENABLED:-true}
+      REPORT_WORKER_CONCURRENCY: ${REPORT_WORKER_CONCURRENCY:-2}
+      REPORT_QUEUE_NAME: ${REPORT_QUEUE_NAME:-ctmp-report-exports}
+      BID_STORAGE_PATH: /data/bid-documents
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_LOCAL_ROOT: /data
+      AUDIT_VERIFY_ON_START: ${AUDIT_VERIFY_ON_START:-true}
+      AUDIT_VERIFY_LIMIT: ${AUDIT_VERIFY_LIMIT:-1000}
+      # Master key for encrypting sensitive system_settings (smtp/ad passwords).
+      # If unset, the app falls back to a known in-source dev key — set a real one.
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://ctmp.hadiclinic.com.kw:4202}
+      # BUG-144: absolute portal URLs baked into every outbound email.
+      ADMIN_PORTAL_URL: ${ADMIN_PORTAL_URL:-https://ctmp.hadiclinic.com.kw:4202}
+      VENDOR_PORTAL_URL: ${VENDOR_PORTAL_URL:-https://vn.hadiclinic.com.kw:4201}
+    # No host port — the API is reached only through nginx (/api/*).
+    volumes:
+      - app_storage:/data
+      - report_storage:/data/reports
+      - bid_storage:/data/bid-documents
+      - tender_storage:/data/tender-documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:3000/api/v1/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web-admin:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/web-admin.Dockerfile
+      args:
+        # Same-origin: the browser calls https://ctmp.hadiclinic.com.kw:4202/api/*
+        # which nginx routes to the api service. Baked at build time.
+        NEXT_PUBLIC_API_URL: ${ADMIN_PUBLIC_API_URL:?ADMIN_PUBLIC_API_URL required}
+    container_name: ctmp-web-admin
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${ADMIN_PUBLIC_API_URL}
+    # No host port — reached only through nginx (/).
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ctmp-nginx
+    restart: unless-stopped
+    ports:
+      - '${ADMIN_TLS_PORT:-4202}:443'
+    volumes:
+      - ./nginx/ctmp.conf:/etc/nginx/conf.d/default.conf:ro
+      # Real DigiCert wildcard *.hadiclinic.com.kw — canonical host paths shared
+      # with the other nginx services on this host, mounted read-only so cert
+      # renewals propagate everywhere from one source of truth.
+      - /etc/ssl/certs/wildcard_HADICLINIC_COM_KW_fullchain.crt:/etc/nginx/certs/fullchain.pem:ro
+      - /etc/ssl/private/wildcard_HADICLINIC_COM_KW.key:/etc/nginx/certs/privkey.pem:ro
+    depends_on:
+      - api
+      - web-admin
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_storage:
+  report_storage:
+  bid_storage:
+  tender_storage:

@@ -6,6 +6,8 @@ import { get } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { NegotiationSection } from '@/components/bids/NegotiationSection';
+import { CommercialTermsSummary } from '@/components/bids/CommercialTermsCard';
+import type { CommercialTerms } from '@ctmp/shared-types';
 
 // BUG-082 (2026-06-01): read-only BoQ view for vendors' submitted bids.
 interface BoqTemplateRow { id: string; itemNo: string; description: string; qty: number; unit: string }
@@ -44,6 +46,7 @@ export default function VendorBidDetailPage({ params }: { params: Promise<{ bidI
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [boqTemplate, setBoqTemplate] = useState<BoqTemplateRow[]>([]);
   const [boqLines, setBoqLines] = useState<BidBoqLine[]>([]);
+  const [terms, setTerms] = useState<CommercialTerms | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,6 +77,10 @@ export default function VendorBidDetailPage({ params }: { params: Promise<{ bidI
         );
         setBoqTemplate(realRows);
         setBoqLines(ownLines.items ?? []);
+        // Migration 052 (2026-08-06): bid-level commercial terms. Best-effort —
+        // bids placed before the migration simply have none.
+        const storedTerms = await get<CommercialTerms>(`/bids/${bidId}/commercial-terms`, token).catch(() => null);
+        setTerms(storedTerms);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load bid');
       } finally {
@@ -180,7 +187,7 @@ export default function VendorBidDetailPage({ params }: { params: Promise<{ bidI
         });
         return (
           <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-            <h2 className="text-sm font-bold text-text-primary">Bill of Quantities (your bid — view only)</h2>
+            <h2 className="text-sm font-bold text-text-primary">Bill of Quantities</h2>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -236,6 +243,16 @@ export default function VendorBidDetailPage({ params }: { params: Promise<{ bidI
         );
       })()}
 
+      {/* Migration 052 (2026-08-06): the commercial terms recorded with this
+          bid. Always rendered once loaded — blank fields read as "—", which is
+          itself information for the bidder. */}
+      {terms && (
+        <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+          <h2 className="text-sm font-bold text-text-primary">Commercial Terms</h2>
+          <CommercialTermsSummary terms={terms} />
+        </div>
+      )}
+
       {/* BUG-115 (2026-06-09): negotiation rounds — visible when this bid has
           at least one INVITED or SUBMITTED invitation. Returns null otherwise. */}
       {boqTemplate.length > 0 && (
@@ -244,6 +261,7 @@ export default function VendorBidDetailPage({ params }: { params: Promise<{ bidI
           tenderId={bid.tenderId}
           boqTemplate={boqTemplate}
           previousBoqLines={boqLines}
+          previousTerms={terms}
         />
       )}
 

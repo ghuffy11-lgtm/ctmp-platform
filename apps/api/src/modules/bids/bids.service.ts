@@ -1,11 +1,19 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'crypto';
-import { AuditRiskLevel, BidStatus, EnvelopeStatus, EnvelopeType, Prisma, TenderStatus } from '@prisma/client';
+import { AuditRiskLevel, BidStatus, EnvelopeStatus, EnvelopeType, Prisma, TenderStatus, TenderVisibility } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { formatDeadline, vendorTenderBidDenial } from '../tenders/vendor-access';
 import { AuditService } from '../audit/audit.service';
 import { BidStorageService } from './bid-storage.service';
 import { BidSupportingDocumentStorageService } from './bid-supporting-document-storage.service';
 import { UploadEnvelopeDto } from './dto/upload-envelope.dto';
+import { CommercialTermsDto } from './dto/commercial-terms.dto';
+import {
+  COMMERCIAL_TERMS_SELECT,
+  CommercialTermsView,
+  normalizeCommercialTerms,
+  toCommercialTermsView,
+} from './commercial-terms.util';
 
 interface MulterFile {
   originalname: string;
@@ -28,22 +36,21 @@ export class BidsService {
   async draftBid(tenderId: string, vendor: any) {
     const tender = await this.prisma.tender.findUnique({
       where: { id: tenderId },
-      select: { id: true, status: true, visibility: true },
+      select: { id: true, status: true, visibility: true, submissionCloseAt: true },
     });
     if (!tender) throw new NotFoundException('Tender not found');
-    if (
-      tender.status !== TenderStatus.PUBLISHED &&
-      tender.status !== TenderStatus.CLARIFICATION_PERIOD
-    ) {
-      throw new BadRequestException(`Cannot draft bid for tender in ${tender.status}`);
-    }
-    // Invitation check for INVITATION_ONLY tenders.
-    if (tender.visibility === 'INVITATION_ONLY') {
-      const invite = await this.prisma.tenderVendor.findUnique({
+
+    // Owner report 2026-08-07: this used to raise "Cannot draft bid for tender
+    // in SUBMISSION_CLOSED" — the internal status name leaked to the supplier
+    // and explained nothing. vendorTenderBidDenial says what happened, when,
+    // and what the vendor can do about it.
+    const invited =
+      tender.visibility !== TenderVisibility.INVITATION_ONLY ||
+      (await this.prisma.tenderVendor.findUnique({
         where: { tenderId_vendorId: { tenderId, vendorId: vendor.vendorId } },
-      });
-      if (!invite) throw new ForbiddenException('Vendor not invited to this tender');
-    }
+      })) != null;
+    const denial = vendorTenderBidDenial(tender, invited);
+    if (denial) throw new ForbiddenException(denial);
 
     // Reuse existing DRAFT bid if any; otherwise create with both envelopes in DRAFT.
     const existing = await this.prisma.bid.findFirst({
@@ -52,7 +59,10 @@ export class BidsService {
     });
     if (existing) {
       if (existing.status !== BidStatus.DRAFT) {
-        throw new ConflictException('Bid already submitted; immutable');
+        throw new ConflictException(
+        'You have already submitted a bid for this tender, and submitted bids cannot be changed. ' +
+          'Open it under My Bids to review what you sent and your submission receipt.',
+      );
       }
       return existing;
     }
@@ -81,6 +91,82 @@ export class BidsService {
     return this.attachDocsToEnvelope(bidId, EnvelopeType.COMMERCIAL, dto, vendor);
   }
 
+  // ───────────── Commercial terms (migration 052, 2026-08-06) ─────────────
+  //
+  // Bid-level: brand/manufacturer, country of origin, warranty, delivery
+  // period and payment terms describe the whole offer, not a BOQ line. Kept
+  // OFF the BOQ endpoint deliberately — ReplaceBidBoqDto requires at least one
+  // line and full template coverage, so on a legacy tender with no BOQ
+  // template that endpoint cannot be called at all, yet the vendor must still
+  // be able to record terms.
+  //
+  // Every field is optional and NOTHING here may enter a submit precondition.
+
+  /** Loads the bid and enforces "your bid, still a draft". */
+  private async loadEditableBid(bidId: string, vendor: any) {
+    const bid = await this.prisma.bid.findUnique({
+      where: { id: bidId },
+      select: { id: true, vendorId: true, tenderId: true, status: true, submittedAt: true },
+    });
+    if (!bid) throw new NotFoundException('Bid not found');
+    if (!vendor?.vendorId || bid.vendorId !== vendor.vendorId) {
+      throw new ForbiddenException('This bid belongs to another company.');
+    }
+    if (bid.status !== BidStatus.DRAFT || bid.submittedAt != null) {
+      throw new ForbiddenException(
+      'This bid has already been submitted, so it can no longer be edited. Submitted bids are locked and checksummed.',
+    );
+    }
+    return bid;
+  }
+
+  async getCommercialTerms(bidId: string, vendor: any): Promise<CommercialTermsView> {
+    const bid = await this.prisma.bid.findUnique({
+      where: { id: bidId },
+      select: { id: true, vendorId: true, ...COMMERCIAL_TERMS_SELECT },
+    });
+    if (!bid) throw new NotFoundException('Bid not found');
+    if (!vendor?.vendorId || bid.vendorId !== vendor.vendorId) {
+      throw new ForbiddenException('This bid belongs to another company.');
+    }
+    return toCommercialTermsView(bid);
+  }
+
+  async updateCommercialTerms(
+    bidId: string,
+    dto: CommercialTermsDto,
+    vendor: any,
+  ): Promise<CommercialTermsView> {
+    const bid = await this.loadEditableBid(bidId, vendor);
+    // Replaces the whole set — an omitted or null field clears the column.
+    const columns = normalizeCommercialTerms(dto);
+
+    const updated = await this.prisma.bid.update({
+      where: { id: bidId },
+      data: columns,
+      select: COMMERCIAL_TERMS_SELECT,
+    });
+
+    await this.audit.log({
+      eventType: 'BID_COMMERCIAL_TERMS_UPDATED',
+      entityType: 'Bid',
+      entityId: bidId,
+      tenderId: bid.tenderId,
+      bidId,
+      actorVendorUserId: vendor.id,
+      // Values themselves are commercial data — log which fields were filled,
+      // not what they say.
+      afterValue: {
+        filled: Object.entries(columns)
+          .filter(([, value]) => value != null)
+          .map(([key]) => key),
+      },
+      riskLevel: AuditRiskLevel.LOW,
+    });
+
+    return toCommercialTermsView(updated);
+  }
+
   async submit(bidId: string, vendor: any) {
     const bid = await this.prisma.bid.findUnique({
       where: { id: bidId },
@@ -94,9 +180,12 @@ export class BidsService {
       },
     });
     if (!bid) throw new NotFoundException('Bid not found');
-    if (bid.vendorId !== vendor.vendorId) throw new ForbiddenException('Not your bid');
+    if (bid.vendorId !== vendor.vendorId) throw new ForbiddenException('This bid belongs to another company.');
     if (bid.status !== BidStatus.DRAFT) {
-      throw new ConflictException('Bid already submitted; immutable');
+      throw new ConflictException(
+        'You have already submitted a bid for this tender, and submitted bids cannot be changed. ' +
+          'Open it under My Bids to review what you sent and your submission receipt.',
+      );
     }
 
     // Deadline check unless an exception is GRANTED and not expired.
@@ -106,7 +195,13 @@ export class BidsService {
     if (past) {
       const exc = bid.lateException;
       if (!exc || exc.status !== 'GRANTED' || (exc.expiresAt && exc.expiresAt < now)) {
-        throw new BadRequestException('Submission deadline passed; no valid exception');
+        // Owner report 2026-08-07: name the deadline and the way out, rather
+        // than "no valid exception", which means nothing to a supplier.
+        const when = formatDeadline(deadline);
+        throw new BadRequestException(
+          `The submission deadline${when ? ` (${when})` : ''} has passed, so this bid can no longer be submitted. ` +
+            'Your draft is saved. If you have a genuine reason for a late submission, contact the procurement team — only they can grant an exception.',
+        );
       }
     }
 
@@ -233,7 +328,7 @@ export class BidsService {
       include: { bid: { select: { vendorId: true } } },
     });
     if (!receipt) throw new NotFoundException('Receipt not found');
-    if (receipt.bid.vendorId !== vendor.vendorId) throw new ForbiddenException('Not your bid');
+    if (receipt.bid.vendorId !== vendor.vendorId) throw new ForbiddenException('This bid belongs to another company.');
     return {
       id: receipt.id,
       bidId: receipt.bidId,
@@ -258,7 +353,7 @@ export class BidsService {
     if (isVendor) {
       // Vendor can re-download their own DRAFT envelope contents pre-submit.
       if (doc.bidEnvelope.bid.vendorId !== user.vendorId) {
-        throw new ForbiddenException('Not your bid');
+        throw new ForbiddenException('This bid belongs to another company.');
       }
     } else if (doc.bidEnvelope.envelopeType === EnvelopeType.TECHNICAL) {
       if (doc.bidEnvelope.status !== EnvelopeStatus.OPENED) {
@@ -301,7 +396,7 @@ export class BidsService {
       select: { id: true, vendorId: true, status: true, tenderId: true },
     });
     if (!bid) throw new NotFoundException('Bid not found');
-    if (bid.vendorId !== vendor.vendorId) throw new ForbiddenException('Not your bid');
+    if (bid.vendorId !== vendor.vendorId) throw new ForbiddenException('This bid belongs to another company.');
     if (bid.status !== BidStatus.DRAFT) {
       throw new ConflictException('Bid is no longer editable');
     }
@@ -380,7 +475,7 @@ export class BidsService {
     });
     if (!doc) throw new NotFoundException('Document not found');
     if (doc.bidEnvelope.bid.vendorId !== vendor.vendorId) {
-      throw new ForbiddenException('Not your bid');
+      throw new ForbiddenException('This bid belongs to another company.');
     }
     if (doc.bidEnvelope.bid.status !== BidStatus.DRAFT) {
       throw new ConflictException('Bid is no longer editable');
@@ -431,7 +526,7 @@ export class BidsService {
     // only the new perm can expand cards on the Commercial Comparison page.
     const isVendor = !!user?.vendorId;
     if (isVendor) {
-      if (bid.vendorId !== user.vendorId) throw new ForbiddenException('Not your bid');
+      if (bid.vendorId !== user.vendorId) throw new ForbiddenException('This bid belongs to another company.');
     } else if (envelopeType === EnvelopeType.TECHNICAL) {
       if (envelope.status !== EnvelopeStatus.OPENED) {
         throw new ForbiddenException('Technical envelope not yet opened');
@@ -495,7 +590,7 @@ export class BidsService {
     const isVendor = !!user?.vendorId;
     if (isVendor) {
       if (doc.bidEnvelope.bid.vendorId !== user.vendorId) {
-        throw new ForbiddenException('Not your bid');
+        throw new ForbiddenException('This bid belongs to another company.');
       }
     } else if (doc.bidEnvelope.envelopeType === EnvelopeType.TECHNICAL) {
       if (doc.bidEnvelope.status !== EnvelopeStatus.OPENED) {
@@ -584,7 +679,7 @@ export class BidsService {
       select: { id: true, vendorId: true, status: true },
     });
     if (!bid) throw new NotFoundException('Bid not found');
-    if (bid.vendorId !== vendor.vendorId) throw new ForbiddenException('Not your bid');
+    if (bid.vendorId !== vendor.vendorId) throw new ForbiddenException('This bid belongs to another company.');
     if (bid.status !== BidStatus.DRAFT) {
       throw new ConflictException('Bid is no longer editable');
     }
@@ -632,7 +727,7 @@ export class BidsService {
     // commercial-envelope-opening rule below.
     const isVendor = !!user?.vendorId;
     if (isVendor && user.vendorId !== bid.vendorId) {
-      throw new ForbiddenException('Not your bid');
+      throw new ForbiddenException('This bid belongs to another company.');
     }
     if (!isVendor && !BidsService.commercialEnvelopeOpened(bid.bidEnvelopes)) {
       throw new ForbiddenException(
@@ -695,7 +790,7 @@ export class BidsService {
       select: { id: true, vendorId: true, status: true },
     });
     if (!bid) throw new NotFoundException('Bid not found');
-    if (bid.vendorId !== vendor.vendorId) throw new ForbiddenException('Not your bid');
+    if (bid.vendorId !== vendor.vendorId) throw new ForbiddenException('This bid belongs to another company.');
     if (bid.status !== BidStatus.DRAFT) {
       throw new ConflictException('Bid already submitted; supporting documents are locked.');
     }
@@ -752,7 +847,7 @@ export class BidsService {
     if (!doc || doc.bidId !== bidId) throw new NotFoundException('Document not found');
     const docBid = (doc as any).bid;
     if (!docBid || docBid.vendorId !== vendor.vendorId) {
-      throw new ForbiddenException('Not your bid');
+      throw new ForbiddenException('This bid belongs to another company.');
     }
     if (docBid.status !== BidStatus.DRAFT || doc.lockedAt) {
       throw new ConflictException('Bid already submitted; supporting documents are locked.');
@@ -804,7 +899,7 @@ export class BidsService {
 
     const isVendor = !!user?.vendorId;
     if (isVendor) {
-      if (docBid.vendorId !== user.vendorId) throw new ForbiddenException('Not your bid');
+      if (docBid.vendorId !== user.vendorId) throw new ForbiddenException('This bid belongs to another company.');
     } else {
       const perms: string[] = user?.permissions ?? [];
       // Admin/evaluator side: gate behind technical:view (same level as

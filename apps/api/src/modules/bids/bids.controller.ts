@@ -11,6 +11,7 @@ import { RequirePermissions } from '../../common/decorators/permissions.decorato
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { BidsService } from './bids.service';
 import { UploadEnvelopeDto } from './dto/upload-envelope.dto';
+import { CommercialTermsDto } from './dto/commercial-terms.dto';
 
 const MAX_DOC_BYTES = 50 * 1024 * 1024; // 50 MB hard cap per file
 
@@ -63,6 +64,29 @@ export class BidsController {
   @ApiOperation({ operationId: 'uploadCommercialEnvelope', summary: 'Attach uploaded documents to commercial envelope' })
   uploadCommercial(@Param('bidId') bidId: string, @Body() dto: UploadEnvelopeDto, @CurrentUser() vendor: any) {
     return this.bidsService.uploadCommercial(bidId, dto, vendor);
+  }
+
+  // Migration 052 (2026-08-06): bid-level commercial terms. Separate from the
+  // BOQ save so they are also enterable on tenders with no BOQ template.
+  @UseGuards(VendorJwtAuthGuard)
+  @Get('bids/:bidId/commercial-terms')
+  @ApiOperation({ operationId: 'getBidCommercialTerms', summary: 'Read the bid-level commercial terms' })
+  getCommercialTerms(@Param('bidId') bidId: string, @CurrentUser() vendor: any) {
+    return this.bidsService.getCommercialTerms(bidId, vendor);
+  }
+
+  @UseGuards(VendorJwtAuthGuard)
+  @Put('bids/:bidId/commercial-terms')
+  @ApiOperation({
+    operationId: 'updateBidCommercialTerms',
+    summary: 'Replace the bid-level commercial terms (all fields optional, DRAFT bids only)',
+  })
+  updateCommercialTerms(
+    @Param('bidId') bidId: string,
+    @Body() dto: CommercialTermsDto,
+    @CurrentUser() vendor: any,
+  ) {
+    return this.bidsService.updateCommercialTerms(bidId, dto, vendor);
   }
 
   @UseGuards(VendorJwtAuthGuard)

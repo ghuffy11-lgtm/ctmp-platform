@@ -173,7 +173,11 @@ export class ClarificationsService {
     // BUG-147 (2026-06-21): unified whitelist for the full active tender
     // lifecycle, including NEGOTIATION + AWARD_RECOMMENDATION + AWARDED.
     if (!CLARIFICATION_ALLOWED_STATES.includes(tender.status)) {
-      throw new BadRequestException(`Cannot submit clarifications when tender is ${tender.status}`);
+      // Owner report 2026-08-07: no raw status names in vendor-facing errors.
+      throw new BadRequestException(
+        'Questions can no longer be raised on this tender — it has closed or been cancelled. ' +
+          'For anything outstanding, contact the procurement team directly.',
+      );
     }
 
     const data: Prisma.TenderClarificationCreateInput = {

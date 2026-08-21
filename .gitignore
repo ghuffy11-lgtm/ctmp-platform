@@ -47,6 +47,13 @@ Thumbs.db
 # Docker
 docker-compose.override.yml
 
+# Production secrets / TLS material (NEVER commit or rsync the real files;
+# the *.example templates ARE tracked)
+infrastructure/docker/.env.admin-prod
+infrastructure/docker/.env.vendor-prod
+infrastructure/docker/certs/
+backups/
+
 # Database dumps / backups (keep migrations, exclude dumps)
 *.dump
 *.sql.gz
@@ -56,6 +63,12 @@ database/dumps/
 package-lock.json
 yarn.lock
 
-# TypeScript / Next.js incremental build artifacts
+# Config backups — `*.env` does NOT match `.env.bak`, so these were previously
+# committable despite containing real secrets. Found during the 2026-08-21 audit.
+.env.bak*
+*.bak
+*.bak.*
+docs/archive/**/docker-config-backups/
+
+# TypeScript incremental build artifacts (found during the 2026-08-21 sync prep)
 *.tsbuildinfo
-next-env.d.ts

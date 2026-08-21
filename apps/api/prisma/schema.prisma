@@ -233,10 +233,32 @@ enum ClarificationStatus {
 // ORGANIZATION
 // =============================================================================
 
+// Migration 054 (2026-08-13): managed tender categories. Replaces a hardcoded
+// array that was duplicated across the tender create and edit pages, and gives
+// each category an Arabic name for /executive-ar.
+//
+// Joined to tenders.category BY NAME — that column stays free text on purpose
+// (a foreign key would touch create/edit, filters, reports and analytics).
+// Renames update the matching tenders in the same transaction.
+model TenderCategory {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @unique @db.VarChar(120)
+  nameAr    String?  @map("name_ar") @db.VarChar(120)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@index([isActive, sortOrder])
+  @@map("tender_categories")
+}
+
 model Department {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   code      String   @unique @db.VarChar(64)
   name      String   @db.VarChar(255)
+  // Migration 054 (2026-08-13): Arabic name for /executive-ar. Null = show name.
+  nameAr    String?  @map("name_ar") @db.VarChar(255)
   parentId  String?  @map("parent_id") @db.Uuid
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
@@ -421,6 +443,9 @@ model CaptchaVerificationLog {
 model Vendor {
   id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   companyName        String       @map("company_name") @db.VarChar(255)
+  // Migration 054 (2026-08-13): optional Arabic trade name — an international
+  // supplier may not have one. Null = show companyName.
+  companyNameAr      String?      @map("company_name_ar") @db.VarChar(255)
   registrationNumber String?      @map("registration_number") @db.VarChar(128)
   taxNumber          String?      @map("tax_number") @db.VarChar(128)
   country            String?      @db.Char(2)
@@ -588,7 +613,7 @@ model Tender {
   departmentId          String           @map("department_id") @db.Uuid
   category              String?          @db.VarChar(128)
   procurementType       String?          @map("tender_type") @db.VarChar(64)
-  estimatedBudget       Decimal?         @map("budget_estimate") @db.Decimal(15, 2)
+  estimatedBudget       Decimal?         @map("budget_estimate") @db.Decimal(16, 3)
   currency              String?          @db.Char(3)
   visibility            TenderVisibility @default(PUBLIC)
   status                TenderStatus     @default(DRAFT)
@@ -605,7 +630,7 @@ model Tender {
   technicalOpeningAt    DateTime?        @map("technical_opening_at")
   awardedAt             DateTime?        @map("awarded_at")
   awardedVendorId       String?          @map("awarded_vendor_id") @db.Uuid
-  awardedAmount         Decimal?         @map("awarded_amount") @db.Decimal(15, 2)
+  awardedAmount         Decimal?         @map("awarded_amount") @db.Decimal(16, 3)
   technicalPassThreshold Decimal?        @map("technical_pass_threshold") @db.Decimal(8, 2)
   currentVersion        Int              @default(1) @map("current_version")
   createdBy             String           @map("created_by") @db.Uuid
@@ -964,6 +989,16 @@ model Bid {
   createdAt                 DateTime        @default(now()) @map("created_at")
   updatedAt                 DateTime        @default(now()) @map("updated_at")
 
+  // Migration 052 (2026-08-06): bid-level commercial terms. Describe the whole
+  // offer, not a BOQ line. All optional — never part of a submit precondition.
+  brandManufacturer         String?              @map("brand_manufacturer") @db.VarChar(255)
+  countryOfOrigin           String?              @map("country_of_origin") @db.VarChar(120)
+  warrantyYears             Decimal?             @map("warranty_years") @db.Decimal(5, 2)
+  deliveryFrom              Int?                 @map("delivery_from")
+  deliveryTo                Int?                 @map("delivery_to")
+  deliveryUnit              DeliveryPeriodUnit?  @map("delivery_unit")
+  paymentTerms              String?              @map("payment_terms") @db.Text
+
   tender                  Tender                  @relation(fields: [tenderId], references: [id])
   vendor                  Vendor                  @relation(fields: [vendorId], references: [id])
   submittedByVendorUser   VendorUser?             @relation(fields: [submittedByVendorUserId], references: [id])
@@ -1144,7 +1179,7 @@ model CommercialEvaluation {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   bidId           String   @map("bid_id") @db.Uuid
   evaluatorUserId String   @map("evaluator_user_id") @db.Uuid
-  totalPrice      Decimal? @map("total_price") @db.Decimal(15, 2)
+  totalPrice      Decimal? @map("total_price") @db.Decimal(16, 3)
   currency        String?  @db.Char(3)
   score           Decimal? @db.Decimal(6, 2)
   comments        String?  @db.Text
@@ -1383,6 +1418,14 @@ enum BidBoqStatus {
   @@map("bid_boq_status")
 }
 
+// Migration 052 (2026-08-06): unit for the bid-level delivery period range.
+enum DeliveryPeriodUnit {
+  WEEKS
+  MONTHS
+
+  @@map("delivery_period_unit")
+}
+
 model TenderBoqItem {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenderId    String   @map("tender_id") @db.Uuid
@@ -1527,6 +1570,16 @@ model BidNegotiationSubmission {
   commercialPdfSha256      String   @map("commercial_pdf_sha256") @db.Char(64)
   commercialPdfFilename    String   @map("commercial_pdf_filename") @db.VarChar(255)
   remarks                  String?  @db.Text
+
+  // Migration 052 (2026-08-06): the round's revised commercial terms. Same
+  // shape and same rules as Bid — a vendor may revise them per round.
+  brandManufacturer        String?              @map("brand_manufacturer") @db.VarChar(255)
+  countryOfOrigin          String?              @map("country_of_origin") @db.VarChar(120)
+  warrantyYears            Decimal?             @map("warranty_years") @db.Decimal(5, 2)
+  deliveryFrom             Int?                 @map("delivery_from")
+  deliveryTo               Int?                 @map("delivery_to")
+  deliveryUnit             DeliveryPeriodUnit?  @map("delivery_unit")
+  paymentTerms             String?              @map("payment_terms") @db.Text
 
   invitation              NegotiationInvitation     @relation(fields: [invitationId], references: [id], onDelete: Cascade)
   submittedByVendorUser   VendorUser?               @relation("BidNegotiationSubmissionSubmittedBy", fields: [submittedByVendorUserId], references: [id])

@@ -12,6 +12,7 @@ import {
   Loader2,
   Lock,
 } from 'lucide-react';
+import { mergeCommercialTerms } from '@ctmp/shared-types';
 import { get } from '@/lib/api';
 import { getAccessToken, hasPermission } from '@/lib/auth';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -265,6 +266,8 @@ function CommercialComparisonContent() {
       currency: v.currency,
       commercialEnvelopeStatus: v.commercialEnvelopeStatus,
       boqLines: v.boqLines,
+      // Migration 052 (2026-08-06): the terms as originally bid.
+      commercialTerms: v.commercialTerms ?? null,
     }));
 
     const sections: Array<{
@@ -325,6 +328,10 @@ function CommercialComparisonContent() {
           currency: entry.currency ?? v.currency,
           commercialEnvelopeStatus: v.commercialEnvelopeStatus,
           boqLines: lines,
+          // Migration 052 (2026-08-06): a round shows the terms revised in that
+          // round, falling back per field to the original bid for anything the
+          // vendor left alone.
+          commercialTerms: mergeCommercialTerms(v.commercialTerms ?? null, entry.commercialTerms ?? null),
         });
       }
       if (roundVendors.length === 0) continue;

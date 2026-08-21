@@ -5,3 +5,4 @@ export * from './tender-status';
 export * from './bid-status';
 export * from './envelope-status';
 export * from './vendor-status';
+export * from './commercial-terms';

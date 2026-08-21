@@ -5,6 +5,22 @@
 **Author:** Design session between project owner and Claude (Opus 4.7)
 **Status:** ✅ DECISIONS LOCKED — see "Change-control rules" before modifying
 
+> **Provenance note added 2026-08-21 (documentation audit).** This plan is kept because its
+> decisions are locked and the feature shipped — but it was written before implementation and
+> **six paths it cites do not exist**. Do not go looking for them:
+>
+> | Cited in this plan | Reality |
+> |---|---|
+> | `database/migrations/003_award_workflow.sql` | shipped as `012_phase_d_award_workflow.sql` |
+> | `apps/api/src/modules/comparison/dto/comparison-response.dto.ts` | never created — `comparison/` has no `dto/` directory |
+> | `apps/api/src/modules/award/dto/recommend-award.dto.ts` | shipped as `award-recommendation.dto.ts` |
+> | `docs/specs/IN_APP_COMPARISON_FLOWCHART_2026-05-27.md` | never created |
+> | `docs/qa/BUG_TRACKER_2026-05-25.md` | never created |
+> | `docs/qa/IN_APP_COMPARISON_TRACKER_2026-05-27.md` | never created |
+>
+> For what actually exists today see `docs/PROJECT_STATE.md` and `docs/ARCHITECTURE.md`.
+
+
 ---
 
 ## ⚠️ Change-control rules

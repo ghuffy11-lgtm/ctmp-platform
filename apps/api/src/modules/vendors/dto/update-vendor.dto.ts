@@ -7,6 +7,11 @@ export class UpdateVendorDto {
   @IsOptional()
   companyName?: string;
 
+  @ApiPropertyOptional({ description: 'Optional Arabic company name (migration 054). Shown on the Arabic management dashboard; falls back to companyName when empty.' })
+  @IsString()
+  @IsOptional()
+  companyNameAr?: string;
+
   @ApiPropertyOptional()
   @IsString()
   @IsOptional()

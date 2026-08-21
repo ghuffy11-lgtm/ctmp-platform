@@ -10,8 +10,12 @@ import { setTokens, getHiddenSidebarItems } from '@/lib/auth';
 // Generic check against the JWT's hiddenSidebarItems list — works for any
 // future role that hides Dashboard.
 function landingPath(accessToken: string): string {
+  // Owner request 2026-08-13: management signs in and lands directly on the
+  // Arabic dashboard. Same signal as before (roles that hide /dashboard are the
+  // executive ones); only the destination changed. The English /executive is
+  // one click away via the "English" link in that page's header.
   const hidden = getHiddenSidebarItems(accessToken);
-  return hidden.includes('/dashboard') ? '/executive' : '/dashboard';
+  return hidden.includes('/dashboard') ? '/executive-ar' : '/dashboard';
 }
 import { Building2, AtSign, Lock, Eye, EyeOff, ArrowRight, Info } from 'lucide-react';
 

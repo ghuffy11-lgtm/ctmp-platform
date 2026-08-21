@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { get, post } from '@/lib/api';
-import { getAccessToken } from '@/lib/auth';
+import { get, patch, post } from '@/lib/api';
+import { getAccessToken, hasPermission } from '@/lib/auth';
 import { useConfirm } from '@/components/dialog/DialogProvider';
 import { RefreshCw, Store, Clock, BadgeCheck, Ban, Search, CheckCircle2, PauseCircle, FileText, Eye, Download } from 'lucide-react';
 import type { LucideProps } from 'lucide-react';
@@ -35,6 +35,10 @@ interface VendorDocumentRow {
 interface Vendor {
   id: string;
   company: string;
+  // Migration 054 (2026-08-13): Arabic trade name, optional. Null for every
+  // vendor that registered before the field existed — procurement fills those
+  // in here so the Arabic dashboard reads properly.
+  companyAr?: string | null;
   email: string;
   contactName: string;
   contactPhone?: string;
@@ -361,6 +365,15 @@ export default function VendorsPage() {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h2 className="text-base font-bold text-text-primary">{selected.company}</h2>
+                    <ArabicNameEditor
+                      vendorId={selected.id}
+                      value={selected.companyAr ?? ''}
+                      // `selected` is derived from the list, so updating the
+                      // list is enough — it recomputes.
+                      onSaved={(v) => {
+                        setVendors(list => list.map(x => (x.id === selected.id ? { ...x, companyAr: v } : x)));
+                      }}
+                    />
                     <p className="text-xs text-text-secondary mt-0.5">ID {selected.id.slice(0, 8)}…</p>
                   </div>
                   <span className={`px-2 py-0.5 rounded text-xs font-bold ${STATUS_LABELS[selected.registrationStatus].cls}`}>
@@ -484,6 +497,93 @@ function FieldRow({ label, value, verified }: { label: string; value: string; ve
             : <Clock className="w-3.5 h-3.5 text-amber-600" aria-label="Unverified" />
         )}
       </p>
+    </div>
+  );
+}
+
+// Migration 054 (2026-08-13): the only editable vendor field on this screen.
+// Vendors can set their own Arabic name in their profile, but the 17 that
+// registered before the field existed have none — procurement backfills here
+// rather than waiting for each vendor to log in.
+function ArabicNameEditor({
+  vendorId,
+  value,
+  onSaved,
+}: {
+  vendorId: string;
+  value: string;
+  onSaved: (v: string) => void;
+}) {
+  const [canEdit, setCanEdit] = useState(false);
+  useEffect(() => {
+    const t = getAccessToken();
+    setCanEdit(!!t && hasPermission(t, 'vendor:edit_profile'));
+  }, []);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { setDraft(value); setEditing(false); setError(null); }, [vendorId, value]);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await patch(`/vendors/${vendorId}`, { companyNameAr: draft.trim() }, getAccessToken());
+      onSaved(draft.trim());
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <p className="text-xs mt-0.5 flex items-center gap-2">
+        {value ? (
+          <span className="text-text-primary" dir="rtl" lang="ar">{value}</span>
+        ) : (
+          <span className="text-text-secondary italic">No Arabic name</span>
+        )}
+        {/* Owner report 2026-08-13: the Edit link used to show for everyone,
+            including roles without vendor:edit_profile — who then got a 403 on
+            save. Show it only to users who can actually save. */}
+        {canEdit ? (
+          <button onClick={() => setEditing(true)} className="text-accent hover:underline font-semibold">
+            {value ? 'Edit' : 'Add'}
+          </button>
+        ) : (
+          <span className="text-text-secondary/70 italic">(needs vendor:edit_profile)</span>
+        )}
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-1 space-y-1">
+      <div className="flex items-center gap-2">
+        <input
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          dir="rtl"
+          lang="ar"
+          placeholder="اسم الشركة بالعربية"
+          className="px-2 py-1 border border-border rounded text-sm bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+        />
+        <button
+          onClick={save}
+          disabled={saving}
+          className="text-xs font-bold text-accent hover:underline disabled:opacity-40"
+        >{saving ? 'Saving…' : 'Save'}</button>
+        <button
+          onClick={() => { setDraft(value); setEditing(false); setError(null); }}
+          className="text-xs text-text-secondary hover:underline"
+        >Cancel</button>
+      </div>
+      {error && <p className="text-[11px] text-danger">{error}</p>}
     </div>
   );
 }

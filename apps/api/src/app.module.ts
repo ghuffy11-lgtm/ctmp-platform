@@ -38,6 +38,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
+import { TenderCategoriesModule } from './modules/tender-categories/tender-categories.module';
 import { SystemSettingsModule } from './modules/system-settings/system-settings.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 
@@ -77,6 +78,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     ReportsModule,
     SystemSettingsModule,
     DepartmentsModule,
+    TenderCategoriesModule,
     AnalyticsModule,
     RequestContextModule,
   ],

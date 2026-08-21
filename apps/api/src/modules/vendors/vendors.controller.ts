@@ -41,8 +41,12 @@ export class VendorsController {
   @Patch(':id')
   @RequirePermissions('vendor:edit_profile')
   @ApiOperation({ operationId: 'updateVendor', summary: 'Update vendor profile' })
-  update(@Param('id') id: string, @Body() dto: UpdateVendorDto) {
-    return this.vendorsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateVendorDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.vendorsService.update(id, dto, userId);
   }
 
   @Post(':id/approve')

@@ -8,6 +8,15 @@ import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { STORAGE_BACKEND } from '../../common/storage/storage.module';
 import type { StorageBackend } from '../../common/storage/storage.types';
+import {
+  COMMERCIAL_TERMS_SELECT,
+  CommercialTermsView,
+  formatDeliveryPeriod,
+  formatTermText,
+  formatWarranty,
+  mergeCommercialTerms,
+  toCommercialTermsView,
+} from '../bids/commercial-terms.util';
 
 const NAMESPACE = 'award-minutes';
 
@@ -44,6 +53,9 @@ interface BidEntry {
   boqLines: BidBoqLine[];
   negotiationRows: BidNegotiationRow[];
   perCriterionScores: Array<{ criterion: string; score: number | null; maxScore: number }>;
+  // Migration 052 (2026-08-06): bid-level commercial terms, with any terms the
+  // vendor revised in the latest negotiation round overlaid per field.
+  commercialTerms: CommercialTermsView;
 }
 
 interface AwardMinutesData {
@@ -240,7 +252,16 @@ export class AwardMinutesService {
         negotiationInvitations: {
           include: {
             round: { select: { roundNumber: true } },
-            submission: { select: { id: true, submittedAt: true, totalPrice: true, currency: true } },
+            submission: {
+              select: {
+                id: true,
+                submittedAt: true,
+                totalPrice: true,
+                currency: true,
+                // Migration 052: the round's revised commercial terms.
+                ...COMMERCIAL_TERMS_SELECT,
+              },
+            },
           },
         },
       },
@@ -347,6 +368,13 @@ export class AwardMinutesService {
         boqLines,
         negotiationRows,
         perCriterionScores,
+        // Migration 052 (2026-08-06): original terms with the latest round's
+        // revisions overlaid field by field (negotiationSubs is sorted newest
+        // first above), so the minutes state the terms actually agreed.
+        commercialTerms: mergeCommercialTerms(
+          toCommercialTermsView(b),
+          negotiationSubs.length > 0 ? toCommercialTermsView(negotiationSubs[0].submission) : null,
+        ),
       };
     });
 
@@ -547,6 +575,47 @@ export class AwardMinutesService {
       </table>
     ` : '';
 
+    // ────────── Commercial terms matrix (migration 052) ──────────
+    // Rows = the five terms, columns = vendors in the same order as the tables
+    // above. Payment Terms keeps the vendor's line breaks, so the cell needs
+    // white-space: pre-line (puppeteer renders this HTML to PDF).
+    //
+    // Owner feedback 2026-08-06: this used to be skipped when every vendor left
+    // all five fields blank, which meant it never appeared on tenders awarded
+    // before the fields existed — reading as "the feature is missing". It now
+    // always prints whenever the tender has bids, with an em dash per blank
+    // cell, matching what the admin comparison screen shows.
+    const termRows: Array<{ label: string; value: (b: BidEntry) => string; preLine?: boolean }> = [
+      { label: 'Brand / Manufacturer', value: b => formatTermText(b.commercialTerms.brandManufacturer) },
+      { label: 'Country of Origin', value: b => formatTermText(b.commercialTerms.countryOfOrigin) },
+      { label: 'Warranty', value: b => formatWarranty(b.commercialTerms.warrantyYears) },
+      { label: 'Delivery Period', value: b => formatDeliveryPeriod(b.commercialTerms) },
+      { label: 'Payment Terms', value: b => formatTermText(b.commercialTerms.paymentTerms), preLine: true },
+    ];
+    const commercialTermsMatrix = d.bids.length > 0 ? `
+      <h2>Commercial Terms of Offers</h2>
+      <table class="small">
+        <thead>
+          <tr>
+            <th></th>
+            ${d.bids.map(b => `<th>${escapeHtml(shortName(b.vendorName))}${b.isWinner ? ' ★' : ''}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${termRows.map(row => `
+            <tr>
+              <td><strong>${escapeHtml(row.label)}</strong></td>
+              ${d.bids.map(b => {
+                const value = row.value(b);
+                const style = row.preLine ? ' style="white-space: pre-line;"' : '';
+                return `<td${style}>${escapeHtml(value)}</td>`;
+              }).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : '';
+
     // ────────── Negotiation rounds matrix ──────────
     const negotiationMatrix = hasNegotiation ? `
       <h2>Negotiation Rounds</h2>
@@ -679,6 +748,8 @@ export class AwardMinutesService {
   ${techMatrix}
 
   ${boqMatrix}
+
+  ${commercialTermsMatrix}
 
   ${negotiationMatrix}
 

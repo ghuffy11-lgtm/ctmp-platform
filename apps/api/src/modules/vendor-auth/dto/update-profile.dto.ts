@@ -8,6 +8,12 @@ export class UpdateProfileDto {
   @MaxLength(255)
   companyName?: string;
 
+  @ApiPropertyOptional({ description: 'Optional Arabic company name (migration 054). Shown on the Arabic management dashboard; falls back to companyName when empty.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  companyNameAr?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

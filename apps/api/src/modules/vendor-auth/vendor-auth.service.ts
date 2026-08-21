@@ -186,6 +186,7 @@ export class VendorAuthService {
       const vendor = await tx.vendor.create({
         data: {
           companyName: dto.companyName,
+          companyNameAr: dto.companyNameAr?.trim() || null,
           // BUG-101 (2026-06-04): registrationNumber / taxNumber / country no
           // longer collected at registration intake — set later if needed.
           website: dto.website ?? null,
@@ -590,6 +591,7 @@ export class VendorAuthService {
       vendor: {
         id: vendor.id,
         companyName: vendor.companyName,
+        companyNameAr: vendor.companyNameAr ?? null,
         registrationNumber: vendor.registrationNumber ?? undefined,
         taxNumber: vendor.taxNumber ?? undefined,
         country: vendor.country ?? undefined,
@@ -617,6 +619,8 @@ export class VendorAuthService {
   async updateProfile(vendorId: string, actorVendorUserId: string, dto: UpdateProfileDto) {
     const vendorPatch: Prisma.VendorUpdateInput = {};
     if (dto.companyName !== undefined) vendorPatch.companyName = dto.companyName;
+    // Blank clears it — the dashboard then falls back to companyName.
+    if (dto.companyNameAr !== undefined) vendorPatch.companyNameAr = dto.companyNameAr?.trim() || null;
     if (dto.taxNumber !== undefined) vendorPatch.taxNumber = dto.taxNumber;
     if (dto.country !== undefined) vendorPatch.country = dto.country;
     if (dto.address !== undefined) vendorPatch.address = dto.address;

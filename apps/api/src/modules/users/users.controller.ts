@@ -53,4 +53,11 @@ export class UsersController {
   remove(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.usersService.remove(id, userId);
   }
+
+  @Post(':id/welcome-email')
+  @RequirePermissions('users:update')
+  @ApiOperation({ operationId: 'sendUserWelcome', summary: 'Send (or resend) the welcome email + role guide' })
+  sendWelcome(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.usersService.sendWelcome(id, userId);
+  }
 }

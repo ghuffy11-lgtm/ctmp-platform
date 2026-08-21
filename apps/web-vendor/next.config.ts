@@ -1,6 +1,9 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  // @ctmp/shared-types ships raw TypeScript (main: src/index.ts), so Next has
+  // to compile it rather than expect a built package.
+  transpilePackages: ['@ctmp/shared-types'],
   async rewrites() {
     return [
       {

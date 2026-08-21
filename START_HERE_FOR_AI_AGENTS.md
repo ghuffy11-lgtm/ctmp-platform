@@ -1,5 +1,19 @@
 # Start Here For AI Agents
 
+**Read `CLAUDE.md` in the repository root first** — it is the traffic controller for every AI
+session and carries the mandatory initialization, maintenance and boundary directives.
+
+## Current project context (consolidated 2026-08-21)
+
+Read these four before anything else — they are reconciled against the running system:
+
+- `docs/PROJECT_STATE.md` — what is built, what is in flight, what is queued.
+- `docs/ARCHITECTURE.md` — stack and topology. CTMP is **web-only**; there is no mobile app.
+- `docs/DATABASE_SCHEMA.md` — schema introspected from the live database.
+- `docs/AI_DECISION_LOG.md` — decisions, refactors, and the do-not-touch list.
+
+Older status files were archived to `docs/archive/2026-08-21-consolidation/`.
+
 This is the first file every AI agent must read before working on CTMP.
 
 If you read only one instruction file first, read this one.

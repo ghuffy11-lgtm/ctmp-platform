@@ -13,6 +13,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { CommercialTermsDto } from '../../bids/dto/commercial-terms.dto';
 
 // BUG-115 (2026-06-09): one revised BoQ line on a negotiation submission.
 export class NegotiationBoqLineDto {
@@ -64,4 +65,13 @@ export class SubmitNegotiationDto {
   @IsString()
   @MaxLength(2000)
   remarks?: string;
+
+  // Migration 052 (2026-08-06): the vendor may revise the bid-level commercial
+  // terms for this round. Omitted = no terms recorded for the round; the
+  // comparison then falls back to the original bid's terms.
+  @ApiPropertyOptional({ description: 'Revised bid-level commercial terms for this round.', type: CommercialTermsDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CommercialTermsDto)
+  commercialTerms?: CommercialTermsDto;
 }

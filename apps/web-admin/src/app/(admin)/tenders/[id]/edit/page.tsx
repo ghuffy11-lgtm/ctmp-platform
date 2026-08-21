@@ -25,10 +25,30 @@ import {
   Trash2,
 } from 'lucide-react';
 
-const CATEGORIES = [
+// Migration 054 (2026-08-13): categories now come from the managed
+// tender_categories table (Settings → Tender Categories). This array used to be
+// hardcoded here AND in the other tender form; the fallback below only applies
+// if the API call fails, so the form is never unusable.
+const CATEGORY_FALLBACK = [
   'Construction', 'IT Services', 'Healthcare', 'Engineering',
   'Services', 'Insurance', 'Consulting', 'Supply',
 ];
+
+// Categories come from the API (Settings → Tender Categories), falling back to
+// the previously-hardcoded list only if that call fails.
+function useTenderCategories(): string[] {
+  const [categories, setCategories] = useState<string[]>(CATEGORY_FALLBACK);
+  useEffect(() => {
+    get<{ items: Array<{ name: string; isActive: boolean }> }>('/tender-categories', getAccessToken())
+      .then(res => {
+        const names = (res.items ?? []).filter(c => c.isActive).map(c => c.name);
+        if (names.length > 0) setCategories(names);
+      })
+      .catch(() => {});
+  }, []);
+  return categories;
+}
+
 
 const PROCUREMENT_TYPES = ['Open Tender', 'Restricted', 'Single Source'];
 
@@ -133,6 +153,7 @@ export default function EditTenderPage() {
   const [form, setForm] = useState<FormData | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
   // BUG-085: permission for the Submit-for-Approval CTA at the bottom of /edit.
+  const categories = useTenderCategories();
   const [canSubmit, setCanSubmit] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   useEffect(() => {
@@ -378,7 +399,7 @@ export default function EditTenderPage() {
                 className="w-full px-4 py-2.5 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-bg cursor-pointer transition-shadow"
               >
                 <option value="">Select Category</option>
-                {CATEGORIES.map(c => (
+                {categories.map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>

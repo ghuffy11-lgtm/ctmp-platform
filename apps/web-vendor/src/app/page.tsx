@@ -15,6 +15,14 @@ import { getAccessToken } from '@/lib/auth';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Loading, Empty } from '@/components/ui/Empty';
 import { StatusBadge, Chip } from '@/components/ui/StatusBadge';
+import {
+  AboutSystem,
+  GoodToKnow,
+  Hero,
+  HowItWorks,
+  LandingFooter,
+  Requirements,
+} from '@/components/landing/Sections';
 
 interface TenderSummary {
   id: string;
@@ -138,6 +146,14 @@ export default function PublicHome() {
               <div className="text-electric-500 text-[10px] tracking-[4px] font-medium mt-0.5">VENDOR PORTAL</div>
             </div>
           </Link>
+          {/* Section anchors — hidden on small screens where the page is a
+              single scroll anyway. */}
+          <nav className="hidden lg:flex items-center gap-7 text-base font-medium text-slate-900/70">
+            <a href="#about" className="hover:text-electric-600 transition-colors">About</a>
+            <a href="#how-it-works" className="hover:text-electric-600 transition-colors">How It Works</a>
+            <a href="#requirements" className="hover:text-electric-600 transition-colors">Requirements</a>
+            <a href="#open-tenders" className="hover:text-electric-600 transition-colors">Open Tenders</a>
+          </nav>
           <div className="flex items-center gap-2 sm:gap-3">
             <Link
               href="/login"
@@ -157,10 +173,21 @@ export default function PublicHome() {
         </div>
       </header>
 
-      <main className="flex-1 max-w-screen-2xl mx-auto w-full px-6 lg:px-8 py-10 space-y-8">
+      <main className="flex-1 max-w-screen-2xl mx-auto w-full px-6 lg:px-8 pb-10">
+        {/* BUG-??? / owner request 2026-08-07: the page used to open straight
+            onto the tender grid, which told a first-time supplier nothing about
+            the system or what bidding involves. These sections explain it; the
+            grid below is unchanged. Copy lives in components/landing/content.ts. */}
+        <Hero portalName={portalName} />
+        <AboutSystem />
+        <HowItWorks />
+        <Requirements />
+        <GoodToKnow />
+
+        <section id="open-tenders" className="pt-16 space-y-8 scroll-mt-24">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
-            <h1 className="heading-font text-4xl md:text-5xl font-semibold tracking-tighter">Public Tenders</h1>
+            <h2 className="heading-font text-3xl md:text-4xl font-semibold tracking-tighter">Open tenders</h2>
             <p className="text-slate-900/65 text-sm mt-2 max-w-xl">
               Browse open procurement opportunities. {' '}
               <Link href="/login" className="text-electric-600 hover:underline font-medium">
@@ -248,7 +275,10 @@ export default function PublicHome() {
             ))}
           </div>
         )}
+        </section>
       </main>
+
+      <LandingFooter portalName={portalName} />
     </div>
   );
 }

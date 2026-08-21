@@ -1,4 +1,4 @@
-import { IsString, IsEmail, IsNotEmpty, IsUUID, IsOptional, IsEnum, IsArray, MinLength, ValidateIf } from 'class-validator';
+import { IsString, IsEmail, IsNotEmpty, IsUUID, IsOptional, IsEnum, IsArray, IsBoolean, MinLength, ValidateIf } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum UserAuthTypeDto {
@@ -47,4 +47,9 @@ export class CreateUserDto {
   @IsOptional()
   @IsUUID()
   primaryDepartmentId?: string;
+
+  @ApiPropertyOptional({ description: 'Send a welcome email (with the role guide attached) on create', default: false })
+  @IsOptional()
+  @IsBoolean()
+  sendWelcomeEmail?: boolean;
 }

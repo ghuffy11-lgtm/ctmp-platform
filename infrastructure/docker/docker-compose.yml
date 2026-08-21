@@ -105,6 +105,7 @@ services:
       STORAGE_S3_AUTO_CREATE_BUCKETS: ${STORAGE_S3_AUTO_CREATE_BUCKETS:-true}
       AUDIT_VERIFY_ON_START: ${AUDIT_VERIFY_ON_START:-true}
       AUDIT_VERIFY_LIMIT: ${AUDIT_VERIFY_LIMIT:-1000}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200,http://localhost:4300}
       # BUG-144 (2026-06-19): absolute portal URLs baked into every email
       # template. Override these in `.env` when going live with a new

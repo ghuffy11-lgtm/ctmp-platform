@@ -43,6 +43,7 @@ export default function VendorRegisterPage() {
   // needed). Add Company Website.
   const [form, setForm] = useState({
     companyName: '',
+    companyNameAr: '',
     website: '',
     address: '',
     phone: '',
@@ -137,6 +138,9 @@ export default function VendorRegisterPage() {
       );
       await post('/vendor-auth/register', {
         companyName: form.companyName,
+        // Migration 054 (2026-08-13): optional — an international supplier may
+        // have no Arabic trade name, so this must never block registration.
+        companyNameAr: form.companyNameAr.trim() || undefined,
         website: form.website || undefined,
         address: form.address || undefined,
         phone: form.phone || undefined,
@@ -190,6 +194,14 @@ export default function VendorRegisterPage() {
             value={form.companyName}
             onChange={e => update('companyName', e.target.value)}
             required
+          />
+          <Input
+            label="Company Name (Arabic)"
+            value={form.companyNameAr}
+            onChange={e => update('companyNameAr', e.target.value)}
+            dir="rtl"
+            lang="ar"
+            placeholder="اسم الشركة بالعربية (اختياري)"
           />
           <Input
             label="Company Website"

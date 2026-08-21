@@ -18,6 +18,14 @@ import {
   Shield,
   TrendingDown,
 } from 'lucide-react';
+import {
+  type CommercialTerms,
+  EMPTY_TERM,
+  formatDeliveryPeriod,
+  formatPaymentTerms,
+  formatTermText,
+  formatWarranty,
+} from '@ctmp/shared-types';
 import { CommercialDocumentsList } from '@/components/CommercialDocumentsList';
 import { SupportingDocumentsList } from '@/components/SupportingDocumentsList';
 import { usePdfViewer } from '@/components/viewer/PdfViewerProvider';
@@ -69,6 +77,9 @@ export interface CardVendor {
   // can build the download URL.
   // BUG-130 (2026-06-12): boqLines per round so BoqBreakdownBlock can show
   // per-line Original vs Negotiated unit prices.
+  // Migration 052 (2026-08-06): bid-level commercial terms (brand, origin,
+  // warranty, delivery period, payment terms). Every field is optional.
+  commercialTerms?: CommercialTerms | null;
   originalCommercialTotal?: number | null;
   negotiationHistory?: Array<{
     submissionId: string;
@@ -85,6 +96,9 @@ export interface CardVendor {
       status: 'BIDDING' | 'NOT_BIDDING';
       unitPrice: number | null;
     }>;
+    // Migration 052: terms as revised in this round. A null field means the
+    // vendor did not revise it — callers fall back to the bid's own terms.
+    commercialTerms?: CommercialTerms | null;
   }>;
   hasOpenNegotiationInvitation?: boolean;
   openNegotiationRoundNumber?: number | null;
@@ -722,6 +736,21 @@ function CommercialTotalBlock({
           Awaiting price entry by procurement / finance. The comparison cannot be finalised until a total is recorded for this vendor.
         </div>
       )}
+
+      {/* Migration 052: on a legacy tender there is no BOQ table to continue,
+          so the terms get their own compact table under the total. */}
+      <div className="bg-card border border-border rounded-lg overflow-hidden mt-3">
+        <table className="w-full text-sm">
+          <tbody className="divide-y divide-border">
+            <CommercialTermRows
+              terms={vendor.commercialTerms}
+              labelColSpan={1}
+              spacerCells={0}
+              valueColSpan={1}
+            />
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
@@ -736,6 +765,64 @@ function CommercialTotalBlock({
 // from the row layout — the footer carries the grand totals, which is what
 // the committee actually compares. Original-only mode is preserved for
 // vendors without negotiation history so legacy display is untouched.
+// Migration 052 (2026-08-06): the five bid-level commercial terms, emitted as
+// bare <tr>s so they continue the vendor's own commercial table under its total
+// row (owner feedback 2026-08-06 — "under each vendor's Commercial Breakdown").
+// `labelColSpan` + `valueColSpan` adapt to the 5- or 7-column BOQ layout.
+const CARD_TERM_ROWS: Array<{
+  key: string;
+  label: string;
+  render: (terms: CommercialTerms | null | undefined) => string;
+  preLine?: boolean;
+}> = [
+  { key: 'brandManufacturer', label: 'Brand / Manufacturer', render: t => formatTermText(t?.brandManufacturer) },
+  { key: 'countryOfOrigin', label: 'Country of Origin', render: t => formatTermText(t?.countryOfOrigin) },
+  { key: 'warrantyYears', label: 'Warranty', render: t => formatWarranty(t?.warrantyYears ?? null) },
+  { key: 'delivery', label: 'Delivery Period', render: t => formatDeliveryPeriod(t) },
+  { key: 'paymentTerms', label: 'Payment Terms', render: t => formatPaymentTerms(t?.paymentTerms), preLine: true },
+];
+
+function CommercialTermRows({
+  terms,
+  labelColSpan,
+  spacerCells,
+  valueColSpan,
+}: {
+  terms: CommercialTerms | null | undefined;
+  labelColSpan: number;
+  spacerCells: number;
+  valueColSpan: number;
+}) {
+  return (
+    <>
+      {CARD_TERM_ROWS.map((row, i) => {
+        const value = row.render(terms);
+        return (
+          <tr key={row.key} className={`align-top ${i === 0 ? 'border-t-2 border-border' : ''}`}>
+            <td
+              colSpan={labelColSpan}
+              className={`px-3 text-xs font-semibold text-text-secondary ${i === 0 ? 'pt-3 pb-2' : 'py-2'}`}
+            >
+              {row.label}
+            </td>
+            {Array.from({ length: spacerCells }, (_, n) => (
+              <td key={`spacer-${n}`} className={i === 0 ? 'pt-3 pb-2' : 'py-2'} />
+            ))}
+            <td
+              colSpan={valueColSpan}
+              className={`px-3 text-sm text-right ${i === 0 ? 'pt-3 pb-2' : 'py-2'} ${
+                row.preLine ? 'whitespace-pre-line' : ''
+              } ${value === EMPTY_TERM ? 'text-text-secondary' : 'text-text-primary'}`}
+            >
+              {value}
+            </td>
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
 function BoqBreakdownBlock({
   vendor,
   boqTemplate,
@@ -854,6 +941,16 @@ function BoqBreakdownBlock({
                 </tr>
               );
             })}
+            {/* Migration 052 (2026-08-06): bid-level terms continue this table.
+                The label spans Item/Description/Qty/Unit and the value spans the
+                price columns, so both line up with the grid above. Owner
+                feedback: the Bid total row follows them, closing the block. */}
+            <CommercialTermRows
+              terms={vendor.commercialTerms}
+              labelColSpan={2}
+              spacerCells={2}
+              valueColSpan={hasNegotiation ? 3 : 2}
+            />
             {/* Footer with grand totals. With LT columns removed (BUG-130
                 walkthrough 2026-06-13), the footer now carries the only
                 line-totals on the table: Bid total label + Original total +

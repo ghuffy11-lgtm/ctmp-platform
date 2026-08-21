@@ -135,6 +135,20 @@ export class SystemSettingsService {
     };
   }
 
+  // 2026-06-26: branding used to render the HTML email shell — the system name
+  // and the admin (raster/JPG) logo storage key, which the notifications
+  // service attaches inline (CID) to every outbound email.
+  async resolveEmailBranding(): Promise<{ systemName: string; adminLogoKey: string | null }> {
+    const [name, logoKey] = await Promise.all([
+      this.prisma.systemSetting.findUnique({ where: { key: 'branding.system_name' } }),
+      this.prisma.systemSetting.findUnique({ where: { key: 'branding.admin_portal_logo_storage_key' } }),
+    ]);
+    return {
+      systemName: name?.value || 'CTMP',
+      adminLogoKey: logoKey?.value || null,
+    };
+  }
+
   // BUG-107 Piece 5: resolve SMTP config from DB first, env fallback. Called
   // by NotificationsService at transporter-creation time.
   async resolveSmtpConfig() {

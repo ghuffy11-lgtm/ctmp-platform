@@ -51,6 +51,8 @@ interface Department {
   id: string;
   code: string;
   name: string;
+  // Migration 054 (2026-08-13): Arabic name for /executive-ar. Null = use name.
+  nameAr?: string | null;
   parentId: string | null;
   isActive: boolean;
 }
@@ -80,7 +82,7 @@ interface InternalUser {
   departments: UserDepartmentSummary[];
 }
 
-type Tab = 'ROLES' | 'TEMPLATES' | 'PLATFORM' | 'DEPARTMENTS' | 'USERS';
+type Tab = 'ROLES' | 'TEMPLATES' | 'PLATFORM' | 'DEPARTMENTS' | 'CATEGORIES' | 'USERS';
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -97,6 +99,7 @@ export default function SettingsPage() {
           { key: 'ROLES', label: 'Roles & Permissions' },
           { key: 'USERS', label: 'Users' },
           { key: 'DEPARTMENTS', label: 'Departments' },
+          { key: 'CATEGORIES', label: 'Tender Categories' },
           { key: 'TEMPLATES', label: 'Notification Templates' },
           { key: 'PLATFORM', label: 'Platform Settings' },
         ] as { key: Tab; label: string }[]).map(t => (
@@ -117,6 +120,7 @@ export default function SettingsPage() {
       {tab === 'ROLES' && <RolesTab />}
       {tab === 'USERS' && <UsersTab />}
       {tab === 'DEPARTMENTS' && <DepartmentsTab />}
+      {tab === 'CATEGORIES' && <CategoriesTab />}
       {tab === 'TEMPLATES' && <TemplatesTab />}
       {tab === 'PLATFORM' && <PlatformTab />}
     </div>
@@ -1336,7 +1340,8 @@ function DepartmentsTab() {
   const [loading, setLoading] = useState(true);
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<Department | 'new' | null>(null);
-  const [draft, setDraft] = useState<{ code: string; name: string; parentId: string | null }>({ code: '', name: '', parentId: null });
+  // Migration 054 (2026-08-13): nameAr feeds the Arabic management dashboard.
+  const [draft, setDraft] = useState<{ code: string; name: string; nameAr: string; parentId: string | null }>({ code: '', name: '', nameAr: '', parentId: null });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1355,12 +1360,12 @@ function DepartmentsTab() {
   useEffect(() => { load(); }, [load]);
 
   function startNew() {
-    setDraft({ code: '', name: '', parentId: null });
+    setDraft({ code: '', name: '', nameAr: '', parentId: null });
     setError(null);
     setEditing('new');
   }
   function startEdit(d: Department) {
-    setDraft({ code: d.code, name: d.name, parentId: d.parentId });
+    setDraft({ code: d.code, name: d.name, nameAr: d.nameAr ?? '', parentId: d.parentId });
     setError(null);
     setEditing(d);
   }
@@ -1378,11 +1383,14 @@ function DepartmentsTab() {
         await post('/departments', {
           code: draft.code.trim(),
           name: draft.name.trim(),
+          nameAr: draft.nameAr.trim() || undefined,
           parentId: draft.parentId || undefined,
         }, token);
       } else if (editing) {
         await patch(`/departments/${editing.id}`, {
           name: draft.name.trim(),
+          // Empty string clears it; the dashboard then falls back to name.
+          nameAr: draft.nameAr.trim(),
           parentId: draft.parentId,
         }, token);
       }
@@ -1455,7 +1463,7 @@ function DepartmentsTab() {
               {editing === 'new' ? 'Create Department' : `Edit ${editing.code}`}
             </h3>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
               <label className="text-xs font-bold uppercase tracking-wider text-text-secondary block mb-1">
                 Code <span className="text-danger">*</span>
@@ -1479,6 +1487,20 @@ function DepartmentsTab() {
                 placeholder="e.g. Procurement"
                 className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
               />
+            </div>
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-text-secondary block mb-1">
+                Arabic Name
+              </label>
+              <input
+                value={draft.nameAr}
+                onChange={e => setDraft({ ...draft, nameAr: e.target.value })}
+                dir="rtl"
+                lang="ar"
+                placeholder="مثال: المشتريات"
+                className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              <p className="text-[10px] text-text-secondary mt-0.5">Optional — shown on the Arabic dashboard. Blank falls back to Name.</p>
             </div>
             <div>
               <label className="text-xs font-bold uppercase tracking-wider text-text-secondary block mb-1">Parent Department</label>
@@ -1515,6 +1537,7 @@ function DepartmentsTab() {
             <tr>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Code</th>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Name</th>
+              <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Arabic Name</th>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Parent</th>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Status</th>
               <th className="px-5 py-3 text-right text-xs font-bold uppercase tracking-wider text-text-secondary">Actions</th>
@@ -1529,6 +1552,9 @@ function DepartmentsTab() {
                 <tr key={d.id} className={d.isActive ? '' : 'opacity-60'}>
                   <td className="px-5 py-3 font-mono text-text-primary">{d.code}</td>
                   <td className="px-5 py-3 font-semibold text-text-primary">{d.name}</td>
+                  <td className="px-5 py-3 text-text-primary" dir="rtl" lang="ar">
+                    {d.nameAr || <span className="text-text-secondary" dir="ltr">—</span>}
+                  </td>
                   <td className="px-5 py-3 text-text-secondary">{parent ? `${parent.name} (${parent.code})` : '—'}</td>
                   <td className="px-5 py-3">
                     <span className={`px-2 py-0.5 rounded text-xs font-bold ${
@@ -1582,12 +1608,15 @@ function UsersTab() {
     roleId: string;
     departmentIds: string[];
     primaryDepartmentId: string;
+    sendWelcomeEmail: boolean;
   }>({
     email: '', displayName: '', authType: 'AD', adUsername: '', password: '',
-    status: 'ACTIVE', roleId: '', departmentIds: [], primaryDepartmentId: '',
+    status: 'ACTIVE', roleId: '', departmentIds: [], primaryDepartmentId: '', sendWelcomeEmail: false,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [welcomeBusyId, setWelcomeBusyId] = useState<string | null>(null);
+  const [welcomeMsg, setWelcomeMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1609,7 +1638,7 @@ function UsersTab() {
   function startNew() {
     setDraft({
       email: '', displayName: '', authType: 'AD', adUsername: '', password: '',
-      status: 'ACTIVE', roleId: '', departmentIds: [], primaryDepartmentId: '',
+      status: 'ACTIVE', roleId: '', departmentIds: [], primaryDepartmentId: '', sendWelcomeEmail: false,
     });
     setError(null);
     setEditing('new');
@@ -1626,9 +1655,24 @@ function UsersTab() {
       roleId: u.roles[0]?.id ?? '',
       departmentIds: u.departments.map(d => d.id),
       primaryDepartmentId: u.departments.find(d => d.isPrimary)?.id ?? '',
+      sendWelcomeEmail: false,
     });
     setError(null);
     setEditing(u);
+  }
+
+  async function handleResendWelcome(u: InternalUser) {
+    setWelcomeBusyId(u.id);
+    setWelcomeMsg(null);
+    try {
+      const token = getAccessToken();
+      await post(`/users/${u.id}/welcome-email`, {}, token);
+      setWelcomeMsg(`Welcome email sent to ${u.email}.`);
+    } catch (err) {
+      setWelcomeMsg(err instanceof Error ? err.message : 'Failed to send welcome email');
+    } finally {
+      setWelcomeBusyId(null);
+    }
   }
 
   function cancel() { setEditing(null); setError(null); }
@@ -1663,6 +1707,7 @@ function UsersTab() {
         // authType is set at creation only — immutable post-create per backend rule.
         payload.authType = draft.authType;
         if (draft.authType === 'AD') payload.adUsername = draft.adUsername.trim() || undefined;
+        if (draft.sendWelcomeEmail) payload.sendWelcomeEmail = true;
         await post('/users', payload, token);
       } else if (editing) {
         payload.status = draft.status;
@@ -1809,6 +1854,16 @@ function UsersTab() {
             )}
           </div>
 
+          {editing === 'new' && (
+            <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={draft.sendWelcomeEmail}
+                onChange={e => setDraft({ ...draft, sendWelcomeEmail: e.target.checked })}
+              />
+              <span className="inline-flex items-center gap-1.5"><Mail className="w-3.5 h-3.5" /> Send welcome email with role guide</span>
+            </label>
+          )}
           {error && <p className="text-xs text-danger">{error}</p>}
           <div className="flex justify-end gap-2">
             <button onClick={cancel} className="px-4 py-1.5 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-bg">Cancel</button>
@@ -1820,6 +1875,8 @@ function UsersTab() {
           </div>
         </div>
       )}
+
+      {welcomeMsg && <p className="text-xs text-text-secondary px-1 mb-2">{welcomeMsg}</p>}
 
       <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
         <table className="w-full text-sm">
@@ -1881,6 +1938,14 @@ function UsersTab() {
                   ><Pencil className="w-3.5 h-3.5" /> Edit</button>
                   {u.status !== 'DISABLED' && (
                     <button
+                      onClick={() => handleResendWelcome(u)}
+                      disabled={welcomeBusyId === u.id || editing !== null}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-text-secondary hover:bg-bg rounded ml-1 disabled:opacity-40"
+                      title="Send (or resend) the welcome email with the role guide"
+                    ><Mail className="w-3.5 h-3.5" /> {welcomeBusyId === u.id ? 'Sending…' : 'Welcome'}</button>
+                  )}
+                  {u.status !== 'DISABLED' && (
+                    <button
                       onClick={() => handleDisable(u)}
                       className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-danger hover:bg-danger/10 rounded ml-1"
                     ><Trash2 className="w-3.5 h-3.5" /> Disable</button>
@@ -1904,6 +1969,225 @@ function Field({ label, required, children }: { label: string; required?: boolea
         {label} {required && <span className="text-danger">*</span>}
       </label>
       {children}
+    </div>
+  );
+}
+
+// ─── Tender Categories tab ────────────────────────────────────────────────────
+//
+// Migration 054 (2026-08-13). Until now the category list was a hardcoded array
+// duplicated in tenders/new/page.tsx and tenders/[id]/edit/page.tsx, so nobody
+// could add a category without a code change and there was nowhere to hang an
+// Arabic name.
+//
+// Categories are deactivated, never deleted: tenders store the category NAME,
+// so removing a row would strand historical tenders. Renaming is safe — the API
+// updates the tenders carrying the old name in the same transaction.
+
+interface TenderCategory {
+  id: string;
+  name: string;
+  nameAr?: string | null;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+function CategoriesTab() {
+  const confirm = useConfirm();
+  const [items, setItems] = useState<TenderCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<TenderCategory | 'new' | null>(null);
+  const [draft, setDraft] = useState<{ name: string; nameAr: string; sortOrder: string }>({ name: '', nameAr: '', sortOrder: '0' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const token = getAccessToken();
+      const res = await get<{ items: TenderCategory[] }>('/tender-categories?includeInactive=true', token)
+        .catch(() => ({ items: [] }));
+      setItems(res.items ?? []);
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  function startNew() {
+    setDraft({ name: '', nameAr: '', sortOrder: String((items.at(-1)?.sortOrder ?? 0) + 10) });
+    setError(null);
+    setEditing('new');
+  }
+  function startEdit(c: TenderCategory) {
+    setDraft({ name: c.name, nameAr: c.nameAr ?? '', sortOrder: String(c.sortOrder) });
+    setError(null);
+    setEditing(c);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      const body = {
+        name: draft.name.trim(),
+        nameAr: draft.nameAr.trim(),
+        sortOrder: Number(draft.sortOrder) || 0,
+      };
+      if (editing === 'new') {
+        await post('/tender-categories', body, token);
+      } else if (editing) {
+        await patch(`/tender-categories/${editing.id}`, body, token);
+      }
+      setEditing(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally { setSaving(false); }
+  }
+
+  async function handleDeactivate(c: TenderCategory) {
+    const ok = await confirm({
+      title: 'Deactivate category',
+      body: `Hide "${c.name}" from the tender category dropdown? Tenders already using it keep it — nothing is deleted.`,
+      destructive: true,
+      confirmLabel: 'Deactivate',
+    });
+    if (!ok) return;
+    try {
+      await del(`/tender-categories/${c.id}`, getAccessToken());
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to deactivate');
+    }
+  }
+
+  async function handleReactivate(c: TenderCategory) {
+    try {
+      await patch(`/tender-categories/${c.id}`, { isActive: true }, getAccessToken());
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to reactivate');
+    }
+  }
+
+  if (loading) return <div className="text-sm text-text-secondary p-6 text-center">Loading…</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-text-secondary">
+          Categories offered when creating or editing a tender. The Arabic name appears on the Arabic
+          management dashboard.
+        </p>
+        <button
+          onClick={startNew}
+          disabled={editing !== null}
+          className="px-4 py-1.5 bg-accent text-white rounded-lg text-sm font-bold hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"
+        >
+          <Plus className="w-4 h-4" /> New Category
+        </button>
+      </div>
+
+      {editing && (
+        <div className="bg-card rounded-xl border border-border shadow-sm p-5 space-y-3">
+          <h3 className="text-sm font-bold text-text-primary">
+            {editing === 'new' ? 'Create Category' : `Edit ${editing.name}`}
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-text-secondary block mb-1">
+                Name <span className="text-danger">*</span>
+              </label>
+              <input
+                value={draft.name}
+                onChange={e => setDraft({ ...draft, name: e.target.value })}
+                placeholder="e.g. Medical Equipment"
+                className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              {editing !== 'new' && (
+                <p className="text-[10px] text-text-secondary mt-0.5">
+                  Renaming also updates every tender using this category.
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-text-secondary block mb-1">Arabic Name</label>
+              <input
+                value={draft.nameAr}
+                onChange={e => setDraft({ ...draft, nameAr: e.target.value })}
+                dir="rtl"
+                lang="ar"
+                placeholder="مثال: أجهزة طبية"
+                className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              <p className="text-[10px] text-text-secondary mt-0.5">Optional — blank falls back to Name.</p>
+            </div>
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-text-secondary block mb-1">Sort Order</label>
+              <input
+                type="number"
+                value={draft.sortOrder}
+                onChange={e => setDraft({ ...draft, sortOrder: e.target.value })}
+                className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-bg font-mono focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+          </div>
+          {error && <p className="text-xs text-danger">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => { setEditing(null); setError(null); }}
+              className="px-4 py-1.5 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-bg"
+            >Cancel</button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !draft.name.trim()}
+              className="px-4 py-1.5 bg-accent text-white rounded-lg text-sm font-bold hover:opacity-90 disabled:opacity-40"
+            >{saving ? 'Saving…' : 'Save'}</button>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-bg border-b border-border">
+            <tr>
+              <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Name</th>
+              <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Arabic Name</th>
+              <th className="px-5 py-3 text-right text-xs font-bold uppercase tracking-wider text-text-secondary">Sort</th>
+              <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider text-text-secondary">Status</th>
+              <th className="px-5 py-3 text-right text-xs font-bold uppercase tracking-wider text-text-secondary">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {items.length === 0 && (
+              <tr><td colSpan={5} className="px-5 py-8 text-center text-text-secondary">No categories yet.</td></tr>
+            )}
+            {items.map(c => (
+              <tr key={c.id} className={c.isActive ? '' : 'opacity-60'}>
+                <td className="px-5 py-3 font-semibold text-text-primary">{c.name}</td>
+                <td className="px-5 py-3 text-text-primary" dir="rtl" lang="ar">
+                  {c.nameAr || <span className="text-text-secondary" dir="ltr">—</span>}
+                </td>
+                <td className="px-5 py-3 text-right font-mono text-text-secondary">{c.sortOrder}</td>
+                <td className="px-5 py-3">
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                    c.isActive ? 'bg-success/10 text-success' : 'bg-border text-text-secondary'
+                  }`}>{c.isActive ? 'Active' : 'Inactive'}</span>
+                </td>
+                <td className="px-5 py-3 text-right space-x-2 whitespace-nowrap">
+                  <button onClick={() => startEdit(c)} className="text-accent hover:underline text-xs font-semibold">Edit</button>
+                  {c.isActive ? (
+                    <button onClick={() => handleDeactivate(c)} className="text-danger hover:underline text-xs font-semibold">Deactivate</button>
+                  ) : (
+                    <button onClick={() => handleReactivate(c)} className="text-success hover:underline text-xs font-semibold">Reactivate</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

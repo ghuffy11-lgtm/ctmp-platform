@@ -2,8 +2,27 @@
 
 Use this file to find the right project document quickly.
 
+## Read these first (consolidated 2026-08-21)
+
+Four files hold the current, reconciled picture of the project. Prefer them over anything older:
+
+- `docs/PROJECT_STATE.md`: completed features, active tasks, pending backlog, deployment state.
+- `docs/ARCHITECTURE.md`: tech stack, two-server topology, directory mappings. **Note: CTMP is
+  web-only — there is no iOS or Android codebase.**
+- `docs/DATABASE_SCHEMA.md`: all 59 tables, columns, types, foreign keys, generated from the live
+  database; includes the dev/production drift.
+- `docs/AI_DECISION_LOG.md`: technical decisions, refactoring history, and the do-not-touch list.
+
+Superseded material is in `docs/archive/2026-08-21-consolidation/` with a README explaining each
+move. `STATUS.md` at the repository root is now a pointer stub.
+
+**Current build state (2026-08-21, end of day):** dev and production are fully in step — identical
+571-column schemas through migration `055`, images built from the same source, nothing queued behind
+a sign-off.
+
 ## Start Here
 
+- `CLAUDE.md`: Traffic controller — mandatory reading order, maintenance rule, boundaries.
 - `START_HERE_FOR_AI_AGENTS.md`: Single entry point for all AI agents.
 - `README.md`: Project structure and source-of-truth pointers.
 - `AI_BUILD_INSTRUCTIONS.md`: Required workflow for AI agents.
@@ -42,3 +61,9 @@ Use this file to find the right project document quickly.
 - `api-contracts/`: OpenAPI and schema contracts.
 - `infrastructure/`: Docker, future Kubernetes, scripts.
 - `qa/`: Test suites.
+
+## Production operations (2026-06)
+- `docs/runbooks/PRODUCTION_OPERATIONS.md` — topology, air-gap deploy, integrations, troubleshooting.
+- `docs/runbooks/admin-prod-deploy.md` — admin server deploy runbook.
+- `agents/handoffs/HANDOVER.md` — chronological change log (deploy, email, AD, key rotation, data sync).
+- Skills (`~/.claude/skills/`): `ctmp-deploy`, `ctmp-email`, `ctmp-config`, `ctmp-troubleshoot`.

@@ -11,7 +11,7 @@ WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY apps/web-admin/package.json apps/web-admin/
 COPY packages packages/
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --no-frozen-lockfile
 
 FROM base AS build
 ARG NEXT_PUBLIC_API_URL=http://localhost:3000

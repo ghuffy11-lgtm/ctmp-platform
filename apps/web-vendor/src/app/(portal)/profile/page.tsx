@@ -14,6 +14,7 @@ interface ProfileResponse {
   vendor: {
     id: string;
     companyName: string;
+    companyNameAr?: string | null;
     registrationNumber?: string;
     taxNumber?: string;
     country?: string;
@@ -37,6 +38,8 @@ interface ProfileResponse {
 
 type Editable = {
   companyName: string;
+  // Migration 054 (2026-08-13): optional Arabic trade name.
+  companyNameAr: string;
   taxNumber: string;
   country: string;
   address: string;
@@ -47,7 +50,7 @@ type Editable = {
 };
 
 const EMPTY: Editable = {
-  companyName: '', taxNumber: '', country: '', address: '',
+  companyName: '', companyNameAr: '', taxNumber: '', country: '', address: '',
   phone: '', website: '', contactFullName: '', contactPhone: '',
 };
 
@@ -77,6 +80,7 @@ export default function VendorProfilePage() {
         setProfile(p);
         const init: Editable = {
           companyName: p.vendor.companyName ?? '',
+          companyNameAr: p.vendor.companyNameAr ?? '',
           taxNumber: p.vendor.taxNumber ?? '',
           country: p.vendor.country ?? '',
           address: p.vendor.address ?? '',
@@ -174,6 +178,14 @@ export default function VendorProfilePage() {
               value={form.companyName}
               onChange={e => update('companyName', e.target.value)}
               required
+            />
+            <Input
+              label="Company Name (Arabic)"
+              value={form.companyNameAr}
+              onChange={e => update('companyNameAr', e.target.value)}
+              dir="rtl"
+              lang="ar"
+              placeholder="اسم الشركة بالعربية (اختياري)"
             />
             <Input
               label="Tax Number"

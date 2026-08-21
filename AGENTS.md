@@ -22,7 +22,8 @@ The CTMP stack runs on remote Ubuntu server `10.1.13.98` (user: `claude`).
 
 ## General Rules
 
-- Read `START_HERE_FOR_AI_AGENTS.md` first.
+- Read `CLAUDE.md` (repository root) first — it governs every session.
+- Read `START_HERE_FOR_AI_AGENTS.md` next.
 - Read `AI_BUILD_INSTRUCTIONS.md` before starting a task.
 - Read `docs/specs/implementation-spec.md` before implementation.
 - Check `agents/backlog/MASTER_TASK_TRACKER.md` for current task status.

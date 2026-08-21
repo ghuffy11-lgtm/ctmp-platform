@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { VendorStatus, AuditRiskLevel } from '@prisma/client';
+import { VendorStatus, AuditRiskLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { VendorDocumentStorageService } from './vendor-document-storage.service';
@@ -208,9 +208,48 @@ export class VendorsService {
     return this.findOne(id);
   }
 
-  async update(id: string, dto: UpdateVendorDto) {
-    // TODO: audit log
-    throw new Error('Not implemented');
+  /**
+   * Admin edit of a vendor record. Historically a stub that threw
+   * "Not implemented"; migration 054 needed a way for procurement to fill in
+   * Arabic company names for the 17 vendors that registered before the field
+   * existed, so it now handles exactly the fields it can handle safely.
+   *
+   * Deliberately narrow: company identity and status changes still belong to
+   * the approve / reject / suspend flows, which carry their own audit events
+   * and notifications.
+   */
+  async update(id: string, dto: UpdateVendorDto, actorUserId?: string) {
+    const before = await this.prisma.vendor.findUnique({
+      where: { id },
+      select: { id: true, companyName: true, companyNameAr: true, address: true, phone: true },
+    });
+    if (!before) throw new NotFoundException('Vendor not found');
+
+    const data: Prisma.VendorUpdateInput = { updatedAt: new Date() };
+    if (dto.companyName !== undefined) data.companyName = dto.companyName.trim();
+    // Blank clears it — consumers fall back to companyName.
+    if (dto.companyNameAr !== undefined) data.companyNameAr = dto.companyNameAr?.trim() || null;
+    if (dto.address !== undefined) data.address = dto.address;
+    if (dto.phone !== undefined) data.phone = dto.phone;
+
+    const after = await this.prisma.vendor.update({
+      where: { id },
+      data,
+      select: { id: true, companyName: true, companyNameAr: true, address: true, phone: true },
+    });
+
+    await this.audit.log({
+      eventType: 'VENDOR_PROFILE_UPDATED_BY_ADMIN',
+      entityType: 'Vendor',
+      entityId: id,
+      vendorId: id,
+      actorUserId,
+      beforeValue: before,
+      afterValue: after,
+      riskLevel: AuditRiskLevel.MEDIUM,
+    });
+
+    return this.findOne(id);
   }
 
   // BUG-137 (2026-06-19): vendor registration documents — list, view, download.
@@ -314,6 +353,9 @@ export class VendorsService {
     return {
       id: v.id,
       company: v.companyName,
+      // Migration 054 (2026-08-13): shown on the Arabic management dashboard;
+      // null means "fall back to company".
+      companyAr: v.companyNameAr ?? null,
       email: primary?.email ?? '',
       contactName: primary?.fullName ?? '',
       contactPhone: primary?.phone ?? v.phone ?? undefined,

@@ -2,6 +2,14 @@
 
 import { useState } from 'react';
 import { ArrowLeftRight, Award, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
+import {
+  CommercialTerms,
+  EMPTY_TERM,
+  formatDeliveryPeriod,
+  formatPaymentTerms,
+  formatTermText,
+  formatWarranty,
+} from '@ctmp/shared-types';
 
 export interface CommercialMatrixVendor {
   bidId: string;
@@ -21,6 +29,10 @@ export interface CommercialMatrixVendor {
     unitPrice: number | null;
     lineTotal: number | null;
   }>;
+  // Migration 052 (2026-08-06): bid-level commercial terms — brand, origin,
+  // warranty, delivery period, payment terms. All optional, so every field may
+  // be null even when the object is present.
+  commercialTerms?: CommercialTerms | null;
 }
 
 export interface CommercialMatrixBoqRow {
@@ -89,6 +101,132 @@ function resultBadge(result: 'PASS' | 'FAIL' | 'PENDING') {
   }
 }
 
+// Migration 052 (2026-08-06): the five bid-level commercial terms, rendered as
+// label rows × vendor columns under the itemized matrix. Kept in this file so
+// the section reuses the matrix's own sortedVendors + lowestPassBidId and can
+// never drift out of column order with the table above it.
+const TERM_ROWS: Array<{
+  key: string;
+  label: string;
+  render: (terms: CommercialTerms | null | undefined) => string;
+  preLine?: boolean;
+}> = [
+  { key: 'brandManufacturer', label: 'Brand / Manufacturer', render: t => formatTermText(t?.brandManufacturer) },
+  { key: 'countryOfOrigin', label: 'Country of Origin', render: t => formatTermText(t?.countryOfOrigin) },
+  { key: 'warrantyYears', label: 'Warranty', render: t => formatWarranty(t?.warrantyYears ?? null) },
+  { key: 'delivery', label: 'Delivery Period', render: t => formatDeliveryPeriod(t) },
+  { key: 'paymentTerms', label: 'Payment Terms', render: t => formatPaymentTerms(t?.paymentTerms), preLine: true },
+];
+
+/**
+ * The five term rows, emitted as bare <tr>s so they can live INSIDE the BOQ
+ * matrix table (owner feedback 2026-08-06). Sharing the table is what keeps the
+ * vendor columns aligned with the Total row above — no width matching, no
+ * repeated vendor header, no section chrome.
+ *
+ * Alignment (owner feedback, round 3): the label covers Item + Description ONLY
+ * so the `border-r` running down the table after Description is not broken by a
+ * merged cell, `spacerCells` fills the remaining non-vendor columns so the
+ * browser cannot re-derive column widths, and the values are right-aligned like
+ * every figure above them.
+ */
+function CommercialTermRows({
+  vendors,
+  lowestPassBidId,
+  labelColSpan,
+  spacerCells,
+}: {
+  vendors: CommercialMatrixVendor[];
+  lowestPassBidId: string | null;
+  labelColSpan: number;
+  spacerCells: number;
+}) {
+  return (
+    <>
+      {TERM_ROWS.map((row, i) => (
+        <tr
+          key={row.key}
+          className={`group hover:bg-bg/40 align-top ${i === 0 ? 'border-t-2 border-border' : ''}`}
+        >
+          <td
+            colSpan={labelColSpan}
+            className={`px-3 font-semibold text-xs text-text-secondary sticky left-0 z-10 bg-card group-hover:bg-bg/40 border-r border-border ${
+              i === 0 ? 'pt-3 pb-2' : 'py-2'
+            }`}
+          >
+            {row.label}
+          </td>
+          {Array.from({ length: spacerCells }, (_, n) => (
+            <td key={`spacer-${n}`} className={i === 0 ? 'pt-3 pb-2' : 'py-2'} />
+          ))}
+          {vendors.map(v => {
+            const value = row.render(v.commercialTerms);
+            const isEmpty = value === EMPTY_TERM;
+            return (
+              <td
+                key={v.bidId}
+                className={`px-3 text-sm text-right min-w-[140px] ${i === 0 ? 'pt-3 pb-2' : 'py-2'} ${
+                  row.preLine ? 'whitespace-pre-line' : ''
+                } ${
+                  isEmpty
+                    ? 'text-text-secondary'
+                    : v.bidId === lowestPassBidId
+                      ? 'text-success'
+                      : 'text-text-primary'
+                }`}
+              >
+                {value}
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Legacy tenders have no BOQ matrix to append to, so the terms get their own
+ * minimal table — vendor names for context, but still no section heading.
+ */
+function StandaloneCommercialTerms({
+  vendors,
+  lowestPassBidId,
+}: {
+  vendors: CommercialMatrixVendor[];
+  lowestPassBidId: string | null;
+}) {
+  return (
+    <div className="overflow-x-auto relative border-t border-border">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-bg border-b border-border">
+          <tr>
+            <th className="px-3 py-2 w-48 sticky left-0 z-10 bg-bg"></th>
+            {vendors.map(v => (
+              <th
+                key={v.bidId}
+                className={`px-3 py-2 text-xs font-bold uppercase tracking-wider min-w-[140px] ${
+                  v.bidId === lowestPassBidId ? 'text-success' : 'text-text-secondary'
+                }`}
+              >
+                {v.vendorName}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          <CommercialTermRows
+            vendors={vendors}
+            lowestPassBidId={lowestPassBidId}
+            labelColSpan={1}
+            spacerCells={0}
+          />
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /**
  * Phase C (BUG-035). Top section of the redesigned Commercial Comparison page.
  * Summary ↔ Itemized toggle (Itemized stays a Phase-F placeholder until the
@@ -140,7 +278,11 @@ export function CommercialMatrix({ vendors, lowestPassBidId, selectedBidId, onSe
       </div>
 
       {layout === 'itemized' ? (
-        hasBoq ? (
+        /* Migration 052: the BOQ matrix (or its no-template placeholder) is
+           followed by the bid-level Commercial Terms section. The terms are
+           bid-level, so they render even when hasBoq is false. */
+        <>
+        {hasBoq ? (
           /* BUG-068 / Phase F BOQ: rows = template lines, columns = vendors.
              Cells show line total (unit_price * qty) when the vendor is
              BIDDING that line; "—" when NOT_BIDDING or no row submitted.
@@ -208,19 +350,31 @@ export function CommercialMatrix({ vendors, lowestPassBidId, selectedBidId, onSe
                     </td>
                   ))}
                 </tr>
+                {/* Migration 052 — bid-level terms continue the same table so
+                    they line up under Total by construction. */}
+                <CommercialTermRows
+                  vendors={sortedVendors}
+                  lowestPassBidId={lowestPassBidId}
+                  labelColSpan={2}
+                  spacerCells={2}
+                />
               </tbody>
             </table>
           </div>
         ) : (
-          <div className="px-6 py-10 text-center bg-bg/40">
-            <p className="text-sm text-text-secondary">
-              This tender has no BOQ template configured (legacy / pre-Phase F).
-            </p>
-            <p className="text-xs text-text-secondary mt-2">
-              Switch back to Summary view to compare totals.
-            </p>
-          </div>
-        )
+          <>
+            <div className="px-6 py-10 text-center bg-bg/40">
+              <p className="text-sm text-text-secondary">
+                This tender has no BOQ template configured (legacy / pre-Phase F).
+              </p>
+              <p className="text-xs text-text-secondary mt-2">
+                Switch back to Summary view to compare totals.
+              </p>
+            </div>
+            <StandaloneCommercialTerms vendors={sortedVendors} lowestPassBidId={lowestPassBidId} />
+          </>
+        )}
+        </>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">

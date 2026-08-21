@@ -183,6 +183,10 @@ function safeVendor(v: any) {
     commercialDocuments: Array.isArray(v?.commercialDocuments) ? v.commercialDocuments : [],
     currency: v?.currency ?? 'KWD',
     technicalResult: v?.technicalResult ?? 'PENDING',
+    // Migration 052 (2026-08-06): bid-level commercial terms. Archived tenders
+    // awarded before the migration have none — normalise to null so the terms
+    // section renders "—" rather than crashing on an absent object.
+    commercialTerms: v?.commercialTerms ?? null,
   };
 }
 

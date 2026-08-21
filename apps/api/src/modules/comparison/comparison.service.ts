@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { TenderStatus, TechnicalResult, EnvelopeType, EnvelopeStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { toCommercialTermsView } from '../bids/commercial-terms.util';
 
 const STATUS_DB_TO_API: Record<TenderStatus, string> = {
   DRAFT: 'Draft',
@@ -379,6 +380,10 @@ export class ComparisonService {
           percentReductionVsOriginal,
           commercialPdfFilename: inv.submission.commercialPdfFilename,
           remarks: inv.submission.remarks ?? null,
+          // Migration 052 (2026-08-06): the round's own commercial terms. Null
+          // fields mean the vendor did not revise that term this round; the
+          // frontend falls back to the original bid's value.
+          commercialTerms: toCommercialTermsView(sub),
           boqLines: (inv.submission.boqItems ?? []).map((b: any) => ({
             tenderBoqItemId: b.tenderBoqItemId,
             status: b.status,
@@ -449,6 +454,10 @@ export class ComparisonService {
             ? Number(i.unitPrice) * Number(i.tenderBoqItem.qty)
             : null,
         })),
+        // Migration 052 (2026-08-06): bid-level commercial terms shown as a
+        // section under the Itemized matrix. Additive — no existing consumer
+        // breaks by ignoring it.
+        commercialTerms: toCommercialTermsView(bid),
         // BUG-115 (2026-06-09): original + negotiated views.
         originalCommercialTotal,
         negotiationHistory,

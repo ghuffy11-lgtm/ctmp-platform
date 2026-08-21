@@ -133,7 +133,7 @@ export class BoqService {
     // Vendor: own bid only. Internal user: gated by tender:view (the controller
     // applies the perm decorator; here we just trust the guard).
     if (user?.vendorId && bid.vendorId !== user.vendorId) {
-      throw new ForbiddenException('Not your bid');
+      throw new ForbiddenException('This bid belongs to another company.');
     }
 
     const items = await this.prisma.bidBoqItem.findMany({
@@ -170,10 +170,12 @@ export class BoqService {
     });
     if (!bid) throw new NotFoundException('Bid not found');
     if (!vendor?.vendorId || bid.vendorId !== vendor.vendorId) {
-      throw new ForbiddenException('Not your bid');
+      throw new ForbiddenException('This bid belongs to another company.');
     }
     if (bid.status !== BidStatus.DRAFT || bid.submittedAt != null) {
-      throw new ForbiddenException('Bid is already submitted and immutable');
+      throw new ForbiddenException(
+      'This bid has already been submitted, so its pricing can no longer be edited. Submitted bids are locked and checksummed.',
+    );
     }
 
     // Tender's BOQ template must cover every line the vendor sends, and the

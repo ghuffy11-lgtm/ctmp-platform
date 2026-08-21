@@ -13,6 +13,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SystemSettingsService } from '../system-settings/system-settings.service';
 import { NegotiationStorageService } from './negotiation-storage.service';
+import { normalizeCommercialTerms } from '../bids/commercial-terms.util';
 import { LaunchNegotiationDto } from './dto/launch-negotiation.dto';
 import { SubmitNegotiationDto } from './dto/submit-negotiation.dto';
 import { CloseNegotiationDto } from './dto/close-negotiation.dto';
@@ -427,6 +428,10 @@ export class NegotiationService {
           commercialPdfSha256: pending.sha256,
           commercialPdfFilename: pending.filename,
           remarks: dto.remarks ?? null,
+          // Migration 052 (2026-08-06): the round's own commercial terms, run
+          // through the same normalizer the bid endpoint uses so both write
+          // paths enforce identical rules.
+          ...normalizeCommercialTerms(dto.commercialTerms),
           boqItems: {
             createMany: {
               data: dto.boqLines.map(l => ({
