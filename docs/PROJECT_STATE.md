@@ -155,6 +155,20 @@ Still outstanding from before, unrelated to the Arabic work:
 
 ### Known gaps and deliberate non-features
 
+- **A tender can reach `APPROVED` with no procurement type and then be permanently stuck.**
+  Found by the 2026-08-21 end-to-end Chrome test. The create form leaves all three
+  procurement-type radios unselected, and neither "Save as Draft" nor "Submit for Approval"
+  requires one — but **publish does**. Once `APPROVED`, the edit form deliberately sends only
+  `visibility` and "bails without hitting the API" (BUG-122b), the API rejects `tenderType`
+  outright, and `revert` only works *from Published*. The tender cannot be published, edited or
+  reverted; the only exit is Cancel and recreate. Fix options: default the radio to "Open Tender",
+  require it before Submit for Approval, or allow revert from `APPROVED`.
+- **`tenders.tender_type` holds inconsistent values** — `OPEN`, `Open Tender` and `Restricted` all
+  exist in the same free-text column. Worth normalising if it is ever filtered or reported on.
+- **The vendor bid wizard uses a native `confirm()`** for final submission
+  (`bids/wizard/[tenderId]/page.tsx:353`) while the admin portal uses its own `DialogProvider`
+  everywhere else. Cosmetic inconsistency, and it blocks headless automation.
+
 - **There is no scheduler.** Nothing auto-transitions a tender when its deadline passes. The
   deadline filter hides expired tenders from vendors, but an admin still closes tenders by hand.
   This is the single biggest "looks broken but isn't" item for a newcomer.

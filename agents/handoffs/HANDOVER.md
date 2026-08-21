@@ -6,6 +6,57 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-21 — Full tender lifecycle driven end-to-end through Chrome (DEV)
+
+**Date/time:** 2026-08-21
+
+Owner asked for a complete simulated tender. Drove all 12 lifecycle stages through the real UI with
+headless Chrome (puppeteer inside `ctmp-api`), as five different personas, on **dev only**.
+
+**Tender:** `TDR-2026-0028` "E2E FULL LIFECYCLE TEST — Server Room Upgrade", IT department,
+budget 50,000.000 KWD, 3 BoQ lines, 2 weighted technical criteria.
+
+**Stages completed:** create → BoQ → criteria → submit for approval → approve → publish →
+2 vendors bid (technical + commercial envelopes, BoQ pricing, all 5 Commercial Terms) →
+close submissions → technical opening → technical evaluation (both PASS) → finalize →
+committee session → attendance/quorum 3/3 → commercial envelopes opened →
+commercial comparison → award → Award Minutes PDF.
+
+**Result: AWARDED** to E2E Test Vendor LLC at **KWD 12,703.750** (lowest of two PASS bids).
+
+**Defect found — tender can reach APPROVED with no procurement type and become permanently stuck.**
+Publish requires `procurementType`; the create form pre-selects none and nothing before publish
+demands it; once APPROVED the edit form sends only `visibility`, the API rejects `tenderType`, and
+`revert` only works from Published. No UI path out — only Cancel. Recorded in `PROJECT_STATE.md`.
+Worked around for the test by setting the column directly in the database.
+
+**Also noted:** `tenders.tender_type` contains mixed values (`OPEN`, `Open Tender`, `Restricted`);
+the vendor wizard uses a native `confirm()` for submission while admin uses `DialogProvider`.
+
+**Controls verified working:**
+- Commercial envelopes stayed **SEALED** through technical evaluation and opened only via a
+  committee session with quorum. `COMMERCIAL_ENVELOPES_OPENED` logged **CRITICAL**.
+- Separation of duties held in both directions: the Procurement Admin could **not** open technical
+  envelopes (no button), and the committee member got **403** attempting to award.
+- Approval and envelope-opening both refuse to proceed without written comments/remarks.
+- Money precision end-to-end: BoQ inputs accept 3 decimals, unit prices stored `1250.750` /
+  `3400.125` / `900.500`, comparison shows `12,703.750`, `tenders.awarded_amount` stores
+  `12703.750`, and the Award Minutes PDF prints `KWD 12,703.750`. Migration `055` confirmed live.
+- Commercial Terms captured for both bids and printed in the minutes under "Commercial Terms of
+  Offers".
+- Audit: **42 events**, CRITICAL on exactly the two regulated actions, hash chain links intact, no
+  security alerts raised during the run.
+
+**Test data left on dev:** tender `TDR-2026-0028` (AWARDED), one new user
+`e2e-procadmin@ctmp.local`, and known passwords set on two pre-existing *test* vendor accounts
+(`ai-claude-2026-05-25@example.com`, `qa-redesign-approved@example.com`). Nothing on production —
+production still has zero tenders.
+
+**Note:** vendor self-registration could **not** be exercised through Chrome — dev uses a real
+hCaptcha key, which headless cannot solve. Existing approved vendors were used instead.
+
+---
+
 ## 2026-08-21 — `VendorDirectory`'s dead `interactive` prop removed (PROD)
 
 **Date/time:** 2026-08-21
