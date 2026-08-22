@@ -8,7 +8,7 @@ called out explicitly.
 - **Database / user:** `ctmp` / `ctmp`
 - **Tables:** 59 · **Columns:** 571 · **Foreign keys:** 119 · **Enum types:** 25
 - **Access layer:** Prisma 6 (`apps/api/prisma/schema.prisma`) — the API never issues raw DDL
-- **Migrations:** `database/migrations/*.sql`, applied in filename order (latest: `055`)
+- **Migrations:** `database/migrations/*.sql`, applied in filename order (latest: `056`)
 
 ## How migrations actually reach a database
 

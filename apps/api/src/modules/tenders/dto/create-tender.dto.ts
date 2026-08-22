@@ -1,6 +1,12 @@
 import { IsString, IsNotEmpty, IsDateString, IsOptional, IsUUID, IsNumber, IsIn, Min, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+/**
+ * The only procurement types the system accepts. Mirrors PROCUREMENT_TYPES in
+ * the admin tender forms — keep the two in step.
+ */
+export const PROCUREMENT_TYPES = ['Open Tender', 'Restricted', 'Single Source'] as const;
+
 export class CreateTenderDto {
   @ApiProperty()
   @IsString()
@@ -30,8 +36,15 @@ export class CreateTenderDto {
   @IsOptional()
   category?: string;
 
-  @ApiPropertyOptional({ enum: ['Open Tender', 'Restricted', 'Single Source'] })
+  // 2026-08-21: the enum was documented for Swagger but only validated as a
+  // string, so the API accepted any value while advertising three. Two rows
+  // reached the database as 'OPEN' via manual SQL. UpdateTenderDto extends this
+  // class, so @IsIn covers create and update alike.
+  @ApiPropertyOptional({ enum: PROCUREMENT_TYPES })
   @IsString()
+  @IsIn(PROCUREMENT_TYPES, {
+    message: `procurementType must be one of: ${PROCUREMENT_TYPES.join(', ')}`,
+  })
   @IsOptional()
   procurementType?: string;
 
