@@ -72,3 +72,6 @@ docs/archive/**/docker-config-backups/
 
 # TypeScript incremental build artifacts (found during the 2026-08-21 sync prep)
 *.tsbuildinfo
+
+# Next.js generated type shims
+next-env.d.ts

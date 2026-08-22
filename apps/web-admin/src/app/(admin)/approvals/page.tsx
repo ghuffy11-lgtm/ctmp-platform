@@ -312,8 +312,11 @@ export default function ApprovalsPage() {
   // ─── Actions ───────────────────────────────────────────────────────────────
   async function handleAction(action: 'APPROVE' | 'REJECT') {
     if (!selectedTask) return;
-    if (!comments.trim()) {
-      setActionError('Comments are required for audit compliance.');
+    // 2026-08-22: the API now enforces this too (ApproveTenderDto / RejectTenderDto,
+    // MinLength(20) — the house convention for audit free-text on a regulated state
+    // change). Keep the two in step; before today only this client-side check existed.
+    if (comments.trim().length < 20) {
+      setActionError('Comments are required for audit compliance — at least 20 characters.');
       return;
     }
     setSubmitting(true);

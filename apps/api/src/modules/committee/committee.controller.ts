@@ -8,6 +8,7 @@ import { CommitteeService } from './committee.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { RecordAttendanceDto } from './dto/record-attendance.dto';
 import { AmendSessionDto } from './dto/amend-session.dto';
+import { OpenEnvelopesDto } from './dto/open-envelopes.dto';
 
 @ApiTags('committee')
 @ApiBearerAuth()
@@ -50,10 +51,10 @@ export class CommitteeController {
   @ApiOperation({ operationId: 'openCommercialEnvelopes', summary: 'Open commercial envelopes — committee only, changes envelope state' })
   openEnvelopes(
     @Param('sessionId') sessionId: string,
-    @Body() body: { remarks?: string } = {},
+    @Body() dto: OpenEnvelopesDto,
     @CurrentUser('id') userId: string,
   ) {
-    return this.committeeService.openEnvelopes(sessionId, userId, body?.remarks);
+    return this.committeeService.openEnvelopes(sessionId, userId, dto.remarks);
   }
 
   @Get('committee-sessions/:sessionId/opening-records')

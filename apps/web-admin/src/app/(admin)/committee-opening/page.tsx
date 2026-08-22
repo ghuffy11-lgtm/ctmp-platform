@@ -260,7 +260,10 @@ export default function CommitteeOpeningPage() {
   const canOpenEnvelopes = !!session
     && session.status !== 'COMPLETED'
     && quorumMet
-    && remarks.trim().length > 0
+    // 2026-08-22: OpenEnvelopesDto now enforces MinLength(20) server-side. Before
+    // today the API accepted an empty body on the most regulated action in the
+    // system, and only this client check stood in the way.
+    && remarks.trim().length >= 20
     && !beforeMeeting;
 
   // ─── Handlers ───────────────────────────────────────────────────────────────
@@ -791,7 +794,10 @@ export default function CommitteeOpeningPage() {
                     className="w-full p-3 text-sm border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent bg-bg resize-none"
                   />
                   <p className="text-[11px] text-text-secondary italic mt-2">
-                    Notes are time-stamped in the audit log.
+                    Notes are time-stamped in the audit log. Minimum 20 characters
+                    {remarks.trim().length > 0 && remarks.trim().length < 20
+                      ? ` — ${20 - remarks.trim().length} more needed.`
+                      : '.'}
                   </p>
                 </div>
               </div>

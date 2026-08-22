@@ -14,6 +14,7 @@ import { UpdateTenderDto } from './dto/update-tender.dto';
 import { ListTendersDto } from './dto/list-tenders.dto';
 import { InviteVendorDto } from './dto/invite-vendor.dto';
 import { RevertTenderDto } from './dto/revert-tender.dto';
+import { ApproveTenderDto, RejectTenderDto } from './dto/approve-tender.dto';
 import { SuspendTenderDto } from './dto/suspend-tender.dto';
 import { ResumeTenderDto } from './dto/resume-tender.dto';
 import { CancelTenderDto } from './dto/cancel-tender.dto';
@@ -264,10 +265,10 @@ export class TendersController {
   @ApiOperation({ operationId: 'approveTender', summary: 'Approve tender from Internal Review' })
   approve(
     @Param('id') id: string,
-    @Body('comments') comments: string,
+    @Body() dto: ApproveTenderDto,
     @CurrentUser('id') userId: string,
   ) {
-    return this.tendersService.approve(id, comments, userId);
+    return this.tendersService.approve(id, dto.comments, userId);
   }
 
   @Post(':id/reject')
@@ -275,10 +276,10 @@ export class TendersController {
   @ApiOperation({ operationId: 'rejectTender', summary: 'Reject tender from Internal Review' })
   reject(
     @Param('id') id: string,
-    @Body('reason') reason: string,
+    @Body() dto: RejectTenderDto,
     @CurrentUser('id') userId: string,
   ) {
-    return this.tendersService.reject(id, reason, userId);
+    return this.tendersService.reject(id, dto.reason, userId);
   }
 
   // BUG-112 (2026-06-07) Piece 1: revert Published → earlier editable state.
