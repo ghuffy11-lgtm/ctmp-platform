@@ -6,6 +6,69 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-23 — Justification fixes SHIPPED TO PRODUCTION (admin host) — `prod-20260823`
+
+**Date/time:** 2026-08-23 · commit `3664ad2` · admin host only
+
+Rolls yesterday's approve / reject / open-commercial-envelopes justification fixes to production,
+on the owner's instruction. `api` + `web-admin` only — **no vendor image, no migration, no schema
+change**. The vendor host was not touched.
+
+**Deploy sequence** (unchanged recipe):
+1. Pre-flight: build box 85% → `docker builder prune -f` reclaimed 1.4 GB → 83%. Admin host 33% on
+   `sdb`. All five production containers healthy beforehand.
+2. `pg_dump --format=custom` → `/var/lib/docker/ctmp-platform/backups/ctmp_pre_20260823.dump`
+   (226 KB). Taken even though nothing touches the schema — it costs nothing and the one time it is
+   skipped is the time it is needed.
+3. Rollback tags cut: `ctmp-api:rollback-20260823` (`d4da4f1`),
+   `ctmp-web-admin:rollback-20260823` (`4ef283b`) — both equal to the `prod-20260822` images they
+   replace.
+4. Built both with explicit prod build-args, tagged `prod-20260823`.
+5. **Build-arg gate before transfer:** admin bundle 43 × `ctmp.hadiclinic.com.kw:4202`,
+   **11** × `localhost:3000` — the documented fallback-literal fingerprint, unchanged since
+   2026-08-21.
+6. **Fix confirmed present in the image before shipping it**, not inferred from the commit:
+   `ApproveTenderDto`, `RejectTenderDto` and `OpenEnvelopesDto` each appear in 4 compiled files, and
+   both new DTO files carry their `MinLength` metadata.
+7. `docker save | gzip -1 | ssh | docker load` to `cts-prod`; retag `prod-20260823` → `latest`;
+   `up -d --no-build --force-recreate api web-admin`.
+
+**Verified after cutover:**
+- Running image IDs equal their `prod-20260823` tags: api `2a5e556`, web-admin `880912c`.
+- All five containers up, `ctmp-api` healthy.
+- `/api/v1/health`, `/login`, `/executive-ar`, `/approvals` → **200**.
+- API boot clean: **`Audit chain verified — 41 rows OK (id 1..41)`**,
+  `CAPTCHA provider: hCaptcha (production)`, no errors.
+- Production OpenAPI now advertises all three new schemas — the opening endpoint previously had no
+  request-body schema at all.
+- Vendor portal re-checked because it proxies `/api/*` to this API: `/`, `/login`, `/register` and
+  the proxied `/api/v1/health` all **200**.
+
+**Not verified on production, deliberately:** the 400-on-empty-body behaviour was proven by
+execution on dev (empty → 400, short → 400, valid → 201/404-at-handler) but **not re-executed
+here**, because doing so means approving or rejecting a real tender, and production has none. The
+evidence on production is the compiled DTOs in the running image plus the OpenAPI schemas. When the
+launch test tender runs, Stage 4 exercises it for real.
+
+**Production now at:** `ctmp-api:prod-20260823`, `ctmp-web-admin:prod-20260823`,
+`ctmp-web-vendor:prod-20260822` (unchanged), schema `056`.
+
+**Rollback:** retag `ctmp-api:rollback-20260823` / `ctmp-web-admin:rollback-20260823` to `:latest`
+and recreate with `--no-build`. No migration to reverse.
+
+**Behaviour change users will notice:** approving or rejecting a tender, and opening commercial
+envelopes, now require at least 20 characters of written justification. Both admin screens enforce
+the same minimum and the committee remarks box counts down the characters still needed, so the
+server should never be the first thing to say no.
+
+**Open questions:** none.
+
+**Next recommended step:** decide the reference-reuse question before the launch test (cancel rather
+than purge the test tender — see the 2026-08-22 finding), and consider promoting the dev lifecycle
+harness into `qa/playwright`.
+
+---
+
 ## 2026-08-22 — Approve / reject / open-envelopes now require written justification (DEV)
 
 **Date/time:** 2026-08-22 · commit `3664ad2` · dev only, **not on production**

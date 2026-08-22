@@ -1,6 +1,6 @@
 # CTMP — Project State
 
-**As of 2026-08-22 (midday).** Reconciled against the working tree, the running dev containers, and the
+**As of 2026-08-23.** Reconciled against the working tree, the running dev containers, and the
 production hosts (image tags, schema comparison). Where a claim could be checked, it was checked.
 
 ---
@@ -13,11 +13,12 @@ bid submission (sealed technical + commercial envelopes) → technical evaluatio
 commercial opening → commercial comparison → optional negotiation → award recommendation → award →
 close, with a hash-chained audit trail throughout.
 
-**As of 2026-08-22 dev and production are back in step.** Identical schemas, everything through
-migration `056` on both, and nothing queued. The Arabic management area shipped to production on
-2026-08-21 with migrations `054` and `055`; the three fixes found by the end-to-end lifecycle test —
-the APPROVED dead end, `procurementType` enum enforcement, and the vendor portal's browser-native
-dialogs — shipped on 2026-08-22 with migration `056`.
+**As of 2026-08-23 dev and production are in step.** Identical schemas, everything through migration
+`056` on both, and nothing queued. The Arabic management area shipped to production on 2026-08-21
+with migrations `054` and `055`; the three fixes found by the end-to-end lifecycle test — the
+APPROVED dead end, `procurementType` enum enforcement, and the vendor portal's browser-native
+dialogs — shipped on 2026-08-22 with migration `056`; and the approve / reject / envelope-opening
+justification requirements shipped on 2026-08-23.
 
 **The live money path has still never been exercised.** Production holds **zero tenders**. Creating
 one test tender, walking a vendor through it, and purging it afterwards is the outstanding work.
@@ -46,19 +47,23 @@ at commit `b37170f`.
 
 | Environment | URL | Schema | Images |
 |---|---|---|---|
-| Production admin | `https://ctmp.hadiclinic.com.kw:4202` (`10.1.27.99`) | through `056` | `ctmp-api:prod-20260822`, `ctmp-web-admin:prod-20260822` |
+| Production admin | `https://ctmp.hadiclinic.com.kw:4202` (`10.1.27.99`) | through `056` | `ctmp-api:prod-20260823`, `ctmp-web-admin:prod-20260823` |
 | Production vendor | `https://vn.hadiclinic.com.kw:4201` (`172.16.4.11`) | (uses admin DB) | `ctmp-web-vendor:prod-20260822` |
-| Dev / build box | admin `:4202` / vendor `:4201` on `10.1.13.98` | through `056` | all three rebuilt 2026-08-22 |
+| Dev / build box | admin `:4202` / vendor `:4201` on `10.1.13.98` | through `056` | api + web-admin rebuilt 2026-08-22 (justification fixes) |
 
-Running image IDs confirmed equal to their `prod-20260822` tags on both hosts after cutover:
-api `d4da4f1`, web-admin `4ef283b`, web-vendor `7b6e6f2`.
+Running image IDs confirmed equal to their tags after each cutover: `prod-20260823` api `2a5e556`,
+web-admin `880912c`; `prod-20260822` web-vendor `7b6e6f2` (unchanged since).
 
 **Schema drift, dev vs prod: none.** Both at migration `056`. Note that `056` is data-only — three
 `UPDATE`s and a `COMMENT`, no DDL — so the column-by-column comparison below reports zero difference
 whether or not it has been applied and **cannot be used to detect it**. Check `tender_type` values
 and the column comment directly instead.
 
-**Rollback tags on the hosts:** `ctmp-api:rollback-20260822` (`0c01cc9`),
+**Latest rollback point (admin host):** `ctmp-api:rollback-20260823` (`d4da4f1`),
+`ctmp-web-admin:rollback-20260823` (`4ef283b`) — cut before the 2026-08-23 deploy, equal to the
+`prod-20260822` images. Pre-deploy dump: `backups/ctmp_pre_20260823.dump`.
+
+**Earlier rollback tags:** `ctmp-api:rollback-20260822` (`0c01cc9`),
 `ctmp-web-admin:rollback-20260822` (`51eaa66`) on admin; `ctmp-web-vendor:rollback-20260822`
 (`3a66ef3`) on vendor — all cut immediately before the 2026-08-22 deploy, and all equal to the
 `prod-20260821*` images they replaced. Older points remain: `ctmp-api:rollback-20260821`,
@@ -203,7 +208,7 @@ operate.
 
 ## Defects found by the 2026-08-22 dev lifecycle run
 
-**✅ FIXED on dev, same day (commit `3664ad2`) — not yet on production.** Three regulated actions
+**✅ FIXED and IN PRODUCTION** (dev 2026-08-22, production 2026-08-23, commit `3664ad2`, images `prod-20260823`). Three regulated actions
 accepted an empty body and returned `201`, because each took its justification as a bare
 `@Body('field')` string with no DTO:
 
