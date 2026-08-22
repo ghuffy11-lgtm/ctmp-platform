@@ -6,6 +6,132 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-22 — Vendor portal: browser-native dialogs replaced with `DialogProvider` (DEV)
+
+**Date/time:** 2026-08-22 12:20 (+03) · commit `e0069c2`
+
+**Files changed:** `apps/web-vendor/src/components/dialog/DialogProvider.tsx` (new, 221 lines),
+`apps/web-vendor/src/app/(portal)/layout.tsx`,
+`apps/web-vendor/src/app/(portal)/bids/wizard/[tenderId]/page.tsx`,
+`apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx`,
+`apps/web-vendor/src/components/bids/NegotiationSection.tsx`, `docs/PROJECT_STATE.md`.
+
+**What changed:** BUG-078 (2026-06-01) replaced native `confirm()`/`alert()` with in-app modals on
+the owner's directive, but only in the admin portal. The vendor portal — the externally facing
+surface — still had 2 `confirm()` and 5 `alert()` calls. `DialogProvider` was ported from admin
+unchanged in behaviour (only the panel radius adjusted to the vendor aesthetic), mounted in the
+portal layout, and all 7 call sites replaced.
+
+**Why:** the worst-placed native dialog sat on **bid submission** — the single most consequential,
+irreversible action a supplier takes was announced by unstyled browser chrome. Both apps now share
+one confirm/notify contract. The submission copy was improved while replacing it: "Submit bid?
+Submitted bids are immutable." became a titled dialog explaining the bid is sealed and cannot be
+changed or withdrawn.
+
+`MessageBanner` was deliberately not used here: its `VendorMessage` registry models persistent
+blocked states (submission closed, not invited), not transient one-off failures like "download
+failed". `notify()` is the right fit and matches admin.
+
+**Verification:** drove a real bid to the review step on dev — the in-app modal renders with the new
+title and body and no native dialog event fires. Re-checked 2026-08-22 against the running
+container: `DialogProvider` present in `.next/server`, and zero `window.confirm(` matches remain in
+`.next/static/chunks`.
+
+**Open questions:** admin's own 35 `alert()` calls are untouched — a separate, larger decision.
+
+**Next recommended step:** owner confirms on dev, then roll to production with the other two
+2026-08-22 fixes.
+
+**Deployment:** DEV ONLY — `ctmp-web-vendor:latest` built 12:15, container recreated 12:16 (+03).
+Not on production. Rollback: `ctmp-web-vendor:rollback-20260821`.
+
+---
+
+## 2026-08-22 — `procurementType` enforced as an enum + migration `056` (DEV)
+
+**Date/time:** 2026-08-22 12:06 (+03) · commit `6e34db5`
+
+**Files changed:** `apps/api/src/modules/tenders/dto/create-tender.dto.ts`,
+`database/migrations/056_normalise_tender_type.sql` (new), `docs/DATABASE_SCHEMA.md`,
+`docs/PROJECT_STATE.md`.
+
+**What changed:** the DTO advertised the enum `['Open Tender','Restricted','Single Source']` to
+Swagger but validated only `@IsString()` — the API accepted any string while documenting three.
+Added `@IsIn(PROCUREMENT_TYPES)` with an explicit message; the canonical list is now exported from
+the DTO and mirrors `PROCUREMENT_TYPES` in the admin forms. `UpdateTenderDto` extends
+`CreateTenderDto`, so create and update are both covered by the one change.
+
+**Why:** the contract and the enforcement disagreed. Two dev rows had already reached the database
+as `'OPEN'` through manual SQL — one from May (TDR-2026-0015), one written during the 2026-08-21
+end-to-end test (TDR-2026-0028).
+
+**Migration 056** normalises those rows. Production has no such rows (it had zero tenders at the
+time of writing), so it is a no-op there. `NULL` is deliberately left alone: ten early tenders
+predate the field being required, and a `NULL` there is honest. The migration is idempotent.
+
+**Verification:** `'OPEN'` and arbitrary text are rejected with the new message; all three valid
+values accepted. Re-checked 2026-08-22 on dev: `PROCUREMENT_TYPES` present 6× in the running
+container's `dist/modules/tenders/dto/create-tender.dto.js`, and `SELECT tender_type, count(*) FROM
+tenders GROUP BY 1` returns only `Open Tender` (14), `Restricted` (5) and `NULL` (10) — no `OPEN`.
+
+**Open questions:** none.
+
+**Next recommended step:** apply migration `056` to production as part of the rollout (no-op
+expected — confirm with the same `GROUP BY` query before and after).
+
+**Deployment:** DEV ONLY — `ctmp-api:latest` built 12:05, container recreated 12:06 (+03).
+Migration `056` applied to dev only. Rollback: `ctmp-api:rollback-20260821`.
+
+---
+
+## 2026-08-22 — APPROVED dead end closed: validate at submit, allow revert from Approved (DEV)
+
+**Date/time:** 2026-08-22 11:33 (+03) · commit `e3f0aea`
+
+**Files changed:** `apps/api/src/modules/tenders/tenders.service.ts`,
+`apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx`,
+`apps/web-admin/src/components/dialog/RevertTenderDialog.tsx`, `docs/PROJECT_STATE.md`,
+`docs/decisions/DECISION_LOG.md`.
+
+**What changed:** two fixes, both chosen by the owner.
+
+- **B.** `submitForApproval` rejects a tender missing `procurementType` or `estimatedBudget` — the
+  two fields the edit form locks after approval — with a message explaining why they must be set
+  now. RFQ documents are deliberately *not* required here, since uploads still work in APPROVED and
+  a missing document is recoverable.
+- **C.** `revert` accepts **Approved** as well as Published, with a new ordering guard
+  (`Draft < Internal Review < Approved < Published`) so a tender can never be reverted forward or
+  sideways. `RevertTenderDialog` takes `currentStatus` and offers only earlier targets; the Revert
+  button now shows on Approved as well as Published.
+
+Also corrects the revert audit entry, which hardcoded `beforeValue` to `PUBLISHED` and would have
+logged falsely once Approved became a valid source.
+
+**Why:** the 2026-08-21 end-to-end lifecycle test found a tender could reach APPROVED without a
+procurement type and then be impossible to publish, edit or revert. Publish requires the field; the
+edit form sends a visibility-only payload once APPROVED (BUG-122b) and returns without calling the
+API; the API rejects `tenderType`; and revert only ran from Published. The only exit was Cancel and
+rebuild, losing the BoQ, criteria and approval. Option C fixes the dead end as a *class* rather than
+for this one field — any other pre-publish omission is now recoverable.
+
+**Verification:** on dev — submit without the fields returns the new message; approve then revert
+lands in Draft; reverting forward from Draft and reverting an AWARDED tender are both refused; the
+existing binding-bid guard is untouched (a tender with submitted bids still cannot be reverted).
+Re-checked 2026-08-22 against the running container: `dist/modules/tenders/tenders.service.js`
+carries the Approved source status.
+
+**Open questions:** none. Full rationale and rejected alternatives in `docs/decisions/DECISION_LOG.md`
+(2026-08-21 entry).
+
+**Next recommended step:** owner walks approve → revert → edit → re-submit on dev, then production
+rollout.
+
+**Deployment:** DEV ONLY, awaiting owner confirmation — `ctmp-api:latest` and
+`ctmp-web-admin:latest` built 12:05 / 11:31, containers recreated 12:06 / 11:31 (+03). Not on
+production. Rollback: `ctmp-api:rollback-20260821`, `ctmp-web-admin:rollback-20260821`.
+
+---
+
 ## 2026-08-21 — Full tender lifecycle driven end-to-end through Chrome (DEV)
 
 **Date/time:** 2026-08-21

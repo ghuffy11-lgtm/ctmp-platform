@@ -1,6 +1,6 @@
 # CTMP — Project State
 
-**As of 2026-08-21 (second pass, end of day).** Reconciled against the working tree, the running dev containers, and the
+**As of 2026-08-22 (midday).** Reconciled against the working tree, the running dev containers, and the
 production hosts (image tags, schema comparison). Where a claim could be checked, it was checked.
 
 ---
@@ -13,11 +13,15 @@ bid submission (sealed technical + commercial envelopes) → technical evaluatio
 commercial opening → commercial comparison → optional negotiation → award recommendation → award →
 close, with a hash-chained audit trail throughout.
 
-**As of 2026-08-21 dev and production are fully in step.** Identical schemas (571 columns, types
-included) built from the same source, everything through migration `055` deployed, and nothing
-queued behind a sign-off. The Arabic management area — which this document previously listed as
-waiting on the owner — shipped on 2026-08-21 together with migrations `054` and `055`, followed the
-same day by two owner-reported fixes to the Arabic screens.
+**As of 2026-08-22 dev is one step ahead of production.** Their schemas are structurally identical
+(571 columns, types included) and both carry everything through migration `055`; the Arabic
+management area shipped to production on 2026-08-21 together with migrations `054` and `055`,
+followed the same day by two owner-reported fixes to the Arabic screens.
+
+**Three fixes are queued on dev behind owner sign-off** (all committed and deployed to dev on
+2026-08-22, none on production): the APPROVED dead end, `procurementType` enum enforcement with
+migration `056`, and the vendor portal's browser-native dialogs. See *Shipped 2026-08-21* below and
+the three 2026-08-22 entries in `agents/handoffs/HANDOVER.md`.
 
 ---
 
@@ -43,12 +47,21 @@ at commit `b37170f`.
 
 | Environment | URL | Schema | Images |
 |---|---|---|---|
-| Production admin | `https://ctmp.hadiclinic.com.kw:4202` (`10.1.27.99`) | through `055` | `ctmp-api:prod-20260821`, `ctmp-web-admin:prod-20260821c` |
+| Production admin | `https://ctmp.hadiclinic.com.kw:4202` (`10.1.27.99`) | through `055` | `ctmp-api:prod-20260821`, `ctmp-web-admin:prod-20260821d` |
 | Production vendor | `https://vn.hadiclinic.com.kw:4201` (`172.16.4.11`) | (uses admin DB) | `ctmp-web-vendor:prod-20260821` |
-| Dev / build box | admin `:4202` / vendor `:4201` on `10.1.13.98` | through `055` | rebuilt 2026-08-21 |
+| Dev / build box | admin `:4202` / vendor `:4201` on `10.1.13.98` | through `056` | all three rebuilt 2026-08-22 |
 
-**Schema drift, dev vs prod: none.** Both at migration `055`, 571 columns with identical types,
-verified by comparing name *and* type across both hosts on 2026-08-21.
+Production image tags re-verified on the host 2026-08-22: `ctmp-web-admin:latest` and
+`prod-20260821d` are the same image ID (`51eaa66`), `ctmp-api:latest` and `prod-20260821` the same
+(`0c01cc9`). An earlier revision of this table said `prod-20260821c`, which the `VendorDirectory`
+deploy had already superseded.
+
+**Schema drift, dev vs prod: structurally none, one data migration ahead on dev.** Both hosts have
+571 columns with identical types, verified by comparing name *and* type across both on 2026-08-21.
+Dev additionally carries migration `056`, which contains no DDL — three `UPDATE`s normalising
+`tenders.tender_type` plus a `COMMENT`. It is a no-op on production, which has no non-canonical
+rows, but it still has to be applied there so the column comment matches and the migration ledgers
+stay in step.
 
 **Rollback tags on the hosts:** `ctmp-api:rollback-20260821`, `ctmp-web-admin:rollback-20260821`
 (admin); `ctmp-web-vendor:rollback-20260821` (vendor) — all cut immediately before the 2026-08-21
@@ -120,7 +133,17 @@ tracked here. Neither blocks anything.
 
 ## Active / awaiting the owner
 
-Nothing is blocked on a deployment or a sign-off. Two items sit with the owner by their own choice:
+**Waiting on owner sign-off before a production rollout (added 2026-08-22):** the three fixes below
+are live on dev and nowhere else. They are one rollout, not three — the two tender fixes share the
+`api` image, and migration `056` must be applied to production in the same window.
+
+| Fix | What to click on dev | Images / migration |
+|---|---|---|
+| APPROVED dead end closed | Approve a tender, then use **Revert** on it — the button now appears on Approved and offers only earlier statuses. Separately, try **Submit for approval** on a tender with no procurement type or no estimated budget: it should refuse and say why | `ctmp-api`, `ctmp-web-admin` |
+| `procurementType` enum enforced | Create/edit a tender normally — the three valid types still work; the API now rejects anything else | `ctmp-api` + migration `056` |
+| Vendor portal in-app dialogs | In the vendor portal, take a bid to the review step and press submit — the confirmation is now a styled in-app modal, not browser chrome | `ctmp-web-vendor` |
+
+Two further items sit with the owner by their own choice:
 
 1. **Enter the real Arabic names in production** — 12 departments, 8 categories, 17 vendors, via
    Settings. Blank names fall back to the Latin value per row, so nothing renders empty. The owner

@@ -40,11 +40,23 @@ exposed the earlier claim here as wrong:
 
 ## Dev / production drift
 
-**None as of 2026-08-21.** Migrations `054` and `055` were deployed to production on 2026-08-21;
-dev and production now report an identical 571 columns with identical types, verified by comparing
+**Structurally none as of 2026-08-22; dev is one data-only migration ahead.** Migrations `054` and
+`055` were deployed to production on 2026-08-21; dev and production report an identical 571 columns
+with identical types, verified by comparing
 `table_name.column_name:data_type(precision,scale)` across both hosts.
 
-Both environments are at migration **`055`**.
+Production is at migration **`055`**. Dev is at **`056`**, which contains no DDL — three `UPDATE`s
+normalising `tenders.tender_type` to the three canonical values, plus a `COMMENT ON COLUMN`. It
+matched two dev rows written by hand (`'OPEN'`) and matches nothing on production, so applying it
+there changes no data; apply it anyway in the same window as the next `api` rollout so the column
+comment and the migration ledger stay in step. Because `056` touches no column definition, the
+comparison below will report zero drift both before and after — check `tender_type` values
+directly instead:
+
+```bash
+psql -U ctmp -d ctmp -tAc "SELECT tender_type, count(*) FROM tenders GROUP BY 1 ORDER BY 2 DESC;"
+# expected afterwards: only 'Open Tender', 'Restricted', 'Single Source' and NULL
+```
 
 Re-run the comparison after any migration:
 
