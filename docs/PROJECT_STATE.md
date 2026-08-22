@@ -152,30 +152,54 @@ Still outstanding from before, unrelated to the Arabic work:
 3. **Run the production test tender** — full runbook now written at
    `docs/qa/PRODUCTION_LIFECYCLE_TEST.md`, including the server-side checks and the teardown.
    Production has **zero tenders**, so no part of the live money path has been exercised with real
-   data. **Blocked** — see the role gap below.
+   data. Runnable with the four existing production users — see the role-coverage section below.
 4. **Purge that test tender afterwards** — `SSH_ALIAS=cts-prod bash scripts/purge_tender.sh <REF>`
    dry run, then again with `--confirm`. The script has still **never been run anywhere**, so prove
    it on dev against `TDR-2026-0028` before pointing it at production.
 
-## 🔴 Blocking: production has no approver, evaluator or committee
+## Production role coverage — functional, but nobody is separated from anybody
 
-Counted on the production host 2026-08-22. Production has **four internal users** holding only two
-roles — `admin@hadiclinic.com.kw` (`SYSTEM_ADMIN`) and three `PROCUREMENT_ADMIN`s
-(`ghuffran@`, `EZAZM@`, `walidb@`). Nobody holds:
+Production has **four internal users**: `admin@hadiclinic.com.kw` (`SYSTEM_ADMIN`) and three
+`PROCUREMENT_ADMIN`s (`ghuffran@`, `EZAZM@`, `walidb@`). Nobody holds `APPROVER`,
+`TECHNICAL_EVALUATOR` or `COMMERCIAL_COMMITTEE_MEMBER`.
 
-| Missing role | Blocks |
-|---|---|
-| `APPROVER` | approving a tender |
-| `TECHNICAL_EVALUATOR` | technical evaluation |
-| `COMMERCIAL_COMMITTEE_MEMBER` (+ one `CHAIR`) | committee commercial opening, and therefore award |
+**That does not block the lifecycle.** Checked grant-by-grant on the production database
+2026-08-22 — permissions here do not follow role names, and `PROCUREMENT_ADMIN` is far broader than
+its name suggests:
 
-**This is an operational gap, not merely a testing one.** A real tender created on production today
-could be drafted and published but never approved, evaluated or awarded. `SYSTEM_ADMIN` cannot
-stand in: it deliberately carries no commercial visibility, and the evaluator and committee roles
-are separate by design.
+| Stage | Permission | Held by (production has it?) |
+|---|---|---|
+| Approve tender | `tender:approve` | `PROCUREMENT_ADMIN`, `SYSTEM_ADMIN` — ✅ |
+| Open technical envelopes | `technical:open` | `PROCUREMENT_ADMIN`, `SYSTEM_ADMIN`, `TECHNICAL_EVALUATOR` — ✅ |
+| Technical evaluation | `technical:evaluate` | `PROCUREMENT_ADMIN`, `SYSTEM_ADMIN`, `TECHNICAL_EVALUATOR` — ✅ |
+| Create committee session | `committee:create_session` | `PROCUREMENT_ADMIN`, `SYSTEM_ADMIN` — ✅ |
+| Record attendance | `committee:record_attendance` | `PROCUREMENT_ADMIN`, +2 — ✅ |
+| Open commercial envelopes | `committee:open_commercial` | `PROCUREMENT_ADMIN`, +2 — ✅ |
+| See commercial detail | `commercial:view` | `PROCUREMENT_ADMIN`, +2 — ✅ (**not** `SYSTEM_ADMIN`, by design) |
+| Recommend / finalise award | `award:recommend`, `award:finalize` | `SYSTEM_ADMIN` only — ✅ |
 
-Fix by assigning the real staff in Settings → Users. That is needed to operate regardless, and it
-makes the test verify the configuration production will actually run on.
+**Committee membership is not role-gated.** `committee_members.user_id` references `users(id)` with
+no role check; `is_chair` is a per-session boolean with a one-chair-per-session unique index. Any
+four users can therefore form a quorate session.
+
+**The real concern is separation of duties, not capability.** With only these four accounts, the
+same procurement admin can create a tender, approve it, open the technical envelopes, evaluate the
+bids, sit on the committee that opens the commercial envelopes, and read the prices. The controls
+the system enforces between *roles* are not enforced between *people* here, because one person
+holds all the roles. The spec's separation of duties is intact in code and absent in configuration.
+
+`SYSTEM_ADMIN` is the one genuine split that survives: it can recommend and finalise an award but
+deliberately **cannot** see commercial detail (`commercial:view` withheld). Worth confirming during
+the lifecycle test that the award flow is actually usable under that restriction.
+
+Assigning distinct real staff to `APPROVER`, `TECHNICAL_EVALUATOR` and
+`COMMERCIAL_COMMITTEE_MEMBER` is a governance decision for the owner, not a prerequisite to
+operate.
+
+> **Corrected 2026-08-22.** An earlier revision of this section called production "🔴 Blocking —
+> cannot complete a tender". That was wrong: it inferred capability from role names without reading
+> the grants. Recorded rather than quietly deleted, because inferring permissions from role names
+> is exactly the mistake this table exists to prevent.
 
 ## Pending backlog
 
