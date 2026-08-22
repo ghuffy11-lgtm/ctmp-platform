@@ -139,20 +139,43 @@ live but not yet exercised through the UI** — that is what the test tender cov
 
 Two items sit with the owner by their own choice:
 
-1. **Enter the real Arabic names in production** — 12 departments, 8 categories, 17 vendors, via
+1. **Enter the real Arabic names in production** — **11 departments, 8 categories, 2 vendors**, via
    Settings. Blank names fall back to the Latin value per row, so nothing renders empty. The owner
-   has said they will manage this.
+   has said they will manage this. (An earlier revision said "12 departments … 17 vendors"; those
+   are the **dev** counts. Production is 11/8/2, counted on the host 2026-08-22.)
 2. **Arabic wording** — accepted as-is; the owner will raise changes if any are wanted.
    `docs/i18n/executive-dashboard-ar.md` lists every term, including the month names and two open
    style questions (plural forms for "3 awards"; `نشط` vs `سارية` for an award's Active state).
 
 Still outstanding from before, unrelated to the Arabic work:
 
-3. **Create the production test tender**, walk a vendor through the wizard including Commercial
-   Terms, then check the Commercial Comparison and the Award Minutes PDF. Production currently has
-   **zero tenders**, so no part of the live money path has been exercised with real data.
+3. **Run the production test tender** — full runbook now written at
+   `docs/qa/PRODUCTION_LIFECYCLE_TEST.md`, including the server-side checks and the teardown.
+   Production has **zero tenders**, so no part of the live money path has been exercised with real
+   data. **Blocked** — see the role gap below.
 4. **Purge that test tender afterwards** — `SSH_ALIAS=cts-prod bash scripts/purge_tender.sh <REF>`
-   dry run, then again with `--confirm`. The script has still never been run anywhere.
+   dry run, then again with `--confirm`. The script has still **never been run anywhere**, so prove
+   it on dev against `TDR-2026-0028` before pointing it at production.
+
+## 🔴 Blocking: production has no approver, evaluator or committee
+
+Counted on the production host 2026-08-22. Production has **four internal users** holding only two
+roles — `admin@hadiclinic.com.kw` (`SYSTEM_ADMIN`) and three `PROCUREMENT_ADMIN`s
+(`ghuffran@`, `EZAZM@`, `walidb@`). Nobody holds:
+
+| Missing role | Blocks |
+|---|---|
+| `APPROVER` | approving a tender |
+| `TECHNICAL_EVALUATOR` | technical evaluation |
+| `COMMERCIAL_COMMITTEE_MEMBER` (+ one `CHAIR`) | committee commercial opening, and therefore award |
+
+**This is an operational gap, not merely a testing one.** A real tender created on production today
+could be drafted and published but never approved, evaluated or awarded. `SYSTEM_ADMIN` cannot
+stand in: it deliberately carries no commercial visibility, and the evaluator and committee roles
+are separate by design.
+
+Fix by assigning the real staff in Settings → Users. That is needed to operate regardless, and it
+makes the test verify the configuration production will actually run on.
 
 ## Pending backlog
 
