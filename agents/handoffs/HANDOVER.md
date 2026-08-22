@@ -6,6 +6,92 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-22 — The three end-to-end-test fixes SHIPPED TO PRODUCTION (both servers) + migration `056`
+
+**Date/time:** 2026-08-22 · commits `e3f0aea`, `6e34db5`, `e0069c2` · images `*:prod-20260822`
+
+**Task:** deploy the three fixes found by the 2026-08-21 lifecycle test, on the owner's instruction.
+The owner **chose to skip the separate dev walkthrough** and fold verification into the production
+test tender instead ("roll it to production and you will monitor it when you will do a production
+test"). Recorded because it departs from the standing dev-first working agreement — the code had
+been on dev since that morning, but no human had clicked it.
+
+**Shipped:** the APPROVED dead end (validate at submit + revert from Approved), `procurementType`
+enum enforcement, and the vendor portal's `DialogProvider`. All three images plus migration `056`.
+
+**Deploy sequence** — same recipe as the 2026-08-21 deploy:
+1. Pre-flight. Build box was at **86%** disk with only 14 GB free; `docker builder prune -f`
+   reclaimed 14.92 GB → 71%, comfortably clear of the 100%-disk trap that has silently produced
+   stale images here before. Admin host 30% on `sdb`, vendor host 17%. All containers healthy.
+2. `pg_dump --format=custom` → `/var/lib/docker/ctmp-platform/backups/ctmp_pre056_20260822.dump`
+   (226 KB) on the admin host.
+3. Rollback tags cut on both hosts: `ctmp-api:rollback-20260822` (`0c01cc9`),
+   `ctmp-web-admin:rollback-20260822` (`51eaa66`), `ctmp-web-vendor:rollback-20260822` (`3a66ef3`).
+4. Built all three on the build box with **explicit prod build-args**, tagged `prod-20260822`.
+5. **Build-arg gate, checked on the images before transfer** (see below).
+6. Transferred `docker save | gzip -1 | ssh | docker load` — api + web-admin to `cts-prod`,
+   web-vendor to `cts-vendor`.
+7. Applied `056` by hand (migrations never auto-run on an initialised DB).
+8. Retagged `prod-20260822` → `latest` on each host, `up -d --no-build --force-recreate`.
+
+**Build-args used:**
+```
+web-admin : NEXT_PUBLIC_API_URL=https://ctmp.hadiclinic.com.kw:4202
+web-vendor: NEXT_PUBLIC_API_URL=https://vn.hadiclinic.com.kw:4201
+            NEXT_PUBLIC_HCAPTCHA_SITE_KEY=b03031a4-dab0-431a-8744-bdc2d13af2a2
+```
+
+**The build-arg gate passed at both checkpoints, matching the documented fingerprint exactly.**
+On the images before transfer: admin 43 prod-origin hits / **11** `localhost:3000`; vendor 27 /
+**3**, real hCaptcha key present, test key absent. Those residual counts (11 admin, 3 vendor) are
+the known fallback-literal pattern, identical to every verified-healthy build since 2026-08-21.
+After cutover, re-checked against the **live served chunks** on `vn.hadiclinic.com.kw:4201/register`
+— real hCaptcha key present, test key `10000000-…-000000000001` absent, prod origin present. This
+is the failure that broke dev login on 2026-08-19; it stays a standing gate.
+
+**The fixes were confirmed present in the images before shipping them,** rather than inferred from
+the commit list: `PROCUREMENT_TYPES` ×7 and `Approved` ×4 in the api dist, and **zero** matches for
+`confirm(` / `window.confirm` / `alert(` across the vendor static chunks (grep proven non-vacuous —
+20 files match `useState` in the same tree).
+
+**Migration `056` on production was a genuine no-op, as predicted.** `UPDATE 0` three times — the
+before-state query returned no rows at all, confirming production still holds zero tenders. Only the
+`COMMENT` applied; verified by reading `col_description` back off the live column.
+
+**Verified after cutover:**
+- Running image IDs equal their `prod-20260822` tags on both hosts: api `d4da4f1`,
+  web-admin `4ef283b`, web-vendor `7b6e6f2`.
+- `ctmp-api` `healthy`; all five admin containers and both vendor containers up.
+- Admin `/api/v1/health`, `/login`, `/executive-ar` → 200. Vendor `/`, `/login`, `/register` → 200,
+  and `/api/v1/health` proxied vendor→admin → 200.
+- API startup clean: **`Audit chain verified — 41 rows OK (id 1..41)`**,
+  `CAPTCHA provider: hCaptcha (production)`, no errors.
+- Clocks checked across workstation, build box and both prod hosts — all four agree to the second
+  in UTC, all `+03` local. (An apparent 3-hour skew earlier was container-UTC read against
+  host-local, not a real offset.)
+
+**Correction to the runbook, not yet made:** `docs/runbooks/admin-prod-deploy.md` §5 still says to
+run `docker compose build` **on the production host**. That host has no internet egress and cannot
+build; the real procedure is build-on-box + `docker save`/`load` + `--no-build`, which is what
+`CLAUDE.md` and `docs/ARCHITECTURE.md` describe and what every deploy since June has actually done.
+The runbook is the original install-time document and has drifted. Worth folding in.
+
+**Also noted:** `docs/ARCHITECTURE.md` gives the vendor host's compose file but not its project
+root, and the root differs from the admin host's — vendor is `/mnt/repo/ctmp-platform`, admin is
+`/var/lib/docker/ctmp-platform`. Assuming they matched cost one failed command here. The wildcard
+TLS cert on the vendor host is recorded as **valid to 2026-09-16**, roughly three weeks out.
+
+**Rollback:** retag the `rollback-20260822` images to `:latest` on each host and recreate with
+`--no-build`. Migration `056` needs no revert — no DDL, and it matched no production row.
+
+**Open questions:** none.
+
+**Next recommended step:** the production test tender — the live money path has never been exercised
+with real data. Prove `scripts/purge_tender.sh` on dev *first* (it has never been run anywhere), then
+create the tender on production, walk it through the browser, and purge it.
+
+---
+
 ## 2026-08-22 — Vendor portal: browser-native dialogs replaced with `DialogProvider` (DEV)
 
 **Date/time:** 2026-08-22 12:20 (+03) · commit `e0069c2`

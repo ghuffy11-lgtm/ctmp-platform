@@ -13,15 +13,14 @@ bid submission (sealed technical + commercial envelopes) → technical evaluatio
 commercial opening → commercial comparison → optional negotiation → award recommendation → award →
 close, with a hash-chained audit trail throughout.
 
-**As of 2026-08-22 dev is one step ahead of production.** Their schemas are structurally identical
-(571 columns, types included) and both carry everything through migration `055`; the Arabic
-management area shipped to production on 2026-08-21 together with migrations `054` and `055`,
-followed the same day by two owner-reported fixes to the Arabic screens.
+**As of 2026-08-22 dev and production are back in step.** Identical schemas, everything through
+migration `056` on both, and nothing queued. The Arabic management area shipped to production on
+2026-08-21 with migrations `054` and `055`; the three fixes found by the end-to-end lifecycle test —
+the APPROVED dead end, `procurementType` enum enforcement, and the vendor portal's browser-native
+dialogs — shipped on 2026-08-22 with migration `056`.
 
-**Three fixes are queued on dev behind owner sign-off** (all committed and deployed to dev on
-2026-08-22, none on production): the APPROVED dead end, `procurementType` enum enforcement with
-migration `056`, and the vendor portal's browser-native dialogs. See *Shipped 2026-08-21* below and
-the three 2026-08-22 entries in `agents/handoffs/HANDOVER.md`.
+**The live money path has still never been exercised.** Production holds **zero tenders**. Creating
+one test tender, walking a vendor through it, and purging it afterwards is the outstanding work.
 
 ---
 
@@ -47,28 +46,29 @@ at commit `b37170f`.
 
 | Environment | URL | Schema | Images |
 |---|---|---|---|
-| Production admin | `https://ctmp.hadiclinic.com.kw:4202` (`10.1.27.99`) | through `055` | `ctmp-api:prod-20260821`, `ctmp-web-admin:prod-20260821d` |
-| Production vendor | `https://vn.hadiclinic.com.kw:4201` (`172.16.4.11`) | (uses admin DB) | `ctmp-web-vendor:prod-20260821` |
+| Production admin | `https://ctmp.hadiclinic.com.kw:4202` (`10.1.27.99`) | through `056` | `ctmp-api:prod-20260822`, `ctmp-web-admin:prod-20260822` |
+| Production vendor | `https://vn.hadiclinic.com.kw:4201` (`172.16.4.11`) | (uses admin DB) | `ctmp-web-vendor:prod-20260822` |
 | Dev / build box | admin `:4202` / vendor `:4201` on `10.1.13.98` | through `056` | all three rebuilt 2026-08-22 |
 
-Production image tags re-verified on the host 2026-08-22: `ctmp-web-admin:latest` and
-`prod-20260821d` are the same image ID (`51eaa66`), `ctmp-api:latest` and `prod-20260821` the same
-(`0c01cc9`). An earlier revision of this table said `prod-20260821c`, which the `VendorDirectory`
-deploy had already superseded.
+Running image IDs confirmed equal to their `prod-20260822` tags on both hosts after cutover:
+api `d4da4f1`, web-admin `4ef283b`, web-vendor `7b6e6f2`.
 
-**Schema drift, dev vs prod: structurally none, one data migration ahead on dev.** Both hosts have
-571 columns with identical types, verified by comparing name *and* type across both on 2026-08-21.
-Dev additionally carries migration `056`, which contains no DDL — three `UPDATE`s normalising
-`tenders.tender_type` plus a `COMMENT`. It is a no-op on production, which has no non-canonical
-rows, but it still has to be applied there so the column comment matches and the migration ledgers
-stay in step.
+**Schema drift, dev vs prod: none.** Both at migration `056`. Note that `056` is data-only — three
+`UPDATE`s and a `COMMENT`, no DDL — so the column-by-column comparison below reports zero difference
+whether or not it has been applied and **cannot be used to detect it**. Check `tender_type` values
+and the column comment directly instead.
 
-**Rollback tags on the hosts:** `ctmp-api:rollback-20260821`, `ctmp-web-admin:rollback-20260821`
-(admin); `ctmp-web-vendor:rollback-20260821` (vendor) — all cut immediately before the 2026-08-21
-deploy. Older points remain: `ctmp-api:rollback-20260813`, `ctmp-api:rollback-20260807b`,
-`ctmp-web-admin:rollback-20260806`, `ctmp-web-vendor:rollback-20260807`.
-Pre-deploy DB backup: `/var/lib/docker/ctmp-platform/backups/ctmp_pre055_20260821.dump` on the admin host.
-Roll back by retagging to `:latest` and recreating with `--no-build`.
+**Rollback tags on the hosts:** `ctmp-api:rollback-20260822` (`0c01cc9`),
+`ctmp-web-admin:rollback-20260822` (`51eaa66`) on admin; `ctmp-web-vendor:rollback-20260822`
+(`3a66ef3`) on vendor — all cut immediately before the 2026-08-22 deploy, and all equal to the
+`prod-20260821*` images they replaced. Older points remain: `ctmp-api:rollback-20260821`,
+`ctmp-api:rollback-20260813`, `ctmp-api:rollback-20260807b`, `ctmp-web-admin:rollback-20260821`,
+`ctmp-web-admin:rollback-20260806`, `ctmp-web-vendor:rollback-20260821`,
+`ctmp-web-vendor:rollback-20260807`.
+Pre-deploy DB backups on the admin host: `/var/lib/docker/ctmp-platform/backups/ctmp_pre056_20260822.dump`
+(226 KB, 2026-08-22) and `ctmp_pre055_20260821.dump`.
+Roll back by retagging to `:latest` and recreating with `--no-build`. Migration `056` needs no
+revert — it changes no structure and matched no production row.
 
 ---
 
@@ -122,9 +122,9 @@ Deployed together: migrations `054` + `055` and all three images.
 | **Money precision** — `tenders.awarded_amount`, `tenders.budget_estimate`, `commercial_evaluations.total_price` widened `numeric(15,2)` → `numeric(16,3)` so contract values hold fils. Applied to production while it still had **zero tenders**, so no value was ever rounded in production | migration `055` |
 | **Arabic KPI tiles no longer link into English** — `interactive` was accepted but never read by three components, so `interactive={false}` had been silently ignored since 2026-08-13. Gated every outbound link; verified by counting anchors per page **and per tab** | `ctmp-web-admin:prod-20260821b` |
 | **Arabic month names + a missed `Status` header** — Arabic dates read `21 May 2026`; now `21 مايو 2026` using the Gulf month set the dashboard already used. English still formats via `toLocaleDateString` so it cannot drift | `ctmp-web-admin:prod-20260821c` |
-| **Vendor portal no longer uses browser-native dialogs** — `DialogProvider` ported from admin, so both apps share one confirm/notify contract. 2 `confirm()` and 5 `alert()` replaced, including the irreversible bid submission. Closes a gap left by BUG-078, which applied the rule to admin only. **DEV ONLY** | `web-vendor/components/dialog/`, 3 call-site files |
-| **`procurementType` validation closed** — the DTO advertised three values to Swagger but validated only `@IsString()`, so the API accepted anything. Now `@IsIn(PROCUREMENT_TYPES)`, covering create and update (the update DTO extends create). Migration `056` normalises the two stray `OPEN` rows. **DEV ONLY** | `create-tender.dto.ts`, migration `056` |
-| **APPROVED dead-end fixed** — `submitForApproval` now rejects a tender missing procurement type or estimated budget (the two fields the edit form locks after approval), and `revert` works from **Approved** as well as Published, with the target required to be an earlier status. Found by the end-to-end test; **DEV ONLY, awaiting owner confirmation** | `tenders.service.ts`, `RevertTenderDialog.tsx` |
+| **Vendor portal no longer uses browser-native dialogs** — `DialogProvider` ported from admin, so both apps share one confirm/notify contract. 2 `confirm()` and 5 `alert()` replaced, including the irreversible bid submission. Closes a gap left by BUG-078, which applied the rule to admin only. **Production 2026-08-22** | `web-vendor/components/dialog/`, 3 call-site files |
+| **`procurementType` validation closed** — the DTO advertised three values to Swagger but validated only `@IsString()`, so the API accepted anything. Now `@IsIn(PROCUREMENT_TYPES)`, covering create and update (the update DTO extends create). Migration `056` normalises the two stray `OPEN` rows. **Production 2026-08-22** | `create-tender.dto.ts`, migration `056` |
+| **APPROVED dead-end fixed** — `submitForApproval` now rejects a tender missing procurement type or estimated budget (the two fields the edit form locks after approval), and `revert` works from **Approved** as well as Published, with the target required to be an earlier status. Found by the end-to-end test; **Production 2026-08-22** | `tenders.service.ts`, `RevertTenderDialog.tsx` |
 | **`VendorDirectory`'s dead `interactive` prop removed** — it was accepted and never read. Removing it rather than wiring it: all three links there are label-driven and every target has an Arabic version, so gating them would have *removed* working navigation. The compiler then caught the English route still passing the prop — which an inert prop would have hidden | `ctmp-web-admin:prod-20260821d` |
 
 **Owner's position on the two Arabic follow-ups (2026-08-21):** the wording is accepted as-is and
@@ -133,17 +133,11 @@ tracked here. Neither blocks anything.
 
 ## Active / awaiting the owner
 
-**Waiting on owner sign-off before a production rollout (added 2026-08-22):** the three fixes below
-are live on dev and nowhere else. They are one rollout, not three — the two tender fixes share the
-`api` image, and migration `056` must be applied to production in the same window.
+The three 2026-08-22 fixes shipped to production the same day. The owner chose to skip a separate
+dev walkthrough and fold their verification into the production test tender below, so **they are
+live but not yet exercised through the UI** — that is what the test tender covers.
 
-| Fix | What to click on dev | Images / migration |
-|---|---|---|
-| APPROVED dead end closed | Approve a tender, then use **Revert** on it — the button now appears on Approved and offers only earlier statuses. Separately, try **Submit for approval** on a tender with no procurement type or no estimated budget: it should refuse and say why | `ctmp-api`, `ctmp-web-admin` |
-| `procurementType` enum enforced | Create/edit a tender normally — the three valid types still work; the API now rejects anything else | `ctmp-api` + migration `056` |
-| Vendor portal in-app dialogs | In the vendor portal, take a bid to the review step and press submit — the confirmation is now a styled in-app modal, not browser chrome | `ctmp-web-vendor` |
-
-Two further items sit with the owner by their own choice:
+Two items sit with the owner by their own choice:
 
 1. **Enter the real Arabic names in production** — 12 departments, 8 categories, 17 vendors, via
    Settings. Blank names fall back to the Latin value per row, so nothing renders empty. The owner

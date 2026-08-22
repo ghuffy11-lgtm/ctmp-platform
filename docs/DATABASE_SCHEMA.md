@@ -40,22 +40,29 @@ exposed the earlier claim here as wrong:
 
 ## Dev / production drift
 
-**Structurally none as of 2026-08-22; dev is one data-only migration ahead.** Migrations `054` and
-`055` were deployed to production on 2026-08-21; dev and production report an identical 571 columns
-with identical types, verified by comparing
-`table_name.column_name:data_type(precision,scale)` across both hosts.
+**None as of 2026-08-22.** Migrations `054` and `055` were deployed to production on 2026-08-21 and
+`056` on 2026-08-22; dev and production report an identical 571 columns with identical types,
+verified by comparing `table_name.column_name:data_type(precision,scale)` across both hosts.
 
-Production is at migration **`055`**. Dev is at **`056`**, which contains no DDL — three `UPDATE`s
-normalising `tenders.tender_type` to the three canonical values, plus a `COMMENT ON COLUMN`. It
-matched two dev rows written by hand (`'OPEN'`) and matches nothing on production, so applying it
-there changes no data; apply it anyway in the same window as the next `api` rollout so the column
-comment and the migration ledger stay in step. Because `056` touches no column definition, the
-comparison below will report zero drift both before and after — check `tender_type` values
-directly instead:
+Both environments are at migration **`056`**.
+
+**`056` is invisible to the drift query below.** It contains no DDL — three `UPDATE`s normalising
+`tenders.tender_type` to the three canonical values, plus a `COMMENT ON COLUMN`. The comparison
+reports zero difference whether or not it has been applied, so it cannot tell you. It matched two
+dev rows written by hand (`'OPEN'`) and matched nothing on production (zero tenders at the time), so
+it changed no production data; it was applied there anyway so the column comment and the migration
+ledger stay in step. To check it directly:
 
 ```bash
 psql -U ctmp -d ctmp -tAc "SELECT tender_type, count(*) FROM tenders GROUP BY 1 ORDER BY 2 DESC;"
-# expected afterwards: only 'Open Tender', 'Restricted', 'Single Source' and NULL
+# expected: only 'Open Tender', 'Restricted', 'Single Source' and NULL
+# dev 2026-08-22: Open Tender 14, Restricted 5, NULL 10.  production: no rows (zero tenders)
+
+# and the comment, which is the only thing 056 leaves on an empty table:
+psql -U ctmp -d ctmp -tAc \
+  "SELECT col_description('tenders'::regclass, attnum) FROM pg_attribute
+   WHERE attrelid='tenders'::regclass AND attname='tender_type';"
+# expected to end: "See migration 056."
 ```
 
 Re-run the comparison after any migration:
