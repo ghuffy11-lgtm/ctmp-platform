@@ -54,15 +54,42 @@ on production today could be drafted and published but never approved, never eva
 awarded. `SYSTEM_ADMIN` cannot substitute: it deliberately does not carry commercial visibility
 (spec separation of duties), and the committee/evaluator roles are separate by design.
 
-**Resolve before running this test, owner's choice:**
+**Owner's decision (2026-08-22): option (b)** — create temporary test users, run the test, remove
+them in teardown. Spec below.
 
-- **(a) Assign the real people.** Preferred — production needs these role-holders anyway to operate.
-  Settings → Users. Then this test uses real accounts and proves the real configuration.
-- **(b) Create temporary test users** with the three roles, and delete them in teardown. Proves the
-  mechanism but *not* the configuration you will actually run on.
+> **This proves the mechanism, not the configuration.** After the test, production still has no
+> real approver, evaluator or committee. Assigning the real staff (option (a)) remains outstanding
+> and is what actually makes production operable. Record that in the result table.
 
-Option (a) is the one that makes the test mean something. If you pick (b), note in the record that
-the role configuration remains unverified.
+#### Users to create — Settings → Users
+
+All `authType = LOCAL`, department **Information Technology**, and every display name starts with
+`ZZ TEST` so they sort last and are unmistakable in any list.
+
+| # | Email | Display name | Role (as shown in the UI) |
+|---|---|---|---|
+| U1 | `zz-test-approver@hadiclinic.com.kw` | `ZZ TEST Approver` | Approver |
+| U2 | `zz-test-evaluator@hadiclinic.com.kw` | `ZZ TEST Technical Evaluator` | Technical Evaluator |
+| U3 | `zz-test-committee1@hadiclinic.com.kw` | `ZZ TEST Committee Chair` | Commercial Committee Member |
+| U4 | `zz-test-committee2@hadiclinic.com.kw` | `ZZ TEST Committee Member 2` | Commercial Committee Member |
+| U5 | `zz-test-committee3@hadiclinic.com.kw` | `ZZ TEST Committee Member 3` | Commercial Committee Member |
+
+**Three committee members, not two, on purpose.** Quorum defaults to `ceil(members / 2)` when the
+session does not set it, so three members lets you mark one absent and watch the under-quorum
+refusal fire (Stage 10) before satisfying it. **CHAIR is a per-session flag** (`isChair` on the
+session's member list), not a user role — designate U3 as chair when creating the session.
+
+#### Two constraints on who does this
+
+1. **The owner creates these users, not Claude.** Claude must not enter a password into any field,
+   including the initial password on the create-user form. Claude also cannot authenticate to the
+   API to do it programmatically.
+2. **Do not create them with SQL.** `POST /users` writes an audit entry; a direct `INSERT` does
+   not, and this is a system whose whole value is an unbroken audit trail. `bootstrap_admin.sh`
+   bypasses audit deliberately, but it exists for an empty database — do not reuse it here.
+
+The welcome email fires on user creation. These are real `@hadiclinic.com.kw` addresses on a live
+Exchange relay, so the mail will bounce or land somewhere. Harmless, but expect it.
 
 ### 2. Vendor accounts
 
@@ -105,14 +132,18 @@ each role-holder) to be at the keyboard at each switch.
 
 ## Personas
 
-| # | Persona | Role | Used in stages |
+| # | Persona | Account | Stages |
 |---|---|---|---|
-| P1 | Procurement Admin | `PROCUREMENT_ADMIN` | 1–3, 6–7, 11–12 |
-| P2 | Approver | `APPROVER` | 4 |
-| P3 | Vendor A | `VENDOR_USER` | 5 |
-| P4 | Vendor B | `VENDOR_USER` | 5 |
-| P5 | Technical Evaluator | `TECHNICAL_EVALUATOR` | 8 |
-| P6 | Committee member ×quorum, one `CHAIR` | `COMMERCIAL_COMMITTEE_MEMBER` | 9 |
+| P1 | Procurement Admin | `ghuffran@hadiclinic.com.kw` (existing) | 1–3, 5, 6, 8, 11–12 |
+| P2 | Approver | U1 `zz-test-approver@` | 4, 5 |
+| P3 | Vendor A | existing approved vendor #1 | 7 |
+| P4 | Vendor B | existing approved vendor #2 | 7 |
+| P5 | Technical Evaluator | U2 `zz-test-evaluator@` | 9 |
+| P6 | Committee (chair + 2) | U3 (chair), U4, U5 | 10 |
+
+**Every persona switch needs the owner at the keyboard** to perform the login. Claude drives only
+after the tab is authenticated. There are six switches — worth batching the test into one sitting
+rather than spreading it across days.
 
 ---
 
@@ -349,7 +380,18 @@ that is correct. Migration `053` dropped the audit FKs precisely so this is poss
 Afterwards:
 - Confirm the tender is gone from both portals.
 - Confirm `docker logs ctmp-api | grep "audit chain"` still reports **verified**.
-- If you created temporary users or vendors under option (b), remove them.
+
+**Then remove the five test users** — Settings → Users, delete U1–U5. Verify none remain:
+
+```sql
+SELECT email FROM users WHERE email LIKE 'zz-test-%';   -- expect zero rows
+```
+
+`purge_tender.sh` removes the tender and everything hanging off it, but **it does not touch
+users** — they are not tender data. Deleting them is a separate, manual step and is easy to forget.
+
+The audit trail will still record that these users existed, were created, and acted. That is
+correct and must not be "cleaned up".
 
 ---
 
@@ -375,6 +417,9 @@ Afterwards:
 | 12 | Minutes PDF: 3 decimals + all matrices | | | |
 | — | `alerts_today` = 0 | 0 | | |
 | — | Audit chain verified after purge | verified | | |
+| — | Test tender purged | gone from both portals | | |
+| — | Test users U1–U5 deleted | `zz-test-%` returns 0 rows | | |
+| — | **Real staff still hold no approver/evaluator/committee role** | still outstanding | ⚠️ | option (b) was used, so this remains unverified |
 
 Paste this table, completed, into `agents/handoffs/HANDOVER.md`.
 
