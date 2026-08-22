@@ -6,6 +6,118 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-22 — Full lifecycle driven end-to-end on DEV via API harness — 2 documented controls proven absent
+
+**Date/time:** 2026-08-22 · dev only (`10.1.13.98`) · nothing on production
+
+Owner asked for the whole thing tested and reported. Dev and production run byte-identical images
+at migration `056`, so this exercises the same code paths production now serves.
+
+**Method:** API-driven harness (Node + `fetch`) following the pattern the repo's own Playwright
+suite already uses — provision personas with known passwords, drive the lifecycle, assert, tear
+down. Six internal personas created (2 procurement, 1 technical evaluator, 3 committee) and two
+pre-existing synthetic vendor accounts used. Scripts in the session scratchpad; **promoting them to
+`qa/playwright` is the obvious follow-up** — this run has the same repeatability weakness the Arabic
+checks do.
+
+**Tender:** `TDR-2026-0029`, 3 BoQ lines, 2 weighted criteria (60/40, one mandatory gate), 2 bids.
+Result: **AWARDED** to Vendor 1 at **KWD 6,802.125**, then amended to Vendor 2 at **7,502.000** to
+exercise the supersede rule. Both tenders purged afterwards.
+
+### Controls verified working (58 assertions passed)
+
+- **All four 2026-08-22 fixes confirmed on the deployed code.** Submit-for-approval refuses a
+  tender with no procurement type and the message names the field; a bogus `procurementType` is
+  rejected by the enum; revert **from Approved** works; revert *forward* is refused by the ordering
+  guard.
+- **Sealed commercial envelopes held.** `SUBMITTED`/`SEALED` through technical opening and
+  evaluation, `commercialDetailsVisible:false`, and `OPENED` only after a quorate committee session.
+- **Opening is not visibility.** The technical evaluator got `403` on the commercial comparison
+  *both before and after* the envelopes were opened. So did `SYSTEM_ADMIN` — the spec's separation
+  of duties is real in code.
+- **Quorum gates fire with precise messages.** 2-of-3 present → *"Need 1 more member(s) present
+  (2/3)"*; chair absent → *"+ CHAIR must be present"*. Envelopes stayed `SEALED` through both
+  refusals. A session with fewer than 2 members is refused.
+- **Bid immutability.** Re-submit → `409`; editing BoQ prices after submit → `403`. Both vendors.
+- **Money precision end to end.** `2×1250.750 + 3400.125 + 900.500 = 6802.125` computed correctly
+  and carried through the comparison payload, `tenders.awarded_amount` and the minutes PDF.
+  Budget stored `50000.000`. No rounding anywhere.
+- **The award path is hard to cheat.** The server recomputes the lowest-PASS bid and ignores the
+  client's `isLowest` claim — *"Server re-verifies isLowest claim (client can't lie about it)"*.
+  Override without justification refused; under 20 characters refused (BUG-149's gate agrees with
+  the DTO). Amending kept **both** award rows with the original marked `superseded_by_award_id`.
+- **Audit.** 24 event types on the tender, `CRITICAL` on exactly the three regulated actions
+  (`COMMERCIAL_ENVELOPES_OPENED`, `AWARD_CONFIRMED`, `AWARD_AMENDED`).
+- **`scripts/purge_tender.sh` proven for the first time anywhere.** Dry run then `--confirm` on both
+  tenders: rows and the 7 stored files removed, `audit_logs` preserved exactly (3 and 35 rows).
+- Vendor login throttling returned `429` under repeated attempts — BUG-151 working.
+
+### Finding 1 — approval requires no comments, and the handover says it does
+
+`POST /tenders/:id/approve` takes `@Body('comments') comments: string` with **no DTO and no
+validation**; `approve()` accepts `comments: string | undefined` and never checks it.
+
+Proven by execution on a tender genuinely in `Internal Review` (so the status guard could not mask
+it): approving with an **empty body** returned `201` and the tender moved to `Approved`. The audit
+row records `{"status":"APPROVED"}` and no rationale.
+
+The 2026-08-21 handover lists *"Approval and envelope-opening both refuse to proceed without written
+comments/remarks"* under **"Controls verified working"**. It does not. The earlier check was almost
+certainly made against an already-approved tender, where the status guard returns `400` for an
+unrelated reason — a verification that could not have detected the failure it was testing for.
+
+### Finding 2 — opening commercial envelopes requires no remarks
+
+Same defect, higher stakes. `openEnvelopes` takes `@Body() body: { remarks?: string } = {}` — no
+DTO, no validation, and no request-body schema in the OpenAPI document at all. Opening with an empty
+body returned `201` and opened both envelopes.
+
+This is the single most regulated action in the system. Quorum, chair presence and permissions are
+all enforced properly; what is not captured is **why**. The audit entry is `CRITICAL` and complete
+on the who/when/what, and silent on the rationale.
+
+Both findings are the same one-line fix — a DTO with `@IsString() @IsNotEmpty()` (and a sensible
+`@MinLength`) — plus the UI already prompts for the text, so it is a server-side gap only.
+
+### Finding 3 — dev audit chain has been broken since 2026-05-28
+
+`AUDIT CHAIN BREAK (hash) at row id=218`. Row 218 is a `TENDER_UPDATED` from **2026-05-28** —
+predates this run by three months; the harness did not cause it, and the same error was already in
+the boot log from 09:06 this morning.
+
+Detection and alerting work correctly: **102** `AUDIT_CHAIN_BREAK` `CRITICAL` rows in
+`security_alerts`, one per API boot. Nobody has acted on any of them. The repair tooling that used
+to exist (`008_audit_chain_rebake_2026-05-23.sql`, `rebake-audit-chain.js`, and the RCA) was
+**deleted in the 2026-08-21 sync**, recoverable at `b37170f`.
+
+**Production is clean** — `Audit chain verified — 41 rows OK`. Dev only.
+
+### Finding 4 — a locked master-plan rule is out of date
+
+The master plan and `docs/qa/PRODUCTION_LIFECYCLE_TEST.md` both say an override award requires
+*"text AND PDF"*. BUG-095 (2026-06-02, owner directive: *"remove mandatory pdf upload, just keep it
+optional"*) made the PDF optional; only the text is mandatory. Runbook corrected.
+
+### Notes
+
+- **"Deleting" a user is a soft delete** — `DELETE /users/:id` returns `200` and sets
+  `status='DISABLED'`. Correct for a system with audit history, but a teardown that expects the rows
+  to disappear will report a false failure. All six test users are `DISABLED`.
+- **I overwrote the passwords** of the synthetic dev vendors `vendor1@vendor.test` and
+  `vendor2@vendor.test` (now `QaLife!2026`) and did not preserve the originals. Dev-only, test
+  accounts, but it is a side effect that was not reverted.
+- The legacy `award-recommendation` / `award-approval` / `award` (finalize) endpoints still exist
+  alongside the in-app `award/confirm` flow that superseded them. Only the confirm path was
+  exercised; the legacy trio may be dead code worth checking.
+
+**Verification:** every claim above came from an executed request or a database query, not from
+reading code. Where code is quoted it is to explain a result already observed.
+
+**Next recommended step:** fix Findings 1 and 2 (one DTO each), decide whether to rebake the dev
+audit chain, and promote the harness into `qa/playwright` so this is repeatable by anyone.
+
+---
+
 ## 2026-08-22 — The three end-to-end-test fixes SHIPPED TO PRODUCTION (both servers) + migration `056`
 
 **Date/time:** 2026-08-22 · commits `e3f0aea`, `6e34db5`, `e0069c2` · images `*:prod-20260822`

@@ -262,8 +262,20 @@ Then `/technical-comparison` → per-criterion consensus renders for both vendor
 ✅ **Check:** the **lowest-priced technically-PASS** vendor is auto-highlighted and pre-selected.
 ✅ **Check:** prices show 3 decimals throughout.
 ✅ **Check:** accepting the pre-selected lowest-PASS vendor needs **one Confirm click** — no
-justification text, no PDF. (Overriding to any other vendor requires both. Do not test the override
-path here unless you want a second full run — it changes the award record.)
+justification text, no PDF.
+
+Overriding to any other vendor requires **written justification of at least 20 characters**. The
+PDF is **optional**, not mandatory — BUG-095 (2026-06-02, owner directive *"remove mandatory pdf
+upload, just keep it optional"*) and BUG-149 (min length 100 → 20). Note the master plan
+§A6/§F7 still says *"text + PDF always required"* for the confirm path; the code disagrees and the
+code is what runs. **Verified on dev 2026-08-22 for the amend path** (text under 20 chars refused,
+valid text with no PDF accepted); the confirm-override path was not executed, only read.
+
+You do not need to exercise the override here — it changes the award record. It is covered by the
+dev harness.
+
+✅ **Check:** the server does not trust the client's `isLowest` flag. It recomputes the lowest-PASS
+bid and refuses a false claim. Confirmed on dev.
 
 Confirm the award. 📸
 

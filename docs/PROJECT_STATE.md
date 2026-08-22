@@ -201,6 +201,27 @@ operate.
 > the grants. Recorded rather than quietly deleted, because inferring permissions from role names
 > is exactly the mistake this table exists to prevent.
 
+## 🔴 Open defects found by the 2026-08-22 dev lifecycle run
+
+Both are server-side validation gaps on regulated actions. Both are a one-line DTO fix. Neither is
+a permission or state-machine hole — those all held.
+
+| # | Defect | Detail |
+|---|---|---|
+| 1 | **Tender approval accepts no comments** | `POST /tenders/:id/approve` uses `@Body('comments')` with no DTO; `approve()` never validates it. Approving with an empty body returns `201` and the audit row records only `{"status":"APPROVED"}` — no rationale captured. |
+| 2 | **Commercial envelope opening accepts no remarks** | `openEnvelopes` takes `@Body() body: { remarks?: string } = {}` — no DTO, no validation, no request-body schema in the OpenAPI doc. Opening with an empty body returns `201`. This is the most regulated action in the system; quorum/chair/permission all hold, only the *why* goes unrecorded. |
+
+**The 2026-08-21 handover lists both under "Controls verified working".** They are not implemented.
+The earlier check was almost certainly run against an already-approved tender, where the status
+guard returns `400` for an unrelated reason — a verification that could not have detected the
+failure it was testing for. Worth remembering the next time a control is marked verified.
+
+**Dev audit chain broken since 2026-05-28** (`AUDIT CHAIN BREAK at row id=218`, a `TENDER_UPDATED`).
+Detection and alerting work — **102** `CRITICAL` `AUDIT_CHAIN_BREAK` rows in `security_alerts`, one
+per boot, none actioned. The repair tooling (`008_audit_chain_rebake_2026-05-23.sql`,
+`rebake-audit-chain.js`, the RCA) was deleted in the 2026-08-21 sync; recoverable at `b37170f`.
+**Production is unaffected** — `Audit chain verified — 41 rows OK`.
+
 ## Pending backlog
 
 ### Documentation
