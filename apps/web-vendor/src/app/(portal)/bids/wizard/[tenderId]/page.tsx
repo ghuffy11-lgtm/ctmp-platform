@@ -18,6 +18,7 @@ import {
   type CommercialTermsDraft,
 } from '@/components/bids/CommercialTermsCard';
 import type { CommercialTerms } from '@ctmp/shared-types';
+import { useConfirm, useNotify } from '@/components/dialog/DialogProvider';
 
 interface Tender {
   id: string;
@@ -108,6 +109,10 @@ interface SupportingDoc {
 export default function BidWizardPage({ params }: { params: Promise<{ tenderId: string }> }) {
   const { tenderId } = use(params);
   const router = useRouter();
+
+  const confirm = useConfirm();
+
+  const notify = useNotify();
 
   const [step, setStep] = useState(0);
   const [tender, setTender] = useState<Tender | null>(null);
@@ -256,7 +261,12 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
 
   async function handleDeleteDoc(envelopeType: 'TECHNICAL' | 'COMMERCIAL', docId: string) {
     if (!bid) return;
-    if (!confirm('Remove this document?')) return;
+    if (!await confirm({
+      title: 'Remove document',
+      body: 'Remove this document from your bid? You can upload it again before you submit.',
+      destructive: true,
+      confirmLabel: 'Remove',
+    })) return;
     const token = getAccessToken();
     try {
       await fetch(
@@ -273,7 +283,8 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
         setCommercialDocs(prev => prev.filter(d => d.id !== docId));
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Delete failed');
+      await notify({ title: 'Could not remove the document',
+        body: err instanceof Error ? err.message : 'Delete failed.', variant: 'error' });
     }
   }
 
@@ -350,7 +361,12 @@ export default function BidWizardPage({ params }: { params: Promise<{ tenderId: 
       setError('This tender requires at least one supporting document. Upload one before submitting.');
       return;
     }
-    if (!confirm('Submit bid? Submitted bids are immutable.')) return;
+    if (!await confirm({
+      title: 'Submit your bid',
+      body: 'Once submitted, your bid is sealed and cannot be changed or withdrawn. '
+        + 'Check your pricing and documents before continuing.',
+      confirmLabel: 'Submit bid',
+    })) return;
     setSubmitting(true);
     setError(null);
     try {

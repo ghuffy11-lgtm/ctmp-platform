@@ -13,6 +13,7 @@ import { MessageBanner } from '@/components/ui/MessageBanner';
 import { Textarea } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { blockedStateForTender, vendorMessage } from '@/lib/vendor-messages';
+import { useNotify } from '@/components/dialog/DialogProvider';
 
 interface TenderDetail {
   id: string;
@@ -41,6 +42,7 @@ interface MyBidLite { id: string; tenderId: string; status: string }
 
 export default function VendorTenderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const notify = useNotify();
   const [tender, setTender] = useState<TenderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +106,8 @@ export default function VendorTenderDetailPage({ params }: { params: Promise<{ i
       window.open(url, '_blank', 'noopener,noreferrer');
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to open document');
+      await notify({ title: 'Could not open the document',
+        body: err instanceof Error ? err.message : 'Failed to open document.', variant: 'error' });
     }
   }
 
@@ -120,7 +123,8 @@ export default function VendorTenderDetailPage({ params }: { params: Promise<{ i
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download document');
+      await notify({ title: 'Could not download the document',
+        body: err instanceof Error ? err.message : 'Failed to download document.', variant: 'error' });
     }
   }
 

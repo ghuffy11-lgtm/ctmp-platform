@@ -17,6 +17,7 @@ import {
   type CommercialTermsDraft,
 } from '@/components/bids/CommercialTermsCard';
 import { getAccessToken } from '@/lib/auth';
+import { useNotify } from '@/components/dialog/DialogProvider';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -77,6 +78,7 @@ interface Props {
 }
 
 export function NegotiationSection({ bidId, tenderId, boqTemplate, previousBoqLines, previousTerms }: Props) {
+  const notify = useNotify();
   const [openInvitation, setOpenInvitation] = useState<InvitationDto | null>(null);
   // BUG-128 (2026-06-11): submittedInvitations replaces the prior rounds map.
   // Sourced from the vendor's own /vendor/negotiation/invitations response
@@ -154,6 +156,9 @@ function SubmittedRoundCard({
   invitation: InvitationDto;
   boqTemplate: BoqTemplateRow[];
 }) {
+  // Hook must be called before the early return below — the document actions in
+  // this card report failures through it.
+  const notify = useNotify();
   const submission = invitation.submission;
   if (!submission) return null;
   const qtyById = new Map(boqTemplate.map(t => [t.id, t.qty]));
@@ -201,7 +206,8 @@ function SubmittedRoundCard({
               window.open(url, '_blank', 'noopener,noreferrer');
               setTimeout(() => URL.revokeObjectURL(url), 60_000);
             } catch (err) {
-              alert(err instanceof Error ? err.message : 'Open failed');
+              await notify({ title: 'Could not open the document',
+                body: err instanceof Error ? err.message : 'Open failed.', variant: 'error' });
             }
           }}
         >
@@ -227,7 +233,8 @@ function SubmittedRoundCard({
               document.body.removeChild(a);
               setTimeout(() => URL.revokeObjectURL(url), 60_000);
             } catch (err) {
-              alert(err instanceof Error ? err.message : 'Download failed');
+              await notify({ title: 'Could not download the document',
+                body: err instanceof Error ? err.message : 'Download failed.', variant: 'error' });
             }
           }}
           className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-card text-text-primary border border-emerald-300 rounded hover:bg-emerald-100"
