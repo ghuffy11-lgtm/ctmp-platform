@@ -109,6 +109,7 @@ Deployed together: migrations `054` + `055` and all three images.
 | **Money precision** — `tenders.awarded_amount`, `tenders.budget_estimate`, `commercial_evaluations.total_price` widened `numeric(15,2)` → `numeric(16,3)` so contract values hold fils. Applied to production while it still had **zero tenders**, so no value was ever rounded in production | migration `055` |
 | **Arabic KPI tiles no longer link into English** — `interactive` was accepted but never read by three components, so `interactive={false}` had been silently ignored since 2026-08-13. Gated every outbound link; verified by counting anchors per page **and per tab** | `ctmp-web-admin:prod-20260821b` |
 | **Arabic month names + a missed `Status` header** — Arabic dates read `21 May 2026`; now `21 مايو 2026` using the Gulf month set the dashboard already used. English still formats via `toLocaleDateString` so it cannot drift | `ctmp-web-admin:prod-20260821c` |
+| **APPROVED dead-end fixed** — `submitForApproval` now rejects a tender missing procurement type or estimated budget (the two fields the edit form locks after approval), and `revert` works from **Approved** as well as Published, with the target required to be an earlier status. Found by the end-to-end test; **DEV ONLY, awaiting owner confirmation** | `tenders.service.ts`, `RevertTenderDialog.tsx` |
 | **`VendorDirectory`'s dead `interactive` prop removed** — it was accepted and never read. Removing it rather than wiring it: all three links there are label-driven and every target has an Arabic version, so gating them would have *removed* working navigation. The compiler then caught the English route still passing the prop — which an inert prop would have hidden | `ctmp-web-admin:prod-20260821d` |
 
 **Owner's position on the two Arabic follow-ups (2026-08-21):** the wording is accepted as-is and
@@ -155,14 +156,6 @@ Still outstanding from before, unrelated to the Arabic work:
 
 ### Known gaps and deliberate non-features
 
-- **A tender can reach `APPROVED` with no procurement type and then be permanently stuck.**
-  Found by the 2026-08-21 end-to-end Chrome test. The create form leaves all three
-  procurement-type radios unselected, and neither "Save as Draft" nor "Submit for Approval"
-  requires one — but **publish does**. Once `APPROVED`, the edit form deliberately sends only
-  `visibility` and "bails without hitting the API" (BUG-122b), the API rejects `tenderType`
-  outright, and `revert` only works *from Published*. The tender cannot be published, edited or
-  reverted; the only exit is Cancel and recreate. Fix options: default the radio to "Open Tender",
-  require it before Submit for Approval, or allow revert from `APPROVED`.
 - **`tenders.tender_type` holds inconsistent values** — `OPEN`, `Open Tender` and `Restricted` all
   exist in the same free-text column. Worth normalising if it is ever filtered or reported on.
 - **The vendor bid wizard uses a native `confirm()`** for final submission

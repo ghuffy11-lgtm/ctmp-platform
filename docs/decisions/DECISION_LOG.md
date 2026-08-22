@@ -18,6 +18,60 @@ Related files:
 
 ## Decisions
 
+### 2026-08-21 - Validate pre-approval fields at submit, and allow revert from Approved
+
+Decision:
+
+`submitForApproval` now rejects a tender missing `procurementType` or `estimatedBudget`, and
+`revert` accepts **Approved** as a source status in addition to Published. The revert target must
+be strictly earlier than the current status.
+
+Context:
+
+The end-to-end lifecycle test found that a tender could reach APPROVED without a procurement type
+and then be impossible to publish, edit or revert. Publish requires the field; the edit form sends
+a visibility-only payload once APPROVED (BUG-122b) and returns without calling the API; the API
+rejects `tenderType`; and revert only ran from Published. The only exit was Cancel and rebuild,
+losing the BoQ, criteria and approval.
+
+Options considered:
+
+- **Pre-select "Open Tender" on the create form.** One line, but it only hides the common case —
+  anyone who clears the radio still reaches the dead end.
+- **Validate at submit-for-approval.** Chosen. It fails at the last moment the field is still
+  editable, and the message says why it matters.
+- **Allow revert from Approved.** Also chosen. It fixes the dead end as a class rather than for
+  this one field — any other pre-publish omission is now recoverable.
+
+Owner picked both.
+
+Outcome:
+
+- Only `procurementType` and `estimatedBudget` are enforced at submit. RFQ documents are
+  deliberately NOT, because uploads still work in APPROVED and a missing document is recoverable.
+- `revert` gained an ordering guard (`Draft < Internal Review < Approved < Published`) so it can
+  never move a tender forward or sideways.
+- The audit `beforeValue` on revert was hardcoded to `PUBLISHED`; corrected to the real prior
+  status, which would have logged falsely once Approved became a valid source.
+- `RevertTenderDialog` takes `currentStatus` and offers only earlier targets; the Revert button now
+  shows on Approved as well as Published.
+- The existing binding-bid guard is untouched — a tender with submitted bids still cannot be
+  reverted.
+
+Impact:
+
+Verified on dev: submit without the fields returns a clear message naming both; a tender approved
+and then reverted lands in Draft; reverting forward from Draft, and reverting an AWARDED tender,
+are both refused.
+
+Related files:
+
+```text
+apps/api/src/modules/tenders/tenders.service.ts
+apps/web-admin/src/components/dialog/RevertTenderDialog.tsx
+apps/web-admin/src/app/(admin)/tenders/[id]/page.tsx
+```
+
 ### 2026-08-21 - Money columns widened to numeric(16,3); KWD carries fils
 
 Decision:

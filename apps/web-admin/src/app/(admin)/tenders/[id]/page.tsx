@@ -509,12 +509,12 @@ export default function TenderDetailPage() {
               Edit
             </Link>
           )}
-          {tender.status === 'Published' && perms.revert && (
+          {(tender.status === 'Published' || tender.status === 'Approved') && perms.revert && (
             <button
               onClick={() => setRevertOpen(true)}
               disabled={actionLoading !== null}
               className="px-4 py-2 border border-amber-500/40 text-amber-700 text-sm font-semibold rounded-lg hover:bg-amber-500/5 transition-colors disabled:opacity-60"
-              title="Roll a Published tender back to Approved/Internal Review/Draft so you can fix mistakes. Blocked once vendors have submitted bids."
+              title="Roll a Published or Approved tender back to an earlier status so you can fix mistakes — including fields the edit form locks after approval. Blocked once vendors have submitted bids."
             >
               Revert
             </button>
@@ -830,6 +830,7 @@ export default function TenderDetailPage() {
         open={revertOpen}
         tenderId={tender.id}
         tenderReference={tender.referenceNumber}
+        currentStatus={tender.status}
         onClose={() => setRevertOpen(false)}
         onReverted={() => { setRevertOpen(false); loadTender(); }}
       />

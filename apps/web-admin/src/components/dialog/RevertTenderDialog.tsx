@@ -16,6 +16,8 @@ interface Props {
   open: boolean;
   tenderId: string;
   tenderReference: string;
+  /** Current tender status — only earlier statuses are offered as targets. */
+  currentStatus?: string;
   onClose: () => void;
   onReverted: () => void;
 }
@@ -43,8 +45,14 @@ const BINDING_BID_STATUSES = new Set([
 
 const MIN_REASON = 20;
 
-export function RevertTenderDialog({ open, tenderId, tenderReference, onClose, onReverted }: Props) {
-  const [targetStatus, setTargetStatus] = useState<typeof TARGETS[number]['value']>('Approved');
+export function RevertTenderDialog({ open, tenderId, tenderReference, currentStatus, onClose, onReverted }: Props) {
+  // Only statuses that PRECEDE the current one are valid targets. Revert now
+  // runs from Approved as well as Published (2026-08-21), and the API rejects
+  // a target that is not earlier — so don't offer one.
+  const ORDER = ['Draft', 'Internal Review', 'Approved', 'Published'];
+  const targets = TARGETS.filter(t => ORDER.indexOf(t.value) < ORDER.indexOf(currentStatus ?? 'Published'));
+  const defaultTarget = (targets[targets.length - 1]?.value ?? 'Draft') as typeof TARGETS[number]['value'];
+  const [targetStatus, setTargetStatus] = useState<typeof TARGETS[number]['value']>(defaultTarget);
   const [reason, setReason] = useState('');
   const [bindingBidCount, setBindingBidCount] = useState<number | null>(null);
   const [loadingBids, setLoadingBids] = useState(true);
@@ -53,7 +61,7 @@ export function RevertTenderDialog({ open, tenderId, tenderReference, onClose, o
 
   useEffect(() => {
     if (!open) return;
-    setTargetStatus('Approved');
+    setTargetStatus(defaultTarget);
     setReason('');
     setError(null);
     setBindingBidCount(null);
@@ -148,7 +156,7 @@ export function RevertTenderDialog({ open, tenderId, tenderReference, onClose, o
             <legend className="text-xs font-semibold uppercase tracking-wider text-text-secondary mb-1">
               Roll back to
             </legend>
-            {TARGETS.map((opt) => (
+            {targets.map((opt) => (
               <label
                 key={opt.value}
                 className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${

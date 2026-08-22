@@ -476,6 +476,28 @@ export class TendersService {
   }
 
   async submitForApproval(id: string, userId: string) {
+    // 2026-08-21: validate here, not only at publish. `procurementType` and
+    // `estimatedBudget` cannot be edited once the tender is APPROVED — the edit
+    // form sends a visibility-only payload from that point (BUG-122b) and the
+    // API rejects both fields — so a tender that reaches APPROVED without them
+    // can never be published, edited or (previously) reverted. Catching it on
+    // the way out of DRAFT is the last moment the user can still fix it easily.
+    // RFQ documents are deliberately NOT required here: uploads still work in
+    // APPROVED, so a missing document is recoverable.
+    const tender = await this.prisma.tender.findUnique({
+      where: { id },
+      select: { id: true, procurementType: true, estimatedBudget: true },
+    });
+    if (!tender) throw new NotFoundException('Tender not found');
+    const missing: string[] = [];
+    if (!tender.procurementType) missing.push('procurement type');
+    if (tender.estimatedBudget == null) missing.push('estimated budget');
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Cannot submit for approval: missing ${missing.join(' and ')}. `
+        + 'These cannot be changed after approval, so set them on the edit form first.',
+      );
+    }
     return this.transition(id, userId, TenderStatus.DRAFT, TenderStatus.INTERNAL_REVIEW, 'TENDER_SUBMITTED_FOR_APPROVAL');
   }
 
@@ -993,8 +1015,24 @@ export class TendersService {
       },
     });
     if (!tender) throw new NotFoundException('Tender not found');
-    if (tender.status !== TenderStatus.PUBLISHED) {
-      throw new BadRequestException(`Revert only supported from Published; current status is ${tender.status}.`);
+    // 2026-08-21: APPROVED added. A tender approved without a procurement type
+    // or budget could not be published, edited or reverted — a dead end whose
+    // only exit was Cancel. Revert is now the escape hatch from both
+    // pre-award states.
+    const REVERTABLE_FROM: TenderStatus[] = [TenderStatus.PUBLISHED, TenderStatus.APPROVED];
+    if (!REVERTABLE_FROM.includes(tender.status)) {
+      throw new BadRequestException(
+        `Revert is only supported from Published or Approved; current status is ${tender.status}.`,
+      );
+    }
+    // Never revert "forward" or sideways — the target must precede the current
+    // status in the pre-award sequence.
+    const ORDER = ['Draft', 'Internal Review', 'Approved', 'Published'];
+    const currentLabel = STATUS_DB_TO_API[tender.status] ?? String(tender.status);
+    if (ORDER.indexOf(dto.targetStatus) >= ORDER.indexOf(currentLabel)) {
+      throw new BadRequestException(
+        `Cannot revert to ${dto.targetStatus} from ${currentLabel} — the target must be an earlier status.`,
+      );
     }
     // Block when ANY binding bid exists. DRAFT and WITHDRAWN are preserved.
     const BLOCKING: Set<BidStatus> = new Set([
@@ -1034,7 +1072,7 @@ export class TendersService {
       entityId: id,
       tenderId: id,
       actorUserId: userId,
-      beforeValue: { status: TenderStatus.PUBLISHED },
+      beforeValue: { status: tender.status },
       afterValue: { status: targetDbStatus, invitationNotificationsReset: resetCount },
       reason: dto.reason.trim(),
       riskLevel: AuditRiskLevel.HIGH,
