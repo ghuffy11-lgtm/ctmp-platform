@@ -6,6 +6,105 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-22 — Approve / reject / open-envelopes now require written justification (DEV)
+
+**Date/time:** 2026-08-22 · commit `3664ad2` · dev only, **not on production**
+
+Fixes Findings 1 and 2 from the lifecycle run earlier today.
+
+**Files:** `apps/api/src/modules/tenders/dto/approve-tender.dto.ts` (new),
+`apps/api/src/modules/committee/dto/open-envelopes.dto.ts` (new),
+`tenders.controller.ts`, `committee.controller.ts`,
+`apps/web-admin/src/app/(admin)/approvals/page.tsx`,
+`apps/web-admin/src/app/(admin)/committee-opening/page.tsx`, `.gitignore`.
+
+**What changed.** Three regulated actions took their justification as a bare
+`@Body('field')` string with no DTO, so the API accepted an empty body and returned `201`:
+
+| Endpoint | Was |
+|---|---|
+| `POST /tenders/:id/approve` | `@Body('comments') comments: string` |
+| `POST /tenders/:id/reject` | `@Body('reason') reason: string` |
+| `POST /committee-sessions/:id/open-commercial-envelopes` | `@Body() body: { remarks?: string } = {}` |
+
+Now `ApproveTenderDto`, `RejectTenderDto` and `OpenEnvelopesDto`, each `@MinLength(20)` —
+the house convention already used by Cancel, Suspend, Revert and the award justification
+(BUG-149). Envelope remarks allow 2000 chars rather than 1000; it is the only place a
+committee records what it saw while opening sealed bids.
+
+**`reject` was not in the reported scope.** Same defect, same controller, found in the same
+pass, and rejecting a tender with no recorded reason is worse than approving one. Fixed rather
+than left as a known hole beside its twin.
+
+**Both UIs raised from non-empty to ≥20 in the same commit.** Shipping the DTO alone would have
+swapped one client/server mismatch for another — a user typing "Approved" would have hit a 400 the
+form never warned about. The committee textarea now counts down the characters still needed.
+
+**Why this survived so long:** both admin screens *already* blocked empty text — approvals refuses
+with "Comments are required for audit compliance", and the committee button stays disabled until
+remarks are typed. The control lived in the browser and nowhere else, so testing through the UI
+could never find it, while any direct API call walked straight past. Worth remembering: a control
+verified only through the UI has not been verified.
+
+**Verification — executed against the deployed dev API, not inferred:**
+- `pnpm -C apps/api build` and `pnpm -C apps/web-admin build` clean. (53 pre-existing local errors
+  turned out to be a stale local Prisma client missing the `054` Arabic columns — `prisma generate`
+  cleared them; unrelated to this change.)
+- Fresh tender taken to **Internal Review**, so the status guard could not mask the result:
+  - approve, empty body → **400** *"comments must be longer than or equal to 20 characters"*
+  - approve, 2-char comment → **400**
+  - tender **still** in Internal Review after both refusals
+  - approve with valid comments → **201**, tender `Approved`
+- reject, empty body → **400**; with valid reason → **201**.
+- open-commercial-envelopes against a syntactically valid but non-existent session:
+  empty → **400**, `"short"` → **400**, valid 20+ chars → **404**. The 404 is the proof the
+  validation ran and the handler was reached.
+- OpenAPI now documents both bodies: `#/components/schemas/OpenEnvelopesDto` and
+  `ApproveTenderDto`. Previously the opening endpoint had no request-body schema at all.
+
+**Deployed:** `docker compose --project-name ctmp build api web-admin` then
+`up -d --force-recreate`. Both healthy. **Production untouched** — still `prod-20260822`.
+
+**Teardown:** three probe tenders purged, six `qa-life-*` personas back to `DISABLED`.
+
+---
+
+## 2026-08-22 — Finding: purging a tender frees its reference number for reuse
+
+**Date/time:** 2026-08-22 · dev observation, applies to production · **no code change yet**
+
+Noticed because two probe tenders in the same afternoon were both issued `TDR-2026-0029`.
+
+`generateReference()` (`tenders.service.ts:1506`) takes `MAX(reference)` from the **live**
+`tenders` table and adds one. `scripts/purge_tender.sh` deletes the tender row but deliberately
+keeps `audit_logs`. So purging the highest-numbered tender lowers the max, and the next tender
+created is issued the number that was just freed.
+
+**Consequence:** the permanent audit trail can hold two different tenders under one reference.
+It already does on dev — `c43bce2a…` with 35 rows and `f55dbf7a…` with 3, both `TDR-2026-0029`,
+both purged. `audit_logs` stores `tender_id`, not the reference, so telling them apart means
+joining to a `tenders` row that no longer exists. To a human reading the audit trail by reference
+number, two unrelated procurements are one.
+
+**Why it matters now:** the production test plan ends by purging the test tender. That tender will
+take `TDR-2026-0001`, and after the purge the first *real* tender will be issued `TDR-2026-0001`
+too — permanently ambiguous in the audit record, on the very first live procurement.
+
+**Also latent:** `tenders.reference` has a unique index (`tenders_reference_key`), and
+`generateReference()` does read-then-insert with no retry, so two concurrent creates race to the
+same number and one gets a 500. Not observed; unlikely at this concurrency; same root cause.
+
+**Options (owner's call):**
+1. **Monotonic sequence** — a Postgres sequence, or take the max across `tenders` *and* a small
+   `issued_references` ledger that purge never touches. Fixes both the reuse and the race.
+2. **Don't purge the production test tender** — cancel it instead. Cancelled tenders keep their
+   row, so the number is never freed. Cheapest, and enough for the launch test.
+3. **Accept it** — document that references are unique among live tenders only.
+
+Recommendation: **(2) for the production test now**, **(1) before real volume**.
+
+---
+
 ## 2026-08-22 — Full lifecycle driven end-to-end on DEV via API harness — 2 documented controls proven absent
 
 **Date/time:** 2026-08-22 · dev only (`10.1.13.98`) · nothing on production

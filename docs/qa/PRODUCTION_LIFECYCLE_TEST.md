@@ -339,8 +339,15 @@ docker logs ctmp-api 2>&1 | grep -i "audit chain"
 
 ## Teardown
 
-**Prove the purge on dev first.** `scripts/purge_tender.sh` has never been run anywhere. Its first
-live use must not be against production.
+> **⚠️ Consider cancelling instead of purging.** Purging frees the reference number for reuse —
+> `generateReference()` takes `MAX(reference)` from live tenders, and the purge deletes the row.
+> Purge `TDR-2026-0001` and the first *real* procurement is issued `TDR-2026-0001` too, leaving two
+> different tenders under one number in a permanent audit trail that stores only `tender_id`.
+> Cancelling keeps the row, so the number is never reissued. See `docs/PROJECT_STATE.md`.
+
+**The purge is proven.** Run on dev 2026-08-22 against four tenders — dry run and `--confirm` — rows
+and stored files removed, `audit_logs` preserved exactly each time. It behaves correctly; the
+reference-reuse caveat above is a property of the *system*, not a fault in the script.
 
 ```bash
 # on the build box — dev, dry run, changes nothing

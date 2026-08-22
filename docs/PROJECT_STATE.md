@@ -201,20 +201,43 @@ operate.
 > the grants. Recorded rather than quietly deleted, because inferring permissions from role names
 > is exactly the mistake this table exists to prevent.
 
-## 🔴 Open defects found by the 2026-08-22 dev lifecycle run
+## Defects found by the 2026-08-22 dev lifecycle run
 
-Both are server-side validation gaps on regulated actions. Both are a one-line DTO fix. Neither is
-a permission or state-machine hole — those all held.
+**✅ FIXED on dev, same day (commit `3664ad2`) — not yet on production.** Three regulated actions
+accepted an empty body and returned `201`, because each took its justification as a bare
+`@Body('field')` string with no DTO:
 
-| # | Defect | Detail |
-|---|---|---|
-| 1 | **Tender approval accepts no comments** | `POST /tenders/:id/approve` uses `@Body('comments')` with no DTO; `approve()` never validates it. Approving with an empty body returns `201` and the audit row records only `{"status":"APPROVED"}` — no rationale captured. |
-| 2 | **Commercial envelope opening accepts no remarks** | `openEnvelopes` takes `@Body() body: { remarks?: string } = {}` — no DTO, no validation, no request-body schema in the OpenAPI doc. Opening with an empty body returns `201`. This is the most regulated action in the system; quorum/chair/permission all hold, only the *why* goes unrecorded. |
+| Endpoint | Now |
+|---|---|
+| `POST /tenders/:id/approve` | `ApproveTenderDto`, `@MinLength(20)` |
+| `POST /tenders/:id/reject` | `RejectTenderDto`, `@MinLength(20)` — same defect, found in the same pass |
+| `POST /committee-sessions/:id/open-commercial-envelopes` | `OpenEnvelopesDto`, `@MinLength(20)`, max 2000 |
 
-**The 2026-08-21 handover lists both under "Controls verified working".** They are not implemented.
-The earlier check was almost certainly run against an already-approved tender, where the status
-guard returns `400` for an unrelated reason — a verification that could not have detected the
-failure it was testing for. Worth remembering the next time a control is marked verified.
+Both admin UIs were raised from non-empty to ≥20 in the same commit so client and server agree.
+Verified by execution on the deployed dev API: empty and short bodies now return `400`, valid ones
+`201`, and the tender stays put through the refusals.
+
+**The 2026-08-21 handover listed two of these under "Controls verified working".** They were never
+implemented — both admin screens blocked empty text client-side, so the control lived in the browser
+and nothing else, and testing through the UI could not find it while any direct API call walked
+past. **A control verified only through the UI has not been verified.**
+
+## 🟡 Open: purging a tender frees its reference number for reuse
+
+`generateReference()` takes `MAX(reference)` from the **live** `tenders` table;
+`scripts/purge_tender.sh` removes the tender row but keeps `audit_logs`. Purging the
+highest-numbered tender therefore reissues its number to the next one created.
+
+Dev already holds two purged tenders that both used `TDR-2026-0029` (35 audit rows and 3).
+`audit_logs` stores `tender_id`, not the reference, so nothing in the permanent record separates
+them by number.
+
+**This bites the production launch test directly:** the test tender will take `TDR-2026-0001`, and
+after it is purged the first *real* procurement will be issued `TDR-2026-0001` as well.
+
+Recommendation: **cancel rather than purge the production test tender** (cancelled rows survive, so
+the number is never freed), and move to a monotonic sequence before real volume. A latent race
+exists in the same function — read-then-insert against a unique index, no retry.
 
 **Dev audit chain broken since 2026-05-28** (`AUDIT CHAIN BREAK at row id=218`, a `TENDER_UPDATED`).
 Detection and alerting work — **102** `CRITICAL` `AUDIT_CHAIN_BREAK` rows in `security_alerts`, one
