@@ -33,6 +33,10 @@ deployment reality that will break production if ignored.
 
 ### Regulatory: late submissions and vendor registration
 
+- **Submitted bids are immutable.** No revision, no withdrawal, no re-upload after submit —
+  documents are locked and SHA-256 checksummed. Enforced at five points in `bids.service.ts`
+  (create, update, submit, and both supporting-document paths). A vendor who needs to change a bid
+  gets a new tender round, not an edit. Do not add an "unlock" or "amend bid" path.
 - Late submission is **blocked by default**. It requires an exception that is specific to both the
   tender and the vendor, carries a reason, an expiry and a granting user, and is audited. One
   active exception per (tender, vendor).
@@ -73,9 +77,14 @@ deployment reality that will break production if ignored.
 
 - Agents work **only** inside `/mnt/repo/ctmp-platform/`. Anything outside requires explicit
   permission first — do not find another route to the same access.
-- **This checkout is not a git working copy** (no `.git`). There is no commit history here and no
-  `git log` to consult. The change history *is* `agents/handoffs/HANDOVER.md`. Treat it as the
-  system of record and keep appending to it.
+- **The repository has been under git since 2026-08-21** and is synced to
+  `github.com/ghuffy11-lgtm/ctmp-platform`, branch `main` — the only branch. An earlier revision of
+  this line said the checkout had no `.git` and that the handover was the sole change history; that
+  was true until the sync commit `d9c647b` and is not any more. Consult `git log` *and*
+  `agents/handoffs/HANDOVER.md`: git records what changed, the handover records why, what was
+  verified and how to roll it back. Keep appending to both.
+- On the build box the `.git` directory is owned by `root`, so git commands there need `sudo` and
+  `-c safe.directory=/mnt/repo/ctmp-platform`.
 
 ---
 
