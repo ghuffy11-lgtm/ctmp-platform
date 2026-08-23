@@ -28,6 +28,42 @@ that table into `agents/handoffs/HANDOVER.md` when finished.
 
 ---
 
+## Go-live notes — read these two first
+
+The owner's plan (2026-08-23) is to create the first tender in the live system and then go live.
+Two things decide how that first tender behaves. Both were checked on the production host.
+
+**1. Who gets emailed when you publish — it depends on visibility.**
+
+`notifications.email_override` on production is **empty**, which is correct for live: mail goes to
+real recipients, not a catch-all.
+
+- **`PUBLIC` tender → publishing emails nobody.** Broad publish-notification dispatch is BUG-016,
+  still deferred pending owner approval. The tender simply appears in the portal.
+- **`INVITATION_ONLY` tender → publishing emails every invited vendor** via
+  `dispatchPendingInvitationEmails` (BUG-120), and production has 2 approved real suppliers.
+
+So a `PUBLIC` first tender is silent; an `INVITATION_ONLY` one is not. Either way the tender becomes
+**visible** in the vendor portal once published, so give it a title you are content for a supplier
+to read. Later stages do email internal staff (evaluators on technical opening, managers on
+technical finalisation).
+
+**2. Decide now whether this first tender is disposable.**
+
+`generateReference()` takes `MAX(reference)` from **live** tenders. `purge_tender.sh` deletes the
+tender row and keeps `audit_logs`. So:
+
+| If the first tender is… | Then |
+|---|---|
+| **Purged** afterwards | It frees `TDR-2026-0001`, and the first *real* procurement is issued the same number. Two different tenders under one reference, permanently, in an audit trail that stores only `tender_id`. |
+| **Cancelled** instead | The row survives, the number is never reissued, and the audit trail stays unambiguous. |
+| **Kept** as a genuine first tender | Nothing to decide. |
+
+**Recommendation: cancel, do not purge** — unless you want `TDR-2026-0001` free for the first real
+one, in which case purge *before* any real tender exists and accept the audit-trail overlap.
+
+---
+
 ## STOP — read before booking time
 
 ### 1. Production has the permissions, but no separation between people

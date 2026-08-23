@@ -7,7 +7,10 @@ production hosts (image tags, schema comparison). Where a claim could be checked
 
 ## One-paragraph summary
 
-CTMP is **live in production on both servers** and has been since June 2026. The full tender
+CTMP is **deployed to production on both servers** and has been since June 2026, but is **not yet in
+service** — go-live has not happened, which is why production holds zero tenders. That is the plan,
+not a gap. (Earlier revisions of this file said "live in production since June 2026", which reads as
+*in use* and has already caused one reader to treat zero tenders as alarming.) The full tender
 lifecycle works end to end: create → internal review → approve → publish → vendor clarifications →
 bid submission (sealed technical + commercial envelopes) → technical evaluation → committee
 commercial opening → commercial comparison → optional negotiation → award recommendation → award →
@@ -20,8 +23,10 @@ APPROVED dead end, `procurementType` enum enforcement, and the vendor portal's b
 dialogs — shipped on 2026-08-22 with migration `056`; and the approve / reject / envelope-opening
 justification requirements shipped on 2026-08-23.
 
-**The live money path has still never been exercised.** Production holds **zero tenders**. Creating
-one test tender, walking a vendor through it, and purging it afterwards is the outstanding work.
+**Next step is go-live.** The owner creates the first tender in the live system, walks it through,
+and the platform enters service. `docs/qa/PRODUCTION_LIFECYCLE_TEST.md` is the runbook; read the
+go-live notes there first — publishing behaviour differs by tender visibility, and the
+reference-number question below decides whether that first tender can be removed afterwards.
 
 ---
 
