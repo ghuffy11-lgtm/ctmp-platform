@@ -18,6 +18,59 @@ Related files:
 
 ## Decisions
 
+### 2026-08-24 - Registry invitations for prospective suppliers
+
+Decision:
+
+Procurement can invite a company with no vendor record by email. The invitation is a **general
+registry invitation, not tied to a tender**. The link is tokenised (`/register?invite=<token>`) so
+the email prefills and conversion is tracked. Retention: revoked and long-expired invitations are
+purged; accepted ones are kept.
+
+Context:
+
+The only route onto the platform was unsolicited self-registration. `tender_vendors` cannot
+represent an invitee — `vendor_id` is `NOT NULL REFERENCES vendors(id)` — so a new table was
+required rather than an extension of the existing tender-invite flow.
+
+Options considered:
+
+- **Tender-scoped invitation** (invite them to bid on a specific tender). Rejected by the owner in
+  favour of the general registry invite — it needs auto-linking on approval to be useful, and most
+  outreach is "join our supplier list", not "bid on this one thing".
+- **Plain link to /register, no token.** Simpler, but gives no way to tell an invitee from a
+  passer-by and no conversion signal. Owner chose tokenised.
+- **Reuse `tender:edit` for the permission.** Rejected: `SYSTEM_ADMIN` does not hold it, and the
+  owner wanted IT able to send invitations. Hence a new `vendor:invite`.
+
+Outcome:
+
+- No stored `EXPIRED` status — expiry is derived. A stored value needs a sweeper, and this platform
+  has no scheduler, so it would drift out of sync with the clock.
+- One-live-invitation-per-address is a **partial unique index**, not just a service check, so a race
+  cannot produce two live links to one inbox.
+- Only the SHA-256 of the token is stored. Verified that no invitation audit row contains a token.
+- The invited email is locked on the prefilled form, because the address match is what links the
+  signup back to the invitation. An explicit "use a different email address" releases it and
+  forgoes the linkage.
+- Every token failure degrades to the ordinary blank registration form. A dead invite link must
+  never block a supplier from registering.
+
+Impact:
+
+**The retention purge is incomplete by design and this is accepted.** The invited address is also
+written to `audit_logs`, which is append-only and hash-chained — deleting there would break
+verification for every later row. So purging reduces exposure but is not erasure, and a
+data-subject request cannot be fully honoured. Owner accepted this explicitly on 2026-08-24.
+
+Related files:
+
+`database/migrations/057_vendor_registry_invitations.sql`,
+`apps/api/src/modules/vendors/vendor-invitations.{service,controller}.ts`,
+`apps/web-admin/src/components/VendorInvitationsPanel.tsx`,
+`apps/web-vendor/src/app/register/page.tsx`,
+`scripts/purge_vendor_invitations.sh`
+
 ### 2026-08-21 - Validate pre-approval fields at submit, and allow revert from Approved
 
 Decision:

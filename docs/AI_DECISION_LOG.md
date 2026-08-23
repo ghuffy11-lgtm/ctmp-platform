@@ -48,6 +48,7 @@ deployment reality that will break production if ignored.
 - **`audit_logs` is append-only** and hash-chained, enforced at the database layer. Never
   `UPDATE` or `DELETE` a row. The chain is verified on API boot and a break raises a `CRITICAL`
   `security_alerts` row.
+- **Purging never reaches `audit_logs`, and that is accepted.** The vendor-invitation retention purge (2026-08-24) deletes operational rows but the invited email address remains in the audit trail permanently, because removing it would break the hash chain. Exposure is reduced; erasure is not achieved, and a data-subject request cannot be fully honoured. Owner accepted this explicitly.
 - The tender purge script (`scripts/purge_tender.sh`) deliberately **leaves `audit_logs`
   untouched** — that is the entire reason migration `053` dropped the audit FKs. Do not "improve"
   it by cascading into the audit trail.

@@ -211,6 +211,37 @@ operate.
 > the grants. Recorded rather than quietly deleted, because inferring permissions from role names
 > is exactly the mistake this table exists to prevent.
 
+## 🟢 Shipped to dev 2026-08-24 — supplier registry invitations (awaiting sign-off)
+
+Procurement can now invite a company that has **no vendor record yet** to register. Previously the
+only route onto the platform was unsolicited self-registration; `tender_vendors` could not express
+an invitee because its `vendor_id` is `NOT NULL REFERENCES vendors(id)`.
+
+| | |
+|---|---|
+| Scope | **Registry invitation, not tender-scoped.** The template has no tender variable, so it cannot leak one. |
+| Who can send | `vendor:invite` — `SYSTEM_ADMIN`, `PROCUREMENT_ADMIN`, `PROCUREMENT_OFFICER` |
+| Link | `/register?invite=<token>` — prefills company + email, tracks conversion |
+| Lifetime | 14 days (`VENDOR_INVITE_TTL_DAYS`) |
+| Limits | 3/min per endpoint, 20 per sender per 24 h, 5-min resend cooldown |
+| Retention | `scripts/purge_vendor_invitations.sh` — revoked and >90-day-expired purged, accepted kept |
+
+**An invite is a prefill, never a bypass.** hCaptcha, the duplicate-email guard, the required
+commercial licence, `PENDING` status, email verification and admin approval are all untouched, and
+that was verified by execution rather than inspection.
+
+**Verified on dev:** permission grants exactly three roles; a `TECHNICAL_EVALUATOR` token gets `403`
+on both endpoints; the rendered email escapes `<script>` in the HTML part; duplicate and
+already-a-supplier both `409` with no email sent; the throttle fires on the 4th post in a minute;
+valid tokens resolve and garbage / unknown / expired / revoked all return `{valid:false}` with HTTP
+200 so the register page degrades to a normal blank form; a failed registration leaves the
+invitation `PENDING`; the purge deletes revoked and stale rows while keeping accepted ones; and
+**no invitation audit row contains a token** (the 187 audit rows holding 64-hex strings are all
+document SHA-256 checksums).
+
+**Not yet done:** production rollout (needs migration `057` applied by hand first), and a
+browser-driven pass over the two new UI surfaces.
+
 ## Defects found by the 2026-08-22 dev lifecycle run
 
 **✅ FIXED and IN PRODUCTION** (dev 2026-08-22, production 2026-08-23, commit `3664ad2`, images `prod-20260823`). Three regulated actions

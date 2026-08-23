@@ -6,6 +6,95 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-24 — Supplier registry invitations (DEV) — migration `057`
+
+**Date/time:** 2026-08-24 · commits `4ac4fab` (backend), frontend + seed/purge follow-ups
+**Dev only. Not on production.**
+
+Procurement can now invite a company that has **no vendor record yet**. Until today the only route
+onto the platform was unsolicited self-registration — a supplier had to find the portal alone.
+
+**Why a new table.** `tender_vendors.vendor_id` is `NOT NULL REFERENCES vendors(id)`
+(`001_initial_schema.sql:436`), so the schema literally cannot hold an email-only invitee.
+`inviteVendor()` also hard-404s on a missing vendor. `extraNotificationEmails` looks close but is
+BCC decoration on a registered vendor's tender invite, whose only link needs a login they lack.
+
+**Owner's locked decisions:** general registry invite (**not** tender-scoped); senders
+`SYSTEM_ADMIN` + `PROCUREMENT_ADMIN` + `PROCUREMENT_OFFICER`; tokenised link with conversion
+tracking; sender supplies email + company name; retention purge approved.
+
+**Files:** `database/migrations/057_vendor_registry_invitations.sql`,
+`apps/api/src/modules/vendors/vendor-invitations.{service,controller}.ts` + 3 DTOs,
+`vendors.module.ts`, `vendor-auth.{service,controller}.ts`, `vendor-register.dto.ts`,
+`app.config.ts`, `prisma/schema.prisma`, `apps/web-admin/src/components/VendorInvitationsPanel.tsx`,
+`apps/web-admin/src/lib/email.ts`, `vendors/page.tsx`, `ManageInvitedVendors.tsx`,
+`apps/web-vendor/src/app/register/page.tsx`, `scripts/purge_vendor_invitations.sh`,
+`database/seeds/001_baseline_roles_permissions.sql`.
+
+**Design points worth keeping:**
+- **No stored `EXPIRED`.** Derived from `expires_at`, as the verification tokens already do. A
+  stored value needs a sweeper and this platform has no scheduler, so it would drift.
+- **One live invitation per address is a partial unique index**, not merely a service check — a race
+  cannot produce two live links to one inbox.
+- **Only the SHA-256 hash is stored.** Raw token exists in the email and nowhere else.
+- **Placed inside the existing `vendors` module**, not a new top-level one. `ARCHITECTURE.md` lists
+  the 25 modules and CLAUDE.md §3 forbids inventing structure. `VendorAuthModule` already imports
+  `VendorsModule`, so this added no import edge and no cycle.
+
+**Two corrections to the approved plan, both caught by compiling rather than reading:**
+- The plan said `sendEmail` returns `{status:'FAILED'}` on SMTP failure. **It does not — it writes
+  the `notification_logs` row and then throws** (`notifications.service.ts:302`). Uncaught, that
+  aborts `create()` *after* the row exists, orphaning a PENDING invitation whose link was never sent
+  and whose address the unique index now blocks from re-invitation. Caught and downgraded to an
+  `emailStatus` the UI acts on.
+- `inviteToken` is **transformed, not validated**. A `@Matches` would turn a mangled link into a
+  `400` on submit — blocking a registration, the one thing this must never do.
+
+**An invite is a prefill, never a bypass** — hCaptcha, duplicate-email guard, required commercial
+licence, `PENDING` status, email verification and admin approval all untouched. Proven, not assumed:
+a registration attempt without CAPTCHA was refused **and left the invitation `PENDING`**.
+
+**Verification on dev — all by execution:**
+- Migration applied; `uq_vendor_invitations_pending_email` confirmed **partial**
+  (`WHERE status = 'PENDING'`); `vendor:invite` granted to exactly the three roles.
+- `TECHNICAL_EVALUATOR` token → **403** on both `POST` and `GET`. Front-end gating alone is not
+  verification, so this was done with a real JWT.
+- Create → `201`, `emailStatus SENT`, TTL exactly 14 days.
+- Duplicate → `409` `INVITATION_ALREADY_PENDING`; already-a-supplier → `409`. Neither sent mail.
+- **Throttle proven by accident** — the 4th POST inside a minute returned `429`, which is the
+  designed limit firing.
+- **Rendered email inspected**, by temporarily pointing dev SMTP at MailHog and restoring it after:
+  correct subject, greeting, blue CTA, absolute `?invite=` link, `valid until 6 September 2026`,
+  brand shell. A company name of `<script>x</script>` renders as `&lt;script&gt;` in the HTML part —
+  the raw characters appear only in the `text/plain` alternative, which is correct.
+- Token round trip: valid resolves with email + company; garbage, well-formed-but-unknown, expired
+  and revoked all return **HTTP 200 `{valid:false}`** so the page degrades to a blank form.
+- Purge tested with all four states seeded: deleted 1 revoked + 1 long-expired, **kept** the
+  accepted supplier and the live pending invite.
+- **No invitation audit row contains a token.** 187 audit rows do hold 64-hex strings — every one is
+  a document SHA-256 checksum (`BidDocument`, `AwardMinutes`, `TenderDocument`), none a
+  `VendorInvitation`.
+- Audit events written: `VENDOR_INVITATION_SENT` / `REVOKED` at `MEDIUM`.
+
+**Discovered while testing — dev SMTP is not MailHog.** `smtp.host` is `mail.hadiclinic.com.kw`, a
+real relay; what protects dev is `notifications.email_override = root@hadiclinic.com.kw`. I had
+assumed MailHog and skipped the override step; it happened to be already set, so nothing stray went
+out, but the assumption was wrong and the plan's step existed precisely for it. Settings were
+restored exactly after the MailHog detour.
+
+**Pre-existing defect, untouched:** `vendors/page.tsx` still uses browser `prompt()` at two call
+sites for reject/suspend reasons — the same locked no-native-dialog rule enforced everywhere else.
+Confirmed still exactly 2 in the built chunk; the new panel adds none.
+
+**Open questions:** none blocking. Read-only prefilled email, 14-day TTL and the 20/24h cap are all
+tunable if they chafe.
+
+**Next recommended step:** owner walks the two UI surfaces on dev — Vendors → Invitations, and the
+invited `/register?invite=…` link. Then production: apply `057` by hand, then ship `api`,
+`web-admin` and `web-vendor` by the no-egress path.
+
+---
+
 ## 2026-08-23 — Justification fixes SHIPPED TO PRODUCTION (admin host) — `prod-20260823`
 
 **Date/time:** 2026-08-23 · commit `3664ad2` · admin host only
