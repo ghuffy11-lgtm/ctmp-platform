@@ -1,10 +1,11 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import HCaptcha from '@hcaptcha/react-hcaptcha';
 import { MailCheck, Upload, FileText, X, Loader2 } from 'lucide-react';
-import { post } from '@/lib/api';
+import { get, post } from '@/lib/api';
 import { AuthShell } from '@/components/layout/AuthShell';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -37,7 +38,18 @@ interface UploadedDoc {
   fileSize: number;
 }
 
+// 2026-08-24: /register?invite=<token> prefills an invited supplier's details.
+// useSearchParams() requires a Suspense boundary or the Next build fails, so the
+// page is split the same way verify-email/page.tsx already is.
 export default function VendorRegisterPage() {
+  return (
+    <Suspense fallback={<AuthShell title="Register as a Vendor" subtitle="Loading…" wide><div /></AuthShell>}>
+      <VendorRegisterPageInner />
+    </Suspense>
+  );
+}
+
+function VendorRegisterPageInner() {
   // BUG-101 (2026-06-04): owner simplified the registration form — drop
   // Registration Number / Tax Number / Country (collected later at approval if
   // needed). Add Company Website.
@@ -57,6 +69,41 @@ export default function VendorRegisterPage() {
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const captchaRef = useRef<HCaptcha>(null);
+
+  // 2026-08-24: registry invitation. The token prefills the form; it grants
+  // nothing. hCaptcha, email verification and admin approval are unchanged.
+  //
+  // Every failure path here degrades to the ordinary blank form. A prospective
+  // supplier must never be stopped by a stale or mangled link.
+  const inviteParam = useSearchParams().get('invite');
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [inviteChecked, setInviteChecked] = useState(false);
+  const [inviteStale, setInviteStale] = useState(false);
+
+  useEffect(() => {
+    if (!inviteParam) { setInviteChecked(true); return; }
+    let cancelled = false;
+    get<{ valid: boolean; email?: string; companyName?: string }>(
+      '/vendor-auth/invite/' + encodeURIComponent(inviteParam),
+    )
+      .then(res => {
+        if (cancelled) return;
+        if (res?.valid && res.email) {
+          setInviteToken(inviteParam);
+          setForm(prev => ({
+            ...prev,
+            contactEmail: res.email as string,
+            companyName: prev.companyName || (res.companyName ?? ''),
+          }));
+        } else {
+          setInviteStale(true);
+        }
+      })
+      // Network failure is treated exactly like an invalid token: carry on.
+      .catch(() => { if (!cancelled) setInviteStale(true); })
+      .finally(() => { if (!cancelled) setInviteChecked(true); });
+    return () => { cancelled = true; };
+  }, [inviteParam]);
 
   // BUG-137 (2026-06-19): per-type uploaded documents. Each slot stores a
   // list (multi types allow >1; non-multi keep length ≤1 by design).
@@ -148,6 +195,8 @@ export default function VendorRegisterPage() {
         password: form.password,
         captchaToken,
         documents,
+        // Ignored server-side if unknown, expired, revoked or already used.
+        inviteToken: inviteToken ?? undefined,
       });
       setSuccess(true);
     } catch (err) {
@@ -186,6 +235,30 @@ export default function VendorRegisterPage() {
       wide
     >
       {error && <div className="mb-6"><ErrorBanner message={error} /></div>}
+
+      {/* 2026-08-24: invitation state. Deliberately NOT an ErrorBanner when the
+          link is stale — a dead invite is not the supplier's fault and must not
+          look like a problem they have to solve. Muted note, form still usable. */}
+      {inviteChecked && inviteToken && (
+        <div className="mb-6 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            You were invited to register. Your email address is filled in below.{' '}
+            <button
+              type="button"
+              onClick={() => { setInviteToken(null); update('contactEmail', ''); }}
+              className="underline underline-offset-2 hover:no-underline"
+            >
+              Use a different email address
+            </button>
+          </span>
+        </div>
+      )}
+      {inviteChecked && inviteStale && (
+        <p className="mb-6 text-sm text-slate-500">
+          That invitation link is no longer valid — you can still register below.
+        </p>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-8">
         <Section title="Company Information">
@@ -243,7 +316,12 @@ export default function VendorRegisterPage() {
             value={form.contactEmail}
             onChange={e => update('contactEmail', e.target.value)}
             required
-            className="md:col-span-2"
+            // Locked while an invitation is in play so the address the invite was
+            // sent to is the address that registers — that match is what links
+            // the signup back to the invitation. "Use a different email address"
+            // above releases it, at the cost of the invite not being marked used.
+            readOnly={!!inviteToken}
+            className={`md:col-span-2${inviteToken ? ' bg-slate-50' : ''}`}
             autoComplete="email"
           />
           <Input

@@ -4,7 +4,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { get, patch, post } from '@/lib/api';
 import { getAccessToken, hasPermission } from '@/lib/auth';
 import { useConfirm } from '@/components/dialog/DialogProvider';
-import { RefreshCw, Store, Clock, BadgeCheck, Ban, Search, CheckCircle2, PauseCircle, FileText, Eye, Download } from 'lucide-react';
+// 2026-08-24: registry invitations for prospective suppliers.
+import { VendorInvitationsPanel } from '@/components/VendorInvitationsPanel';
+import { RefreshCw, Store, Clock, BadgeCheck, Ban, Search, CheckCircle2, PauseCircle, FileText, Eye, Download, Mail } from 'lucide-react';
 import type { LucideProps } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
@@ -84,6 +86,16 @@ export default function VendorsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [actionInFlight, setActionInFlight] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 2026-08-24: 'registered' | 'invitations'. Tab only renders with vendor:invite.
+  const [tab, setTab] = useState<'registered' | 'invitations'>('registered');
+  // Permissions are baked into the JWT at login, so a user granted vendor:invite
+  // while signed in will not see this until they log out and back in. The API
+  // enforces it regardless — this only hides the entry point.
+  const [canInvite, setCanInvite] = useState(false);
+  useEffect(() => {
+    const t = getAccessToken();
+    setCanInvite(!!t && hasPermission(t, 'vendor:invite'));
+  }, []);
 
   const fetchVendors = useCallback(async () => {
     setLoading(true);
@@ -241,13 +253,24 @@ export default function VendorsPage() {
         <div>
           <h1 className="text-2xl font-bold text-text-primary tracking-tight">Vendor Management</h1>
         </div>
-        <button
-          onClick={fetchVendors}
-          className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card flex items-center gap-2"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {canInvite && (
+            <button
+              onClick={() => setTab('invitations')}
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-white hover:opacity-90 flex items-center gap-2"
+            >
+              <Mail className="w-4 h-4" />
+              Invite Supplier
+            </button>
+          )}
+          <button
+            onClick={fetchVendors}
+            className="px-4 py-2 border border-border rounded-lg text-sm font-semibold text-text-secondary hover:bg-card flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Stat cards */}
@@ -268,10 +291,34 @@ export default function VendorsPage() {
         ))}
       </div>
 
+      {/* 2026-08-24: tab bar. Only shown to users who can invite — everyone else
+          sees the page exactly as before. */}
+      {canInvite && (
+        <div className="inline-flex rounded-lg border border-border bg-card p-1">
+          {([
+            ['registered', 'Registered vendors'],
+            ['invitations', 'Invitations'],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${
+                tab === key ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {error && (
         <div className="bg-danger/10 border border-danger/30 rounded-lg p-3 text-sm text-danger">{error}</div>
       )}
 
+      {tab === 'invitations' ? (
+        <VendorInvitationsPanel />
+      ) : (
       <div className="flex gap-5 h-[calc(100vh-340px)] min-h-[500px]">
         {/* List */}
         <div className="flex-1 bg-card rounded-xl border border-border shadow-sm overflow-hidden flex flex-col">
@@ -481,6 +528,7 @@ export default function VendorsPage() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

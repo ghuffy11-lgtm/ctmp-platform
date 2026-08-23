@@ -5,6 +5,7 @@ import { Plus, X, AlertCircle, Loader2, Mail, Send, Pencil } from 'lucide-react'
 import { get, post, del, patch } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 import { useConfirm } from '@/components/dialog/DialogProvider';
+import { parseEmails } from '@/lib/email';
 
 interface InvitedVendor {
   vendorId: string;
@@ -52,12 +53,9 @@ const ADD_STATUSES = new Set(['Draft', 'Internal Review', 'Approved', 'Published
 const REMOVE_STATUSES = new Set(['Draft', 'Internal Review', 'Approved', 'Published', 'Clarification Period']);
 const IMMEDIATE_DISPATCH = new Set(['Published', 'Clarification Period']);
 
-function parseEmails(raw: string): string[] {
-  return raw
-    .split(/[\s,;]+/)
-    .map(e => e.trim().toLowerCase())
-    .filter(e => e.length > 0 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
-}
+// 2026-08-24: parseEmails moved to @/lib/email so the vendor-invitation panel
+// and this box share one definition of a valid address. Two regexes drifting
+// apart is how "but it worked on the other screen" bugs start.
 
 export function ManageInvitedVendors({ tenderId, tenderStatus }: Props) {
   const confirm = useConfirm();
