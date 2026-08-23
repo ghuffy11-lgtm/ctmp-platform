@@ -17,6 +17,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { SystemSettingsService } from '../system-settings/system-settings.service';
 import { VendorDocumentStorageService } from '../vendors/vendor-document-storage.service';
+// 2026-08-24: registry invitations — token lookup + conversion on registration.
+import { VendorInvitationsService } from '../vendors/vendor-invitations.service';
 import { VENDOR_DOC_TYPES, vendorDocTypeByCode } from './vendor-document-types';
 import { VendorRegisterDto } from './dto/vendor-register.dto';
 import { VendorLoginDto } from './dto/vendor-login.dto';
@@ -73,6 +75,7 @@ export class VendorAuthService {
     private readonly settings: SystemSettingsService,
     // BUG-137: anonymous registration document storage.
     private readonly docStorage: VendorDocumentStorageService,
+    private readonly invitations: VendorInvitationsService,
   ) {}
 
   // ------------------------------------------------- BUG-137 doc upload
@@ -182,6 +185,7 @@ export class VendorAuthService {
     const ttlHours = Number(this.config.get<string>('auth.verifyEmailTtlHours') ?? 24);
     const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
 
+    let acceptedInvitationId: string | null = null;
     const registration = await this.prisma.$transaction(async (tx: any) => {
       const vendor = await tx.vendor.create({
         data: {
@@ -241,6 +245,16 @@ export class VendorAuthService {
         data: { vendorUserId: vendorUser.id, tokenHash, expiresAt },
       });
 
+      // 2026-08-24: if the registrant arrived from a registry invitation, mark
+      // it converted inside THIS transaction, so a conversion can never be
+      // recorded against a registration that rolled back. markAccepted never
+      // throws — a broken invite link must not block a supplier signing up.
+      if (dto.inviteToken) {
+        acceptedInvitationId = await this.invitations.markAccepted(
+          tx, dto.inviteToken, vendor.id, vendorUser.id, dto.email,
+        );
+      }
+
       return req;
     });
 
@@ -260,7 +274,28 @@ export class VendorAuthService {
       verifyUrl,
     });
 
+    // 2026-08-24: record the conversion AFTER the transaction commits —
+    // AuditService.log() opens its own transaction and takes an advisory lock,
+    // so nesting it inside one deadlocks.
+    if (acceptedInvitationId) {
+      await this.audit.log({
+        eventType: 'VENDOR_INVITATION_ACCEPTED',
+        entityType: 'VendorInvitation',
+        entityId: acceptedInvitationId,
+        riskLevel: AuditRiskLevel.LOW,
+        afterValue: { email: dto.email, registrationId: registration.id },
+      });
+    }
+
     return { registrationId: registration.id, status: 'PENDING_VERIFICATION' };
+  }
+
+  // -------------------------------------------------------- resolveInvite
+  // Public lookup for the registration page. Always resolves — an invalid,
+  // expired, revoked or already-used token returns { valid: false } rather than
+  // an error, so a broken link never blocks a prospective supplier.
+  async resolveInvite(rawToken: string) {
+    return this.invitations.resolveByToken(rawToken);
   }
 
   // ------------------------------------------------------------ verifyEmail

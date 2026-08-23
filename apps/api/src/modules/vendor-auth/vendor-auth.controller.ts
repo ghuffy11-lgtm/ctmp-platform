@@ -3,6 +3,7 @@ import {
   Post,
   Patch,
   Get,
+  Param,
   Body,
   HttpCode,
   HttpStatus,
@@ -88,6 +89,25 @@ export class VendorAuthController {
   @ApiOperation({ operationId: 'verifyVendorEmail', summary: 'Verify vendor email address' })
   verifyEmail(@Body() dto: VerifyEmailDto) {
     return this.vendorAuthService.verifyEmail(dto);
+  }
+
+  // 2026-08-24: resolve a registry-invitation token so /register can prefill.
+  //
+  // ALWAYS returns 200. An unknown, expired, revoked or already-used token
+  // resolves to { valid: false } — never an error — because the register page
+  // must degrade to an ordinary blank form rather than block a prospective
+  // supplier behind a broken link. Throttled because it is an anonymous
+  // token-probing surface, same reasoning as verify-email above.
+  @Public()
+  @Throttle({ short: { limit: 10, ttl: 60_000 }, long: { limit: 60, ttl: 3_600_000 } })
+  @Get('invite/:token')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    operationId: 'resolveVendorInvite',
+    summary: 'Resolve an invitation token for the registration form; always 200',
+  })
+  resolveInvite(@Param('token') token: string) {
+    return this.vendorAuthService.resolveInvite(token);
   }
 
   @Public()

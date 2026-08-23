@@ -83,4 +83,23 @@ export class VendorRegisterDto {
   @Type(() => VendorRegistrationDocumentRef)
   @ArrayMaxSize(20)
   documents: VendorRegistrationDocumentRef[];
+
+  // 2026-08-24: raw token from /register?invite=… when the supplier arrived from
+  // a registry invitation.
+  //
+  // TRANSFORMED, NOT VALIDATED, on purpose. A @Matches() here would turn a
+  // mangled or truncated link into a 400 on submit — blocking a registration,
+  // which is the one thing this feature must never do. Anything that is not a
+  // well-formed token is silently dropped and the registration proceeds as an
+  // ordinary self-registration.
+  @ApiPropertyOptional({
+    description: 'Invitation token. Ignored if unknown, expired, revoked or already used.',
+  })
+  @Transform(({ value }) => {
+    const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return /^[0-9a-f]{64}$/.test(v) ? v : undefined;
+  })
+  @IsOptional()
+  @IsString()
+  inviteToken?: string;
 }
