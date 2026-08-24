@@ -294,14 +294,14 @@ per boot, none actioned. The repair tooling (`008_audit_chain_rebake_2026-05-23.
 ## 🔴 Backup and data-loss exposure (2026-08-24)
 
 Found while writing the backup runbook. The nightly backup **had never run** — the script was mode
- and cron invokes it by path; the log held 61 permission failures and zero successes. Fixed,
-and the restore path is now proven (see ).
+`644` with no execute bit and cron invokes it by path; the log held 61 permission failures and zero
+successes. Fixed, and the restore path is now proven (see `docs/runbooks/BACKUP_RESTORE.md`).
 
 Three gaps remain, none solved:
 
-1. **No off-host copy.** Every dump sits on the machine it came from. Losing  or the host
+1. **No off-host copy.** Every dump sits on the machine it came from. Losing `/dev/sdb` or the host
    loses the database and all of its backups in the same moment.
-2. **No file-volume backup at all.**  covers the database only. Bid documents, tender
+2. **No file-volume backup at all.** `pg_dump` covers the database only. Bid documents, tender
    documents and award minutes live in Docker volumes and are backed up nowhere. A database-only
    restore produces rows pointing at files that no longer exist — for a platform whose bid documents
    are SHA-256-checksummed evidence, this is the bigger exposure.
