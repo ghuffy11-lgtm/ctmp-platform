@@ -291,6 +291,28 @@ per boot, none actioned. The repair tooling (`008_audit_chain_rebake_2026-05-23.
 `rebake-audit-chain.js`, the RCA) was deleted in the 2026-08-21 sync; recoverable at `b37170f`.
 **Production is unaffected** — `Audit chain verified — 41 rows OK`.
 
+## 🔴 Backup and data-loss exposure (2026-08-24)
+
+Found while writing the backup runbook. The nightly backup **had never run** — the script was mode
+ and cron invokes it by path; the log held 61 permission failures and zero successes. Fixed,
+and the restore path is now proven (see ).
+
+Three gaps remain, none solved:
+
+1. **No off-host copy.** Every dump sits on the machine it came from. Losing  or the host
+   loses the database and all of its backups in the same moment.
+2. **No file-volume backup at all.**  covers the database only. Bid documents, tender
+   documents and award minutes live in Docker volumes and are backed up nowhere. A database-only
+   restore produces rows pointing at files that no longer exist — for a platform whose bid documents
+   are SHA-256-checksummed evidence, this is the bigger exposure.
+3. **No agreed RPO.** Nightly dumps imply up to ~24 hours of acceptable loss; nobody has confirmed
+   that is acceptable.
+
+Worth deciding on (1) and (2) before go-live rather than after.
+
+**Unrelated but same host and time-critical: the TLS certificate expires 2026-09-16.** When it
+lapses both portals stop serving.
+
 ## Pending backlog
 
 ### Documentation
@@ -300,8 +322,12 @@ per boot, none actioned. The repair tooling (`008_audit_chain_rebake_2026-05-23.
 - **`VENDOR_GUIDE.md` reaches nobody automatically.** `seed_role_guides.sh` maps only the seven
   internal roles; vendors get no role-guide attachment. If suppliers are meant to receive that
   guide, there is no mechanism for it today.
-- Backup/restore runbook and an on-prem deployment runbook are both still unwritten
-  (`scripts/backup_ctmp_db.sh` exists; the procedure around it does not).
+- ~~Backup/restore runbook~~ **written 2026-08-24** — `docs/runbooks/BACKUP_RESTORE.md`, with a
+  restore actually performed and verified (row counts, audit hash chain, migration 057 objects).
+  Writing it uncovered that the nightly backup had **never run** (script was mode 644; 61 log lines,
+  61 permission failures, 0 successes). Fixed.
+- **An on-prem deployment runbook is still unwritten**, and `docs/runbooks/admin-prod-deploy.md`
+  still says to build on the production host, which has no internet egress.
 
 ### Testing
 - `qa/playwright/tests/commercial-terms.spec.ts` was written but **has never executed** — this box

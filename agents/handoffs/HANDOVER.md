@@ -6,6 +6,85 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-24 — 🔴 The nightly production backup had NEVER run. Fixed, and the restore is now proven.
+
+**Date/time:** 2026-08-24 · admin host `10.1.27.99` · **found while writing the backup runbook**
+
+### The finding
+
+`backups/backup.log` on production: **61 lines, 61 of them `Permission denied`, zero successes.**
+
+`scripts/backup_ctmp_db.sh` was mode **`644`** — no execute bit — and cron invokes it by absolute
+path. It has failed every single night since it was installed and has **never produced a dump**.
+
+The only dumps that existed were:
+- `ctmp-20260806-155349.dump` and `ctmp-20260807-094627.dump` — from manual runs in early August
+- four `ctmp_pre*.dump` files that **I** happened to take before each deploy this week
+
+So production's real backup coverage was accidental. Had the host been lost before 2026-08-21, the
+most recent recoverable state would have been **2026-08-07**.
+
+**Why nobody noticed:** the failure wrote to a log nobody read, and `PRODUCTION_OPERATIONS.md`
+described the backup as though it worked. A cron that has never succeeded is indistinguishable from
+one that simply has not run yet unless you open the log.
+
+### Fixed
+
+`chmod +x` on the host, and the mode corrected in git (`100644 → 100755`) so a fresh rsync or
+checkout cannot reintroduce it. Then ran the exact cron command: **exit 0, `ok: 236K`**, dump
+written. The 14-day prune correctly removed the two August dumps that had aged out.
+
+Production now has `ctmp-20260824-201337.dump` (233 KB) plus the four manual pre-deploy dumps, which
+the prune leaves alone because they are named `ctmp_pre*` and it only matches `ctmp-*`.
+
+### The restore is no longer theoretical
+
+**First restore ever performed on this system.** Done safely: a fresh production dump restored into
+a throwaway `ctmp_restore_test` database on dev, so neither live database was touched.
+
+| Check | Source (prod) | Restored |
+|---|---|---|
+| users / roles / permissions / audit_logs / templates | `4 / 15 / 78 / 41 / 12` | identical ✅ |
+| Audit chain first…last hash | `cc03a36cd0e1 … 0fabffc308e7` | identical ✅ |
+| `hash_chain_value` NULLs | 0 | 0 ✅ |
+| Migration `057` objects | present | `vendor_invitations` + both unique indexes ✅ |
+
+`pg_restore` exited 0 with no warnings. The scratch database was dropped and the staged dumps
+removed from both hosts afterwards — dev is back to `ctmp` + `postgres` only.
+
+The audit-chain check matters most: if the hash chain did not survive a restore, the backup would be
+useless for a system whose compliance case rests on it.
+
+### Runbook written
+
+`docs/runbooks/BACKUP_RESTORE.md`. Structured around what can be verified:
+- **§2 Check it is running** — the monthly check that would have caught this, with the real failure
+  quoted so the symptom is recognisable.
+- **§3 Restore into a scratch database** — non-destructive, quarterly, and the procedure I actually
+  executed, with the observed results in the runbook.
+- **§4 Restore over the live database** — marked **NOT YET REHEARSED** against production, because
+  it has not been. Ends with the audit-chain boot check as the real pass/fail.
+
+### Gaps recorded rather than glossed
+
+1. **No off-host copy.** Every dump sits on the machine it came from. Host loss takes the database
+   and all its backups together.
+2. **No file-volume backup at all.** `pg_dump` covers the database only; bid documents, tender
+   documents and award minutes live in Docker volumes. A DB-only restore yields rows pointing at
+   files that no longer exist — for a system whose bid documents are SHA-256-checksummed evidence,
+   this is the larger exposure of the two.
+3. §4 unrehearsed against production.
+4. No agreed RPO — nightly dumps imply up to ~24 hours of acceptable loss, which nobody has confirmed.
+5. **TLS cert expires 2026-09-16**, ~3 weeks out. Unrelated to backups, same host, will take both
+   portals down when it lapses.
+
+**Open questions:** whether to solve (1) and (2) before go-live. Both are real; neither is solved here.
+
+**Next recommended step:** decide on off-host copies and file-volume backup, and put the TLS renewal
+in someone's calendar.
+
+---
+
 ## 2026-08-24 — User guides refreshed; `seed_role_guides.sh` un-broken; role PDFs regenerated on dev **and production**
 
 **Date/time:** 2026-08-24 · commits `ca3b158` (script fix) + the guide edits before it
