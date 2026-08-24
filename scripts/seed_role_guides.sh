@@ -31,7 +31,27 @@ MAP=(
 )
 
 echo "==> installing marked"
-( cd "$W" && npm i --silent marked@12 >/dev/null 2>&1 )
+# 2026-08-24: this used to be `cd "$W" && npm i --silent marked@12 >/dev/null 2>&1`
+# and had been failing silently since 2026-06-28.
+#
+# $W lives under /tmp. With no package.json of its own, npm walks UP looking for
+# a project root, finds the /tmp/package.json that a previous ROOT run of this
+# very script left behind, adopts /tmp as the root, and then cannot write
+# /tmp/package-lock.json because root owns it. EACCES, exit 243 — and the
+# >/dev/null 2>&1 threw the reason away, so the script carried on and produced
+# no PDFs while appearing to succeed.
+#
+# Two fixes: give npm its own package.json so it never walks up (and skip the
+# lockfile entirely), and stop swallowing the error.
+printf '{"name":"ctmp-role-guides","private":true,"version":"0.0.0"}\n' > "$W/package.json"
+if ! ( cd "$W" && npm i --silent --no-package-lock --no-audit --no-fund marked@12 ); then
+  echo "ERROR: could not install 'marked'. The build box needs npm registry access." >&2
+  exit 1
+fi
+if [[ ! -d "$W/node_modules/marked" ]]; then
+  echo "ERROR: 'marked' did not install into $W/node_modules — refusing to continue." >&2
+  exit 1
+fi
 
 cat > "$W/conv.js" <<'JS'
 const { marked } = require('marked');
