@@ -6,6 +6,89 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-24 — 🔴 Root cause of every audit chain break found: `Decimal` was never canonicalised
+
+**Date/time:** 2026-08-24 · started as three UI defects in the tender Audit Trail tab
+
+Owner pointed at the Audit Trail tab and said something was wrong there. I had been analysing the
+database and missed what was on the screen. Looking at the tab found three display defects — and
+chasing the third uncovered why this system's audit chain has been breaking since May.
+
+### The three tab defects
+
+**1. Every row read `Invalid Date`.** The API returns `eventTime`; the UI interface declared
+`timestamp` and read `a.timestamp`, so `new Date(undefined)` → `Invalid Date` on every audit row
+ever displayed. TypeScript could not catch it: the response is cast to `AuditRow` at the fetch
+boundary, so the compiler believed the declaration over the payload. **A compliance record in which
+no entry had a readable date.**
+
+**2. Tender edits showed the actor as `system`.** `PATCH /tenders/:id` never took `@CurrentUser`, so
+`update()` had no actor and wrote the row unattributed; the tab renders `actorName ?? 'system'`.
+A person changing a budget or deadline displayed as *the system* having done it — worse than blank,
+because it asserts something untrue. Three such rows on `TDR-2026-0019` alone. Fixed forward;
+historical rows stay unattributed, because the actor was never captured and I will not write a
+plausible name into an append-only record to tidy a screen.
+
+**3. `actor_role_code` was NULL on all 1105 rows.** Column existed, DTO declared it, serializer
+emitted it, UI had markup for it — nothing ever wrote a value. So the trail could say *who* acted
+and never *in what capacity*, which is precisely the separation-of-duties question. Now resolved
+once inside `AuditService.log()` rather than at ~50 call sites, recording the roles held at the
+time, comma-joined so multiple roles are represented honestly rather than arbitrarily.
+
+Corrected one of my own earlier claims while here: `getTenderLogs` does **not** use a different
+serializer. Same one — `actorRole` was simply absent from the JSON because `JSON.stringify` drops
+`undefined` keys.
+
+### Then the chain broke, and it was not my change
+
+After deploying, I created a tender and edited it to prove attribution worked. It did — and the next
+boot reported `AUDIT CHAIN BREAK at row id=1108`, the row I had just written.
+
+**`canonicalize()` handles `Date` and `Buffer`. It never handled `Prisma.Decimal`.** Proven in the
+container:
+
+```
+write path  canonicalize(Decimal) -> {"constructor":undefined,"d":[1000],"e":3,"s":1}
+Prisma writes it to JSONB as       -> 1000            (jsonb_typeof = number)
+verify path canonicalize(1000)     -> 1000
+```
+
+Different strings, different hashes, **chain break every single time an audited payload carried a
+money field.**
+
+This is the identical asymmetry the 2026-05-23 RCA documented for `Date`. That fix added an
+`instanceof Date` branch and missed `Decimal`.
+
+**It explains the whole history.** Row 218 — the original dev break — is a `TENDER_UPDATED` carrying
+`estimatedBudget`. So are rows 633, 673, 676. Rebaking in May and again this morning corrected the
+*stored hashes* but never the *write path*, so the very next tender edit broke it again. Three
+months of `CRITICAL` alerts, one unfixed line.
+
+Migration `055` widened the money columns to `numeric(16,3)`, so there are **more** Decimals in play
+now, not fewer.
+
+**Fix:** a `Prisma.Decimal.isDecimal` branch emitting the number. Only the write path is affected —
+on the verify path values have already been through JSONB and arrive as plain numbers, so the branch
+never fires there. That is why existing rebaked rows stay valid.
+
+**Verified by reproducing it:** created a tender with `estimatedBudget: 12345.678`, edited it to
+`99999.999`, restarted the API. `Audit chain verified — 1000 rows OK (id 111..1111)`. Before the fix
+the identical sequence broke the chain immediately. **First time a money-bearing tender edit has
+survived verification on this system.** Test tenders purged afterwards; audit rows preserved.
+
+### ⚠️ Production is exposed
+
+Production's chain verifies clean **only because it holds zero tenders.** No audited payload there
+has ever contained a money value.
+
+**The first launch tender with an estimated budget will break production's audit chain on the first
+edit** — on a system whose compliance case rests on that chain. The fix is on dev and **not yet on
+production**.
+
+**Next recommended step:** ship this to production *before* the launch tender, not after.
+
+---
+
 ## 2026-08-24 — Punch-list batch: native dialogs, dead auth config, deploy runbook, harness into the repo
 
 **Date/time:** 2026-08-24 · items 9–12 of the consolidated list · **dev only, nothing on production**
