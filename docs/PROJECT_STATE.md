@@ -16,12 +16,13 @@ bid submission (sealed technical + commercial envelopes) → technical evaluatio
 commercial opening → commercial comparison → optional negotiation → award recommendation → award →
 close, with a hash-chained audit trail throughout.
 
-**As of 2026-08-23 dev and production are in step.** Identical schemas, everything through migration
+**As of 2026-08-24 dev and production are in step.** Identical schemas, everything through migration
 `056` on both, and nothing queued. The Arabic management area shipped to production on 2026-08-21
 with migrations `054` and `055`; the three fixes found by the end-to-end lifecycle test — the
 APPROVED dead end, `procurementType` enum enforcement, and the vendor portal's browser-native
 dialogs — shipped on 2026-08-22 with migration `056`; and the approve / reject / envelope-opening
-justification requirements shipped on 2026-08-23.
+justification requirements shipped on 2026-08-23; and supplier registry invitations, with migration
+`057`, on 2026-08-24.
 
 **Next step is go-live.** The owner creates the first tender in the live system, walks it through,
 and the platform enters service. `docs/qa/PRODUCTION_LIFECYCLE_TEST.md` is the runbook; read the
@@ -293,8 +294,12 @@ per boot, none actioned. The repair tooling (`008_audit_chain_rebake_2026-05-23.
 ## Pending backlog
 
 ### Documentation
-- `docs/user-guides/VENDOR_GUIDE.md` step 6 predates Commercial Terms — refresh it, then re-run
-  `scripts/seed_role_guides.sh` so the generated role-guide PDFs match.
+- ~~VENDOR_GUIDE step 6 / role-guide PDFs~~ **done 2026-08-24.** Commercial Terms and the
+  invitation path added; `seed_role_guides.sh` fixed (it had been failing silently since
+  2026-06-28) and re-run against **dev and production**.
+- **`VENDOR_GUIDE.md` reaches nobody automatically.** `seed_role_guides.sh` maps only the seven
+  internal roles; vendors get no role-guide attachment. If suppliers are meant to receive that
+  guide, there is no mechanism for it today.
 - Backup/restore runbook and an on-prem deployment runbook are both still unwritten
   (`scripts/backup_ctmp_db.sh` exists; the procedure around it does not).
 

@@ -6,6 +6,77 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-24 — User guides refreshed; `seed_role_guides.sh` un-broken; role PDFs regenerated on dev **and production**
+
+**Date/time:** 2026-08-24 · commits `ca3b158` (script fix) + the guide edits before it
+
+**Files:** `docs/user-guides/VENDOR_GUIDE.md`, `docs/user-guides/MANAGER_TENDER_LIFECYCLE_GUIDE.md`,
+`docs/PROJECT_STATE.md`, `scripts/seed_role_guides.sh`.
+
+### The guides
+
+- **VENDOR_GUIDE step 6** now documents **Commercial Terms** — the tracked backlog gap. Field names
+  were read out of `CommercialTermsCard.tsx` and placed on the **Commercial Pricing** step, where
+  `Step2BoqPricing` actually renders them, rather than guessed. States the thing a supplier needs:
+  the fields never block submission, but a blank warranty reads as "not offered" at comparison time.
+- **VENDOR_GUIDE step 1** covers arriving from an invitation — prefilled form, why the email field
+  is locked, and what to do when the link is dead (*carry on and register anyway*).
+- **MANAGER guide §3b** is new: inviting a company that is not on the platform yet. Includes the
+  distinction people will get wrong — a **registry** invitation is not inviting a registered vendor
+  to a tender — plus one-live-invite-per-address, resend killing the old link, and the rate limits.
+- **PROJECT_STATE** — "there is no scheduler" now reads "no scheduler **in the application**". Two
+  OS cron jobs exist on the admin host; the flat claim could be read as nothing running on a timer.
+
+### `seed_role_guides.sh` had been failing silently since 2026-06-28
+
+The tracked item *"refresh the guide, then re-run `seed_role_guides.sh`"* **could not have been
+completed as written.** The script exits **243**, produces no PDFs, and looks like it succeeded.
+
+`$W` is a `mktemp -d` under `/tmp` with no `package.json`, so npm walks **up** for a project root,
+finds `/tmp/package.json` — left by a previous **root run of this same script on 2026-06-28** —
+adopts `/tmp` as the root, and cannot write the root-owned `/tmp/package-lock.json`. `EACCES`.
+**The script's own leftovers had been blocking it for two months.**
+
+What hid it was `>/dev/null 2>&1` on the npm line: the error was discarded, the script continued,
+chrome rendered nothing, and both environments kept 28-June PDFs while every re-run reported
+success. My own first check reported `EXIT=0` because I had piped to `tail` and read *tail's* exit
+code — worth remembering when a script is "passing".
+
+**Fixed** by writing a `package.json` into `$W` so npm never walks up, adding `--no-package-lock`,
+**no longer swallowing the output**, and asserting `marked` actually landed so a future failure
+stops instead of quietly producing nothing.
+
+**The stray `/tmp` files were deliberately left alone.** They are root-owned on a box shared with
+`citelify`, `hadi-intranet` and `oriciety`. Fixing the script beats reaching into shared `/tmp`.
+
+### Regenerated — both environments
+
+| | Before | After |
+|---|---|---|
+| Dev `ctmp-api:/data/role-guides` | 7 PDFs dated **28 Jun** | 7 dated **24 Aug 16:07** |
+| **Production** `ctmp-api:/data/role-guides` | 7 PDFs dated **28 Jun** | 7 dated **24 Aug 16:10** |
+
+`PROCUREMENT_ADMIN.pdf` grew 293 KB → 313 KB on both. Verified by **extracting the text with
+`pdftotext`**, not by trusting the size: the string *"Inviting a supplier who is not on the platform
+yet"* is present in the **production** file. Both hosts' `/tmp` scratch files cleaned up afterwards
+— the same debris class that caused the original breakage.
+
+### Worth knowing: the vendor guide does not ship as a PDF
+
+`seed_role_guides.sh` maps only the seven **internal** roles. `VENDOR_GUIDE.md` is mapped to
+nothing, because vendors are not internal users and get no role-guide welcome attachment. So the
+Commercial Terms and invitation additions to that guide live in the repo only — they reach a
+supplier only if someone sends the file. If suppliers are meant to receive it, that is a gap with no
+mechanism behind it today.
+
+**Open questions:** none.
+
+**Next recommended step:** the backup/restore runbook — nightly dumps exist and have never been
+restored from — and promoting the lifecycle/invitation harness out of the session scratchpad into
+`qa/playwright`.
+
+---
+
 ## 2026-08-24 — Invitation retention cron installed on production
 
 **Date/time:** 2026-08-24 · admin host `10.1.27.99` · **persistent configuration change**
