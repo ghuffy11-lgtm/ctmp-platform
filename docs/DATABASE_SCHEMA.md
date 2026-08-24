@@ -44,11 +44,7 @@ exposed the earlier claim here as wrong:
 `056` on 2026-08-22; dev and production report an identical 571 columns with identical types,
 verified by comparing `table_name.column_name:data_type(precision,scale)` across both hosts.
 
-**Dev is at `057`, production at `056`.** Migration `057` (vendor registry invitations) is
-**dev-only pending owner sign-off**. It adds the `vendor_invitations` table, the
-`vendor_invitation_status` enum, the `vendor:invite` permission and the
-`VENDOR_REGISTRY_INVITATION` email template. Unlike `056`, this one **is** visible to the
-column-comparison query below, because it creates a table — expect drift to report until it ships.
+**Both environments are at migration `057`** (production 2026-08-24). It adds the `vendor_invitations` table, the `vendor_invitation_status` enum, the `vendor:invite` permission and the `VENDOR_REGISTRY_INVITATION` email template.
 
 Three constraints in `057` exist in SQL only and have no Prisma expression: the partial unique
 index `uq_vendor_invitations_pending_email` (one live invitation per address) and the three

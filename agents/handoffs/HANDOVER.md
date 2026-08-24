@@ -6,6 +6,80 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-24 — Supplier registry invitations SHIPPED TO PRODUCTION (both hosts) + migration `057`
+
+**Date/time:** 2026-08-24 · images `*:prod-20260824` · **all three images + a migration**
+
+First deploy in this run to touch every service and the schema at once.
+
+**Pre-flight caught the real risk.** The build box was at **99% disk, 1.6 GB free** — precisely the
+condition that has previously produced a silently stale image here (build succeeds against partial
+source, container restarts on old code). Nothing was built until it was cleared:
+
+1. `docker builder prune -f` → 1.5 GB, still only 3.0 GB free. Not enough for three builds.
+2. `docker image prune -f` (dangling only) → 0 B.
+3. `image prune -a` is **forbidden** by `AI_DECISION_LOG.md` §1 — it would take other projects'
+   images and the rollback tags. So instead: **confirmed first** that every `rollback-*` image
+   exists on its own production host, then removed only the superseded CTMP `prod-*` build
+   artifacts from the **build box** (10 tags). Nothing belonging to `hadi-intranet`, `oriciety`,
+   `pharmacy`, flutter or playwright was touched.
+4. → **8.9 GB free.** Builds proceeded, with a further cache prune between the api and admin builds.
+
+**Deploy sequence:**
+1. `pg_dump` → `/var/lib/docker/ctmp-platform/backups/ctmp_pre057_20260824.dump` (226 KB).
+2. Rollback tags on both hosts: `ctmp-api:rollback-20260824` (`2a5e556`),
+   `ctmp-web-admin:rollback-20260824` (`880912c`), `ctmp-web-vendor:rollback-20260824` (`7b6e6f2`).
+3. Built all three with explicit prod build-args, tagged `prod-20260824`.
+4. **Build-arg gate before transfer** — admin 43 prod-origin / **11** `localhost:3000`; vendor 27 /
+   **3**, real hCaptcha key present, test key absent. Both fingerprints unchanged since 2026-08-21.
+5. **Feature confirmed inside the images before shipping them:** `Invite a supplier` in the admin
+   bundle, `You were invited to register` in the vendor bundle.
+6. Transferred `docker save | gzip -1 | ssh | docker load`.
+7. **Migration `057` applied before cutover** — it is purely additive (new table, enum, permission,
+   template), so the running old code was unaffected by it in the gap.
+8. Retagged → `latest`, `up -d --no-build --force-recreate`.
+
+**Verified after cutover:**
+- Running image IDs equal their `prod-20260824` tags: api `2c7a6bc`, web-admin `e5c22db`,
+  web-vendor `422a7aa`.
+- All five admin containers and both vendor containers up; `ctmp-api` healthy.
+- Admin `/api/v1/health`, `/login`, `/vendors`, `/approvals` → **200**.
+- Vendor `/`, `/login`, `/register` and the proxied `/api/v1/health` → **200**.
+- API boot clean: `POST /api/vendor-invitations` route mapped,
+  **`Audit chain verified — 41 rows OK`**, `CAPTCHA provider: hCaptcha (production)`, no errors.
+- **`vendor:invite` granted to exactly** `SYSTEM_ADMIN`, `PROCUREMENT_ADMIN`, `PROCUREMENT_OFFICER`.
+- The unique index on production is confirmed **partial**: `WHERE (status = 'PENDING')`.
+- `VENDOR_REGISTRY_INVITATION` template present and `is_active = true`.
+- **The whole invited path works through the DMZ:** `GET /register?invite=…` → 200, and the public
+  lookup proxied vendor→admin returns `{"valid":false}` at **HTTP 200** for a bad token — degrading
+  to a normal registration form exactly as designed.
+
+**Deliberately NOT done: no test invitation was sent on production.**
+`notifications.email_override` is **empty** there — correctly, for a live system — so any invitation
+would reach a real inbox. The send path was exercised thoroughly on dev instead (including the
+rendered email and HTML escaping). The first production invitation should be one the owner actually
+means to send.
+
+**Production now at:** `ctmp-api:prod-20260824`, `ctmp-web-admin:prod-20260824`,
+`ctmp-web-vendor:prod-20260824`, schema **`057`**. Dev and production are level again.
+
+**Rollback:** retag the three `rollback-20260824` images to `:latest` and recreate with
+`--no-build`. **Migration `057` needs no reversal** — it only adds a table, an enum, a permission
+and a template; the previous images ignore all four. Drop the table only if the feature is being
+abandoned outright.
+
+**Follow-up not yet done:** add the weekly purge cron beside the nightly backup on the admin host,
+once the owner is happy with the retention behaviour:
+`30 2 * * 0 /var/lib/docker/ctmp-platform/scripts/purge_vendor_invitations.sh --confirm`.
+The script itself is proven — tested on dev against all four invitation states.
+
+**Open questions:** none.
+
+**Next recommended step:** send the first real invitation from Vendors → Invitations and watch it
+arrive. Then the production launch tender.
+
+---
+
 ## 2026-08-24 — Supplier registry invitations (DEV) — migration `057`
 
 **Date/time:** 2026-08-24 · commits `4ac4fab` (backend), frontend + seed/purge follow-ups

@@ -1,6 +1,6 @@
 # CTMP — Project State
 
-**As of 2026-08-23.** Reconciled against the working tree, the running dev containers, and the
+**As of 2026-08-24.** Reconciled against the working tree, the running dev containers, and the
 production hosts (image tags, schema comparison). Where a claim could be checked, it was checked.
 
 ---
@@ -52,21 +52,24 @@ at commit `b37170f`.
 
 | Environment | URL | Schema | Images |
 |---|---|---|---|
-| Production admin | `https://ctmp.hadiclinic.com.kw:4202` (`10.1.27.99`) | through `056` | `ctmp-api:prod-20260823`, `ctmp-web-admin:prod-20260823` |
-| Production vendor | `https://vn.hadiclinic.com.kw:4201` (`172.16.4.11`) | (uses admin DB) | `ctmp-web-vendor:prod-20260822` |
-| Dev / build box | admin `:4202` / vendor `:4201` on `10.1.13.98` | through `056` | api + web-admin rebuilt 2026-08-22 (justification fixes) |
+| Production admin | `https://ctmp.hadiclinic.com.kw:4202` (`10.1.27.99`) | through `057` | `ctmp-api:prod-20260824`, `ctmp-web-admin:prod-20260824` |
+| Production vendor | `https://vn.hadiclinic.com.kw:4201` (`172.16.4.11`) | (uses admin DB) | `ctmp-web-vendor:prod-20260824` |
+| Dev / build box | admin `:4202` / vendor `:4201` on `10.1.13.98` | through `057` | all three rebuilt 2026-08-24 (registry invitations) |
 
-Running image IDs confirmed equal to their tags after each cutover: `prod-20260823` api `2a5e556`,
-web-admin `880912c`; `prod-20260822` web-vendor `7b6e6f2` (unchanged since).
+Running image IDs confirmed equal to their `prod-20260824` tags after cutover: api `2c7a6bc`,
+web-admin `e5c22db`, web-vendor `422a7aa`.
 
-**Schema drift, dev vs prod: none.** Both at migration `056`. Note that `056` is data-only — three
-`UPDATE`s and a `COMMENT`, no DDL — so the column-by-column comparison below reports zero difference
-whether or not it has been applied and **cannot be used to detect it**. Check `tender_type` values
-and the column comment directly instead.
+**Schema drift, dev vs prod: none.** Both at migration `057`.
 
-**Latest rollback point (admin host):** `ctmp-api:rollback-20260823` (`d4da4f1`),
-`ctmp-web-admin:rollback-20260823` (`4ef283b`) — cut before the 2026-08-23 deploy, equal to the
-`prod-20260822` images. Pre-deploy dump: `backups/ctmp_pre_20260823.dump`.
+Two migrations here are worth remembering when reading a drift report: `056` is **data-only** (three
+`UPDATE`s and a `COMMENT`) so the column comparison cannot see it at all, whereas `057` creates a
+table and therefore can be seen.
+
+**Latest rollback point:** `ctmp-api:rollback-20260824` (`2a5e556`),
+`ctmp-web-admin:rollback-20260824` (`880912c`) on admin; `ctmp-web-vendor:rollback-20260824`
+(`7b6e6f2`) on vendor — all cut before the 2026-08-24 deploy. Pre-deploy dump:
+`backups/ctmp_pre057_20260824.dump`. Migration `057` needs no reversal to roll back: it only adds a
+table, an enum, a permission and a template, all of which the previous images ignore.
 
 **Earlier rollback tags:** `ctmp-api:rollback-20260822` (`0c01cc9`),
 `ctmp-web-admin:rollback-20260822` (`51eaa66`) on admin; `ctmp-web-vendor:rollback-20260822`
@@ -211,7 +214,7 @@ operate.
 > the grants. Recorded rather than quietly deleted, because inferring permissions from role names
 > is exactly the mistake this table exists to prevent.
 
-## 🟢 Shipped to dev 2026-08-24 — supplier registry invitations (awaiting sign-off)
+## 🟢 Shipped to production 2026-08-24 — supplier registry invitations
 
 Procurement can now invite a company that has **no vendor record yet** to register. Previously the
 only route onto the platform was unsolicited self-registration; `tender_vendors` could not express
@@ -239,8 +242,9 @@ invitation `PENDING`; the purge deletes revoked and stale rows while keeping acc
 **no invitation audit row contains a token** (the 187 audit rows holding 64-hex strings are all
 document SHA-256 checksums).
 
-**Not yet done:** production rollout (needs migration `057` applied by hand first), and a
-browser-driven pass over the two new UI surfaces.
+**In production since 2026-08-24** (`prod-20260824`, migration `057` applied to both environments).
+**Not yet done:** a browser-driven pass over the two UI surfaces, the first real invitation, and the
+weekly purge cron on the admin host.
 
 ## Defects found by the 2026-08-22 dev lifecycle run
 
