@@ -43,7 +43,12 @@ psql_q() {
 
 WHERE="status = 'REVOKED' OR (status = 'PENDING' AND expires_at < now() - interval '${RETENTION_DAYS} days')"
 
-printf '\n\033[1mVendor invitation purge\033[0m\n'
+# Colour only for a human at a terminal. Under cron this appends to a log file,
+# where escape codes are just noise for whoever reads it months later. The
+# timestamp matters for the same reason: a log of weekly runs needs to say when.
+if [[ -t 1 ]]; then B=$'\033[1m'; R=$'\033[0m'; else B=''; R=''; printf '\n===== %s =====\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"; fi
+
+printf "\n${B}Vendor invitation purge${R}\n"
 printf '  host:      %s\n' "${SSH_ALIAS:-local}"
 printf '  retention: %s days past expiry\n\n' "$RETENTION_DAYS"
 
@@ -53,18 +58,18 @@ STALE=$(psql_q "SELECT count(*) FROM vendor_invitations WHERE status = 'PENDING'
 KEPT=$(psql_q "SELECT count(*) FROM vendor_invitations WHERE status = 'ACCEPTED';")
 DOOMED=$(psql_q "SELECT count(*) FROM vendor_invitations WHERE ${WHERE};")
 
-printf '\033[1mWILL DELETE\033[0m\n'
+printf "${B}WILL DELETE${R}\n"
 printf '  revoked                    %s\n' "$REVOKED"
 printf '  expired > %-3s days         %s\n' "$RETENTION_DAYS" "$STALE"
 printf '  ---------------------------------\n'
 printf '  total                      %s\n\n' "$DOOMED"
-printf '\033[1mWILL KEEP\033[0m\n'
+printf "${B}WILL KEEP${R}\n"
 printf '  accepted (real suppliers)  %s\n' "$KEPT"
 printf '  audit_logs                 untouched — append-only, hash-chained\n'
 printf '  table total before         %s\n\n' "$TOTAL"
 
 if [[ "$CONFIRM" != "--confirm" ]]; then
-  printf '\033[1mDRY RUN — nothing was changed.\033[0m\n'
+  printf "${B}DRY RUN — nothing was changed.${R}\n"
   printf 'Re-run with --confirm to delete.\n\n'
   exit 0
 fi
@@ -77,5 +82,5 @@ fi
 psql_q "DELETE FROM vendor_invitations WHERE ${WHERE};" >/dev/null
 AFTER=$(psql_q "SELECT count(*) FROM vendor_invitations;")
 
-printf '\033[1mDONE\033[0m\n'
+printf "${B}DONE${R}\n"
 printf '  rows remaining: %s (expected %s)\n\n' "$AFTER" "$((TOTAL - DOOMED))"

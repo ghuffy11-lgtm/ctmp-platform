@@ -243,8 +243,8 @@ invitation `PENDING`; the purge deletes revoked and stale rows while keeping acc
 document SHA-256 checksums).
 
 **In production since 2026-08-24** (`prod-20260824`, migration `057` applied to both environments).
-**Not yet done:** a browser-driven pass over the two UI surfaces, the first real invitation, and the
-weekly purge cron on the admin host.
+**Not yet done:** a browser-driven pass over the two UI surfaces, the first real invitation.
+The weekly retention cron is installed on the admin host (Sundays 02:30).
 
 ## Defects found by the 2026-08-22 dev lifecycle run
 

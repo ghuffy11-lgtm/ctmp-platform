@@ -6,6 +6,48 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-24 — Invitation retention cron installed on production
+
+**Date/time:** 2026-08-24 · admin host `10.1.27.99` · **persistent configuration change**
+
+Closes the follow-up left open by the `prod-20260824` deploy.
+
+**Installed** in the `claude` crontab on the admin host, **appended** so the existing 01:15 nightly
+`backup_ctmp_db.sh` line was preserved (confirmed still present afterwards):
+
+```cron
+30 2 * * 0 /var/lib/docker/ctmp-platform/scripts/purge_vendor_invitations.sh --confirm \
+  >> /var/lib/docker/ctmp-platform/backups/invite-purge.log 2>&1
+```
+
+Sunday 02:30, clear of the 01:15 backup. Deletes `REVOKED` invitations and `PENDING` ones more than
+90 days past expiry; keeps `ACCEPTED`, which link to real suppliers. Never touches `audit_logs`.
+
+**The script was not on the production host** — it postdated the last rsync — so it was transferred
+first. Worth remembering for any future cron: a line pointing at a script that is not there yet
+gives you a weekly silent failure, not a purge.
+
+**Verified before trusting it to cron:**
+- Ran on production by hand → correct output against the (empty) live table.
+- **Ran under `env -i`**, an empty environment, to mimic cron's minimal `PATH` — `docker` still
+  resolved, exit 0. That is the classic way a script that works by hand becomes a silent weekly
+  failure.
+- Ran the **exact cron command string**, redirect included, into the real log file. Exit 0.
+- `systemctl is-active cron` → `active`. Crontab confirmed to hold **1** purge entry and still
+  **1** backup entry.
+
+**One fix made while testing.** The log filled with ANSI escape codes, because the script coloured
+its headings unconditionally. Colour is now emitted only when stdout is a terminal, and a UTC
+timestamp header is written when it is not — a log accumulating weekly entries needs to say when
+each one ran. Confirmed **0** escape sequences in the live log afterwards.
+
+**Rollback:** `crontab -e` and delete the entry, or restore `/tmp/cron.bak`, written on the host
+immediately before the change. The script is inert unless invoked.
+
+**Open questions:** none. Nothing to purge yet — production holds zero invitations.
+
+---
+
 ## 2026-08-24 — Supplier registry invitations SHIPPED TO PRODUCTION (both hosts) + migration `057`
 
 **Date/time:** 2026-08-24 · images `*:prod-20260824` · **all three images + a migration**
