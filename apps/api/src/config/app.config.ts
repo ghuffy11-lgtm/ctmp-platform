@@ -12,10 +12,10 @@ export default registerAs('app', () => ({
   vendorPortalUrl: (process.env.VENDOR_PORTAL_URL ?? 'https://vn.hadiclinic.com.kw:4201').replace(/\/+$/, ''),
   // 2026-08-24: lifetime of a vendor-registry invitation link.
   //
-  // Deliberately lives here and NOT under an `auth` namespace: vendor-auth
-  // reads `auth.verifyEmailTtlHours` and `auth.resetPasswordTtlMinutes`, but
-  // there is no registerAs('auth') config file and none is loaded in
-  // app.module.ts — so those lookups always return undefined and silently fall
-  // back to their hardcoded defaults. Do not copy that idiom.
+  // Lives here rather than under `auth` because it is not an authentication
+  // parameter. (When this was written `auth.*` was a dead namespace — no
+  // registerAs('auth') existed and every lookup silently returned undefined.
+  // That was fixed the same day in auth.config.ts; the note is kept because it
+  // explains why this key is where it is.)
   vendorInviteTtlDays: parseInt(process.env.VENDOR_INVITE_TTL_DAYS ?? '14', 10),
 }));

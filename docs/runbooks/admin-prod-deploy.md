@@ -74,14 +74,43 @@ Copy `.env.admin-prod.example` → `.env.admin-prod` and fill in. Generate each 
 (`openssl rand -hex 32`) — do **not** reuse staging values. Set SMTP, `CAPTCHA_SECRET_KEY`, and the
 `ctmp.hadiclinic.com.kw:4202` URLs.
 
-### 5. Build + bring up
+### 5. Build on the build box, transfer, bring up with `--no-build`
+
+> **Corrected 2026-08-24.** This step used to say `docker compose … build` **on this host**. That
+> cannot work: `10.1.27.99` has **no internet egress** (one exception, `hcaptcha.com`), so it cannot
+> reach Docker Hub or npm and every build fails. It was written before the air-gap was in place and
+> nobody re-ran it afterwards. The real procedure — used for every deploy since June — is below.
+
+Build on the **build box** (`10.1.13.98`), which is the only machine with egress:
 
 ```bash
-docker compose --env-file .env.admin-prod -f docker-compose.admin-prod.yml -p ctmp build
-docker compose --env-file .env.admin-prod -f docker-compose.admin-prod.yml -p ctmp up -d
+# on the build box, from /mnt/repo/ctmp-platform
+sudo docker build -f infrastructure/docker/api.Dockerfile -t ctmp-api:prod-$(date +%Y%m%d) .
+sudo docker build -f infrastructure/docker/web-admin.Dockerfile \
+  --build-arg NEXT_PUBLIC_API_URL=https://ctmp.hadiclinic.com.kw:4202 \
+  -t ctmp-web-admin:prod-$(date +%Y%m%d) .
 ```
 
-Postgres auto-applies every `database/migrations/*.sql` on first init. Wait for health:
+> **`NEXT_PUBLIC_API_URL` must be passed explicitly.** It is inlined into the browser bundle at
+> build time; a bare build bakes `http://localhost:3000` and every browser then fails with "Failed
+> to fetch". Verify **before** transferring — the healthy fingerprint is ~43 hits for the prod
+> origin and exactly **11** residual `localhost:3000` in the admin bundle.
+
+Transfer and cut over:
+
+```bash
+sudo sh -c "docker save ctmp-api:prod-YYYYMMDD | gzip -1 | ssh cts-prod 'gunzip | docker load'"
+sudo ssh cts-prod "docker tag ctmp-api:prod-YYYYMMDD ctmp-api:latest && \
+  cd /var/lib/docker/ctmp-platform/infrastructure/docker && \
+  docker compose --env-file .env.admin-prod -f docker-compose.admin-prod.yml -p ctmp \
+    up -d --no-build --force-recreate api"
+```
+
+**Always `--no-build` on this host.** Cut a `rollback-YYYYMMDD` tag from the running image and take a
+`pg_dump` before starting — see `docs/runbooks/BACKUP_RESTORE.md`.
+
+On a **first** install only, postgres auto-applies `database/migrations/*.sql` at init. On an
+initialised database migrations do **not** auto-run; apply them by hand. Wait for health:
 
 ```bash
 docker compose --env-file .env.admin-prod -f docker-compose.admin-prod.yml -p ctmp ps

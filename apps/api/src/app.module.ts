@@ -14,6 +14,7 @@ import reportsConfig from './config/reports.config';
 import storageConfig from './config/storage.config';
 import auditConfig from './config/audit.config';
 import captchaConfig from './config/captcha.config';
+import authConfig from './config/auth.config';
 import { StorageModule } from './common/storage/storage.module';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -46,7 +47,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, jwtConfig, adConfig, reportsConfig, storageConfig, auditConfig, captchaConfig],
+      load: [appConfig, databaseConfig, jwtConfig, adConfig, reportsConfig, storageConfig, auditConfig, captchaConfig, authConfig],
       envFilePath: ['.env.local', '.env'],
     }),
     ThrottlerModule.forRoot([

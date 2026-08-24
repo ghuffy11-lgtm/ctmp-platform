@@ -215,8 +215,38 @@ export default function VendorsPage() {
 
   async function handleReject() {
     if (!selected) return;
-    const reason = prompt('Rejection reason (required for audit):');
-    if (!reason?.trim()) return;
+    // 2026-08-24: was a browser prompt(), the last two in the admin portal.
+    // DialogProvider has no text-input variant, but `body` takes a ReactNode —
+    // so the textarea is passed in and written to a closure variable rather
+    // than a ref, because the dialog unmounts as it resolves and a ref would be
+    // null by the time we read it.
+    const draft = { value: '' };
+    const ok = await confirm({
+      title: 'Reject vendor registration',
+      body: (
+        <div className="space-y-2">
+          <p>
+            Reject <strong>{selected.company}</strong>? They will not be able to bid. The reason is
+            written to the audit trail.
+          </p>
+          <textarea
+            autoFocus
+            rows={3}
+            placeholder="Reason for rejection (required)"
+            onChange={e => { draft.value = e.target.value; }}
+            className="w-full p-2 text-sm border border-border rounded-lg bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+        </div>
+      ),
+      confirmLabel: 'Reject vendor',
+      destructive: true,
+    });
+    if (!ok) return;
+    const reason = draft.value.trim();
+    if (!reason) {
+      setError('A rejection reason is required for the audit trail.');
+      return;
+    }
     setActionInFlight(true);
     setError(null);
     try {
@@ -232,8 +262,33 @@ export default function VendorsPage() {
 
   async function handleSuspend() {
     if (!selected) return;
-    const reason = prompt('Suspension reason (required for audit):');
-    if (!reason?.trim()) return;
+    const draft = { value: '' };
+    const ok = await confirm({
+      title: 'Suspend vendor',
+      body: (
+        <div className="space-y-2">
+          <p>
+            Suspend <strong>{selected.company}</strong>? They keep their account but cannot bid
+            until reinstated. The reason is written to the audit trail.
+          </p>
+          <textarea
+            autoFocus
+            rows={3}
+            placeholder="Reason for suspension (required)"
+            onChange={e => { draft.value = e.target.value; }}
+            className="w-full p-2 text-sm border border-border rounded-lg bg-bg focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+        </div>
+      ),
+      confirmLabel: 'Suspend vendor',
+      destructive: true,
+    });
+    if (!ok) return;
+    const reason = draft.value.trim();
+    if (!reason) {
+      setError('A suspension reason is required for the audit trail.');
+      return;
+    }
     setActionInFlight(true);
     try {
       const token = getAccessToken();
