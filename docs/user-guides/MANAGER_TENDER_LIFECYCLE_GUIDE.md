@@ -349,6 +349,53 @@ Final step:
 
 ---
 
+## 3b. Inviting a supplier who is not on the platform yet
+
+An *Invitation only* tender needs at least three **already-registered, approved** vendors before you
+can publish. If the company you want is not on the platform at all, invite them to join the registry
+first — this is separate from inviting a registered vendor to a tender, and it mentions no tender.
+
+**Vendors → Invitations → Invite a supplier.** Two fields:
+
+```
+Invite a supplier
+They receive an email explaining the portal and a link to register.
+Registration still needs your approval before they can bid.
+
+  Company name  [ ACME Trading Co.        ]
+  Email address [ sales@acme.com          ]        [ Send invite ]
+
+  The company name is used only in the email greeting.
+  It does not create a vendor record.
+```
+
+Available to **Procurement Admin, Procurement Officer and System Admin**. If you cannot see the tab,
+you were granted the permission after you signed in — log out and back in.
+
+**What happens next.** They get one email with a personal link, register with their own documents and
+password, verify their email, and then land in **Pending Approval** like any other applicant. You
+approve them there as usual. **An invitation grants nothing** — it only saves them typing.
+
+The Invitations list tracks each one:
+
+| Status | Meaning | What you can do |
+|---|---|---|
+| **Pending** | Sent, not yet used | **Resend** (issues a new link and kills the old one) · **Revoke** |
+| **Registered** | They signed up | **view vendor** → jumps to their record |
+| **Expired** | 14 days passed | **Invite again** |
+| **Revoked** | You withdrew it | — |
+
+**Worth knowing**
+- One live invitation per email address. To chase someone, use **Resend**, not a second invite.
+- The link expires after **14 days**, and **Resend replaces it** — anyone still holding the old link
+  will find it dead.
+- Inviting an address that already has a supplier account is refused, and no email is sent.
+- Revoked and long-expired invitations are cleared automatically each week. Registered ones are kept.
+- Sending is rate-limited (a few per minute, 20 per person per day). For a large onboarding drive,
+  tell IT rather than working around it.
+
+---
+
 ## 4. Exceptions you can use any time
 
 | You need to… | Button | Effect |

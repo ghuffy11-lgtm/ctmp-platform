@@ -311,9 +311,15 @@ per boot, none actioned. The repair tooling (`008_audit_chain_rebake_2026-05-23.
 
 ### Known gaps and deliberate non-features
 
-- **There is no scheduler.** Nothing auto-transitions a tender when its deadline passes. The
-  deadline filter hides expired tenders from vendors, but an admin still closes tenders by hand.
-  This is the single biggest "looks broken but isn't" item for a newcomer.
+- **There is no scheduler *in the application*.** Nothing auto-transitions a tender when its
+  deadline passes. The deadline filter hides expired tenders from vendors, but an admin still closes
+  tenders by hand. This is the single biggest "looks broken but isn't" item for a newcomer.
+
+  Two **OS cron jobs** do exist on the admin host — the nightly DB backup (01:15) and the weekly
+  invitation retention purge (Sundays 02:30), listed in `docs/runbooks/PRODUCTION_OPERATIONS.md`.
+  They are housekeeping outside the app; neither touches tender state. So "no scheduler" means no
+  in-app job runner, not that nothing runs on a timer — and anything needing one (deadline
+  auto-close, invitation chasers, reminders) still has to have it built.
 - **Arabic screens are read-only by design.** `/executive/tenders` and the tender/bid detail screens
   have no Arabic version, so as of 2026-08-21 every drill-down on the Arabic pages is disabled
   rather than pointed at an English screen. Arabic rows still navigate to Arabic profiles. Making

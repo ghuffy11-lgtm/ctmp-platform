@@ -12,6 +12,7 @@
 
 ```mermaid
 flowchart TD
+    A0[Invited by procurement<br/>optional] -.-> A
     A[Register] --> B[Verify email]
     B --> C[Admin approves account]
     C --> D[Sign in]
@@ -30,7 +31,26 @@ flowchart TD
 
 ## STEP 1 — Register your company
 
-Go to the portal → **Register as vendor**.
+There are two ways to reach the registration form. Both end in the same place.
+
+**If procurement invited you**, your email contains a **Register your company** button. Open it and
+the form is already filled in with your company name and email address:
+
+```
+✓ You were invited to register. Your email address is filled in below.
+                                     ( Use a different email address )
+```
+
+The email field is locked to the address the invitation was sent to, because that is what links
+your registration back to the invitation. If your real contact address is different, click **Use a
+different email address** — you can still register normally, it just will not be matched to the
+invite.
+
+> If the link says *"This invitation link is no longer valid"*, nothing is wrong on your side —
+> the invite has expired or been withdrawn. **Carry on and register below anyway**, or ask
+> procurement for a fresh one. The form works either way.
+
+**Otherwise**, go to the portal → **Register as vendor**.
 
 ```
 Register as a Vendor
@@ -136,6 +156,22 @@ Item  Description          Qty  Unit  Bidding?      Unit price   Line total
    [ ⬇ Download CSV ]  [ ⬆ Import CSV ]     [ ← Back ]  [ Save draft ]  [ Continue → ]
 ```
 > Prefer Excel? **Download CSV**, fill prices offline, **Import CSV**.
+
+**Commercial Terms** — on the same step, below the pricing table. These are read alongside your
+price when bids are compared, and they are printed in the Award Minutes, so fill them in properly.
+```
+COMMERCIAL TERMS
+  Brand / Manufacturer  [ .................. ]
+  Country of Origin     [ .................. ]
+  Warranty (years)      [ 3 ▾ ]
+  Delivery Period       [ From ] – [ To ]  [ Weeks ▾ ]     (To is optional)
+  Payment Terms         [ 25% upon signing the contract              ]
+                        [ 25% upon delivery and installation         ]
+                        [ 50% after the Acceptance Certificate       ]
+```
+Every field is optional and none of them blocks submission — but a blank warranty or delivery
+period is simply read as "not offered" when your bid is compared against others. If you are invited
+to a negotiation round later, you can revise these along with your price.
 
 **④ Commercial PDF** — upload your signed pricing PDF (**required**). Stays sealed until the committee opens commercial envelopes.
 
