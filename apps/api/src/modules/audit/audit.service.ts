@@ -43,6 +43,26 @@ function canonicalize(value: unknown): string {
   if (value === null || value === undefined) return 'null';
   if (value instanceof Date) return JSON.stringify(value.toISOString());
   if (Buffer.isBuffer(value)) return JSON.stringify(value.toString('base64'));
+  // 2026-08-24: the same asymmetry as the Date branch above, for Prisma.Decimal
+  // — missed when that one was fixed.
+  //
+  // A Decimal reaching here on the WRITE path is a live Prisma object, and
+  // without this it falls to the object branch and canonicalises as
+  //   {"constructor":undefined,"d":[1000],"e":3,"s":1}
+  // while Prisma writes it to JSONB as the plain number 1000. At verify time
+  // the value comes back from JSONB as a number and canonicalises as `1000`.
+  // Different strings, different hashes, AUDIT CHAIN BREAK — every single time
+  // an audited payload carried a money field.
+  //
+  // That is why dev broke at row 218 (a TENDER_UPDATED carrying
+  // estimatedBudget) and kept breaking on every tender edit since. Migration
+  // 055 widened the money columns to numeric(16,3), so there are more Decimals
+  // now, not fewer.
+  //
+  // Only the write path is affected: on the verify path everything has already
+  // been through JSONB and arrives as a plain number, so this branch never
+  // fires there. Emitting the number matches what verify will recompute.
+  if (Prisma.Decimal.isDecimal(value)) return JSON.stringify(Number(value));
   if (Array.isArray(value)) return '[' + value.map(canonicalize).join(',') + ']';
   if (typeof value === 'object') {
     const obj = value as Record<string, unknown>;
