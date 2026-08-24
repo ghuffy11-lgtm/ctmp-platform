@@ -6,6 +6,60 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-25 — Audit trail fixes SHIPPED TO PRODUCTION — `prod-20260825`
+
+**Date/time:** 2026-08-25 · admin host only · `api` + `web-admin`, **no migration**
+
+Ships the `Decimal` canonicalisation fix ahead of the launch tender, plus the three Audit Trail tab
+defects. Production was carrying the same latent bug as dev and was one budgeted tender away from
+breaking its own compliance chain.
+
+**Pre-flight caught the disk at 100% — 664 MB free.** That is the condition that silently produces a
+stale image here. `scripts/prune_build_box.sh` (written yesterday for exactly this) recovered it on
+its first real use: build cache alone took it to 6.7 GB, then `KEEP_RECENT=0` released the three
+`prod-20260824` tags — each **peer-verified as present on its production host first** — reaching
+10 GB. No other project's images, containers or volumes were touched; 20 containers running before
+and after.
+
+**Sequence:** `pg_dump` → `backups/ctmp_pre_audit_20260825.dump` (233 KB) · rollback tags
+`ctmp-api:rollback-20260825` (`2c7a6bc`), `ctmp-web-admin:rollback-20260825` (`e5c22db`) · build with
+explicit prod args · gate · transfer · retag → `latest` · `up -d --no-build`.
+
+**Build-arg gate:** 43 prod-origin / **11** `localhost:3000` — the documented fingerprint, unchanged.
+
+**Both fixes confirmed inside the images before transfer**, not inferred: `isDecimal` present in the
+compiled `audit.service.js`, `resolvedRoleCode` ×4, and `eventTime` in the admin bundle.
+
+**Verified after cutover:**
+- Running image IDs equal their tags: api `53470d6`, web-admin `1422228`.
+- All five admin containers up, `ctmp-api` healthy.
+- `/api/v1/health`, `/login`, `/vendors` → **200**.
+- **`Audit chain verified — 41 rows OK (id 1..41)`**, `CAPTCHA provider: hCaptcha (production)`,
+  no errors.
+- Vendor portal re-checked — it proxies `/api/*` to this API, so an api-only deploy can still break
+  it. `/`, `/login`, `/register`, proxied `/api/v1/health` all **200**.
+
+**What this prevents.** Production's chain verified clean only because it holds zero tenders — no
+audited payload there had ever contained a money value. The first launch tender with an estimated
+budget would have broken the audit chain on its first edit, on the system whose compliance case
+rests on that chain. Reproduced on dev before shipping, and the fix verified there by creating a
+tender at `12345.678`, editing it to `99999.999`, and confirming the chain still verified.
+
+**Not verified on production, deliberately:** the fix in action. Doing so means creating and editing
+a budgeted tender on a live system that is meant to hold none. The behaviour was proven on dev; the
+evidence here is the compiled branch plus a clean chain. **The launch tender is now the real test —
+and it is now safe to be one.**
+
+**Production now at:** `ctmp-api:prod-20260825`, `ctmp-web-admin:prod-20260825`,
+`ctmp-web-vendor:prod-20260824` (unchanged), schema `057`.
+
+**Rollback:** retag the two `rollback-20260825` images to `:latest` and recreate with `--no-build`.
+No migration to reverse. Note that rolling back reinstates the `Decimal` bug.
+
+**Open questions:** none.
+
+---
+
 ## 2026-08-24 — 🔴 Root cause of every audit chain break found: `Decimal` was never canonicalised
 
 **Date/time:** 2026-08-24 · started as three UI defects in the tender Audit Trail tab

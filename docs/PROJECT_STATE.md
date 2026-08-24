@@ -1,6 +1,6 @@
 # CTMP — Project State
 
-**As of 2026-08-24.** Reconciled against the working tree, the running dev containers, and the
+**As of 2026-08-25.** Reconciled against the working tree, the running dev containers, and the
 production hosts (image tags, schema comparison). Where a claim could be checked, it was checked.
 
 ---
@@ -53,7 +53,7 @@ at commit `b37170f`.
 
 | Environment | URL | Schema | Images |
 |---|---|---|---|
-| Production admin | `https://ctmp.hadiclinic.com.kw:4202` (`10.1.27.99`) | through `057` | `ctmp-api:prod-20260824`, `ctmp-web-admin:prod-20260824` |
+| Production admin | `https://ctmp.hadiclinic.com.kw:4202` (`10.1.27.99`) | through `057` | `ctmp-api:prod-20260825`, `ctmp-web-admin:prod-20260825` |
 | Production vendor | `https://vn.hadiclinic.com.kw:4201` (`172.16.4.11`) | (uses admin DB) | `ctmp-web-vendor:prod-20260824` |
 | Dev / build box | admin `:4202` / vendor `:4201` on `10.1.13.98` | through `057` | all three rebuilt 2026-08-24 (registry invitations) |
 
