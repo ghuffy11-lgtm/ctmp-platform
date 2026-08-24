@@ -67,11 +67,32 @@ deployment reality that will break production if ignored.
   and broke the owner's login for a day.)
 - **Migrations do not auto-run** on an initialised database. Author the file *and* apply it by hand
   to each environment.
-- **Do not touch the other projects** on these hosts — `complainmgmt` and `hadi-intranet` on the
-  admin host, `pharmacy` on the vendor host. Port 443 on the admin host belongs to
-  `hadi-intranet-nginx-1`. Do not prune their images or volumes.
+- **Do not touch the other projects on ANY of the three hosts.** All three are shared. Nothing
+  outside the `ctmp` compose project — containers named `ctmp-*`, volumes `ctmp_*`, network
+  `ctmp_default` — is ours to stop, remove, prune or reconfigure.
+
+  | Host | Co-tenants (as of 2026-08-24) |
+  |---|---|
+  | Admin prod `10.1.27.99` | `complainmgmt`, `hadi-intranet`. Port 443 belongs to `hadi-intranet-nginx-1` |
+  | Vendor prod `172.16.4.11` | `pharmacy` |
+  | **Build box `10.1.13.98`** | `citelify-v2`, `citelify_website`, `hadi-intranet` (dev), `oriciety` (app/db/mail/queue/web) — plus large shared images (flutter ~7 GB, playwright ~2.8 GB) |
+
+  The build box was previously undocumented here and is the one where disk pressure creates the
+  temptation to prune broadly. It carries the **most** co-tenants of the three.
+
 - **Do not prune Docker volumes.** `docker builder prune -f` and dangling-image pruning are safe;
-  `image prune -a` and `volume prune` are not.
+  `image prune -a` and `volume prune` are not. `image prune -a` on the build box would take other
+  projects' images *and* the CTMP rollback tags.
+- **Reclaim build-box disk with `scripts/prune_build_box.sh`, not by hand.** It performs only the
+  two sanctioned operations plus removal of superseded `ctmp-*` tags, and — the load-bearing part —
+  removes a `prod-*`/`rollback-*` tag only after confirming the same tag exists on its production
+  host. The local copy is redundant *because* production holds its own; if that peer copy is
+  missing, the tag is the only one left and is kept. It also refuses to touch `:latest` or any
+  image a running container references, of any project. Dry run is the default.
+
+  This matters because the build box sits near 96% after every deploy, and a build started on a
+  full disk **succeeds against partial source** — the container then serves stale code with no
+  error anywhere. That failure has happened here before.
 - Everything stays off the `/` partition — use the `sdb` data disk.
 
 ### Repository

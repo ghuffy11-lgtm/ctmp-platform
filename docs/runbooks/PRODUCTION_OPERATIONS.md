@@ -53,8 +53,26 @@ cat database/migrations/NNN.sql | ssh cts-prod 'docker exec -i ctmp-postgres psq
 **Backups:** nightly `pg_dump -Fc` via `scripts/backup_ctmp_db.sh` (cron on admin host) to
 `/var/lib/docker/ctmp-platform/backups`. Restore: stop api, `pg_restore --clean --if-exists`.
 
-**Cleaning docker disk (build box):** `docker builder prune -f` (safe, reclaims build cache) +
-`docker image prune -f` (dangling). NEVER `volume prune` blind.
+**Scheduled jobs on the admin host** (`crontab -l` as `claude`):
+
+| When | Job |
+|---|---|
+| 01:15 daily | `scripts/backup_ctmp_db.sh` → `backups/backup.log` |
+| 02:30 Sundays | `scripts/purge_vendor_invitations.sh --confirm` → `backups/invite-purge.log` |
+
+The purge deletes revoked vendor invitations and ones >90 days past expiry, keeps `ACCEPTED` ones,
+and never touches `audit_logs`. Added 2026-08-24 for the retention policy.
+
+**Cleaning docker disk (build box): use `scripts/prune_build_box.sh`.** Dry run by default,
+`--confirm` to act. It does only the two safe operations — `docker builder prune -f` and
+`docker image prune -f` (dangling only) — plus removal of superseded `ctmp-*` tags, and only after
+verifying each tag also exists on its production host.
+
+NEVER `image prune -a` or `volume prune`. The build box is shared with `citelify`, `hadi-intranet`
+(dev) and `oriciety`, and holds ~10 GB of flutter/playwright images belonging to none of them.
+
+Expect ~96% used after any three-image deploy; **do not start a build below ~5 GB free.** A build on
+a full disk succeeds against partial source and the container then serves stale code silently.
 
 ## 4. TLS
 
