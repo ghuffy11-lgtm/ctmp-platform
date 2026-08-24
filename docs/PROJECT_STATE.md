@@ -326,8 +326,8 @@ lapses both portals stop serving.
   restore actually performed and verified (row counts, audit hash chain, migration 057 objects).
   Writing it uncovered that the nightly backup had **never run** (script was mode 644; 61 log lines,
   61 permission failures, 0 successes). Fixed.
-- **An on-prem deployment runbook is still unwritten**, and `docs/runbooks/admin-prod-deploy.md`
-  still says to build on the production host, which has no internet egress.
+- ~~admin-prod-deploy.md said to build on the air-gapped host~~ **corrected 2026-08-24.** A separate
+  on-prem *install-from-scratch* runbook is still unwritten.
 
 ### Testing
 - `qa/playwright/tests/commercial-terms.spec.ts` was written but **has never executed** — this box
@@ -337,7 +337,8 @@ lapses both portals stop serving.
 - **No automated test covers the Arabic screens at all.** Every Arabic verification so far has been
   a scripted browser check run by hand (screenshots, anchor counting per page and per tab). Those
   scripts live in the session scratchpad, not in the repo — so the checks that caught the KPI-link
-  and month-name bugs are not repeatable by anyone else. Worth promoting into `qa/playwright`.
+  and month-name bugs are not repeatable by anyone else. (The **API** lifecycle harness was promoted
+  to `qa/api-tests/lifecycle/` on 2026-08-24; the Arabic **browser** checks were not.)
 - No manual UAT suite; no API test plan.
 
 ### Known gaps and deliberate non-features

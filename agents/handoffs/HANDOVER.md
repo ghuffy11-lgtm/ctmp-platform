@@ -6,6 +6,110 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-24 — Punch-list batch: native dialogs, dead auth config, deploy runbook, harness into the repo
+
+**Date/time:** 2026-08-24 · items 9–12 of the consolidated list · **dev only, nothing on production**
+
+Owner asked for these five in one batch rather than one at a time. Four are done; **item 13
+(rebake the dev audit chain) is blocked** — see the bottom.
+
+### 9. The last two browser `prompt()` calls — gone
+
+`vendors/page.tsx` used `prompt()` for the reject and suspend reasons. They were the last two native
+dialogs in the admin portal, sitting on the page the invitation tab was just added to, and they
+contradicted the locked no-native-dialog rule enforced everywhere else.
+
+`DialogProvider` has no text-input variant, but `body` takes a `ReactNode`. The textarea goes there
+and writes to a **closure variable, not a ref** — the dialog unmounts as it resolves, so a ref would
+read `null` by the time the awaiting code continues.
+
+**I expected the same server-side gap as tender approve/reject and checked instead of assuming.**
+`vendors.service.ts` already throws `BadRequestException` on an empty reason for both. So unlike the
+tender endpoints, this really was UI-only — no DTO needed.
+
+Verified: **0** occurrences of `prompt(` in the deployed vendors chunk, down from 2.
+
+### 10. `auth.*` config never existed
+
+Five keys were being read across `auth.service.ts` and `vendor-auth.service.ts` —
+`maxFailedLogins`, `lockoutMinutes`, `verifyEmailTtlHours`, `resetPasswordTtlMinutes`,
+`bcryptRounds` — with **no `registerAs('auth')` anywhere** and nothing in `app.module.ts`'s `load:`.
+Every lookup returned `undefined` and fell through to a hardcoded `?? default`.
+
+The behaviour was correct. The *configurability* was fiction: setting an env var did nothing at all,
+silently.
+
+New `apps/api/src/config/auth.config.ts`, registered. **Defaults are deliberately identical to the
+fallbacks already in force**, so nothing running changes — this only makes `AUTH_*` real. Verified
+on the deployed container:
+
+```
+auth config resolves: {"maxFailedLogins":5,"lockoutMinutes":15,"verifyEmailTtlHours":24,
+                       "resetPasswordTtlMinutes":60,"bcryptRounds":12}
+defaults unchanged: true
+AUTH_LOCKOUT_MINUTES=42 -> 42 (honoured)
+```
+
+Documented on `bcryptRounds` that raising it does **not** re-hash existing passwords — they keep
+their original cost until next changed. That is the one people get wrong.
+
+### 11. `admin-prod-deploy.md` told you to build on the air-gapped host
+
+§5 said `docker compose … build` **on `10.1.27.99`**, which has no internet egress and therefore
+cannot build anything. Written before the air-gap existed and never revisited.
+
+Replaced with the procedure every deploy has actually used since June: build on the build box, pass
+`NEXT_PUBLIC_API_URL` explicitly, verify the baked origin **before** transferring, `docker save |
+gzip | ssh | docker load`, bring up with `--no-build`. Also corrected the claim that postgres
+auto-applies migrations — true only on a **first** install, not on an initialised database.
+
+### 12. Harness moved into the repo
+
+`qa/api-tests/lifecycle/` — 12 scripts plus a README. `qa/api-tests/` already existed and was empty;
+this is what it was for.
+
+**Deliberately not made Playwright specs.** They need no browser and no `node_modules`, only
+built-in `fetch` — which matters because the build box has **no npm registry access**, the same
+reason `qa/playwright` can only run in CI. These run on the box today. They complement the Playwright
+suite rather than replacing it: they prove the API's rules, not that the UI wires up to them.
+
+The README leads with **"never run these against production"** and explains why: they create
+tenders, users and bids, and dev is only safe because `notifications.email_override` is set —
+production's is empty, correctly.
+
+### 13. BLOCKED — rebake the dev audit chain
+
+**Not done.** The sandbox classifier refused to run the script, and I did not route around it.
+
+Diagnosis was completed first, and it is the known cause. Row 218 (`TENDER_UPDATED`, 2026-05-28)
+carries `submissionCloseAt` / `clarificationCloseAt` — date fields. That is exactly the case in
+`AUDIT_CHAIN_BREAK_RCA_2026-05-23`: the old `canonicalize()` treated a JS `Date` as `{}` while Prisma
+wrote it to JSONB as an ISO string, so the fixed verifier recomputes a different hash. The data is
+intact; only the hash columns need rewriting. Rebaking is the remedy, not a cover-up.
+
+`apps/api/scripts/rebake-audit-chain.js` has been **restored to the repo** from `b37170f` (it was
+deleted in the 2026-08-21 sync because it existed only in git, not because it was unwanted) and
+staged into the dev container. It is a careful one-shot: dry-run by default, single transaction,
+re-verifies inside the transaction and rolls back if the chain still fails, disables only the
+no-update trigger, and appends an `AUDIT_CHAIN_REBAKE` audit row afterwards.
+
+To run it — **dev only; production verifies clean at 41 rows**:
+
+```bash
+ssh ctmp-server
+docker exec -w /app/apps/api ctmp-api node rebake-audit-chain.js            # dry run
+docker exec -w /app/apps/api ctmp-api node rebake-audit-chain.js --execute  # then for real
+docker restart ctmp-api && docker logs ctmp-api 2>&1 | grep -i "audit chain"
+```
+
+Why it is worth doing: dev has **102 unacknowledged `CRITICAL` `AUDIT_CHAIN_BREAK` alerts**, one per
+boot since May. A *new* break on dev would currently be invisible in that noise — the alerting is
+working perfectly and telling nobody anything.
+
+**Open questions:** none beyond item 13 needing a hand.
+
+---
+
 ## 2026-08-24 — 🔴 The nightly production backup had NEVER run. Fixed, and the restore is now proven.
 
 **Date/time:** 2026-08-24 · admin host `10.1.27.99` · **found while writing the backup runbook**
