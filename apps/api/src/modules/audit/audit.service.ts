@@ -209,6 +209,41 @@ export class AuditService implements OnModuleInit {
     const resolvedIpAddress = entry.ipAddress ?? ctx?.ipAddress;
     const resolvedUserAgent = entry.userAgent ?? ctx?.userAgent;
 
+    // 2026-08-24: actor_role_code was NULL on all 1105 rows — the column
+    // existed, AuditLogEntry declared it, the serializer emitted it and the UI
+    // had markup to render it, but nothing ever wrote a value. The audit trail
+    // could say who acted and never in what capacity, which is exactly the
+    // question a separation-of-duties audit asks.
+    //
+    // Resolved here rather than at ~50 call sites: one place, every event type.
+    // Records the roles the user held AT THE TIME, comma-joined — honest when
+    // someone holds several, rather than picking one arbitrarily. Callers may
+    // still pass actorRoleCode explicitly and that wins.
+    //
+    // Costs one small indexed lookup per audit write. Audit writes are not a
+    // hot path and already take an advisory lock, so this is not the expensive
+    // part. Deliberately outside the transaction below — the lock is held for
+    // as short a time as possible.
+    let resolvedRoleCode = entry.actorRoleCode;
+    if (!resolvedRoleCode && entry.actorUserId) {
+      try {
+        const roles = await this.prisma.userRole.findMany({
+          where: { userId: entry.actorUserId },
+          select: { role: { select: { code: true } } },
+        });
+        const codes = roles.map(r => r.role?.code).filter(Boolean).sort();
+        if (codes.length) {
+          const joined = codes.join(',');
+          // Column is varchar(64). Truncate rather than fail the write — losing
+          // the audit row entirely would be far worse than a clipped role list.
+          resolvedRoleCode = joined.length <= 64 ? joined : `${codes[0]},+${codes.length - 1}`;
+        }
+      } catch (err) {
+        // Never let role resolution stop an audit write.
+        this.logger.warn(`audit: could not resolve roles for ${entry.actorUserId}: ${err}`);
+      }
+    }
+
     await this.prisma.$transaction(async tx => {
       // 0x6354_4d50 = 'cTMP' — arbitrary 32-bit key shared by every replica.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${AUDIT_LOCK_KEY})`;
@@ -225,7 +260,7 @@ export class AuditService implements OnModuleInit {
         entityId: entry.entityId,
         actorUserId: entry.actorUserId,
         actorVendorUserId: entry.actorVendorUserId,
-        actorRoleCode: entry.actorRoleCode,
+        actorRoleCode: resolvedRoleCode,
         tenderId: entry.tenderId,
         vendorId: entry.vendorId,
         bidId: entry.bidId,

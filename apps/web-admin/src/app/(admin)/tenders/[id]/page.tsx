@@ -1446,7 +1446,10 @@ interface AuditRow {
   actorRole?: string;
   entityType: string;
   entityId?: string;
-  timestamp: string;
+  // 2026-08-24: the API returns eventTime, never timestamp. This interface said
+  // timestamp, the cast at the fetch boundary made TypeScript believe it, and
+  // every row in the When column rendered "Invalid Date".
+  eventTime: string;
   riskLevel?: string;
 }
 
@@ -1501,7 +1504,7 @@ function AuditTrailTabPanel({ tenderId }: { tenderId: string }) {
           {items.map(a => (
             <tr key={a.id} className="border-b border-border last:border-0">
               <td className="px-4 py-3 text-text-secondary text-xs whitespace-nowrap">
-                {new Date(a.timestamp).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                {new Date(a.eventTime).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
               </td>
               <td className="px-4 py-3 font-mono text-xs text-text-primary">{a.eventType}</td>
               <td className="px-4 py-3 text-text-primary">

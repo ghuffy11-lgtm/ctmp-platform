@@ -55,8 +55,17 @@ export class TendersController {
   @Patch(':id')
   @RequirePermissions('tender:edit')
   @ApiOperation({ operationId: 'updateTender', summary: 'Update tender draft' })
-  update(@Param('id') id: string, @Body() dto: UpdateTenderDto) {
-    return this.tendersService.update(id, dto);
+  // 2026-08-24: this route did not take @CurrentUser, so update() had no actor
+  // to log and every TENDER_UPDATED row was written unattributed. The audit tab
+  // then rendered `actorName ?? 'system'` — so a person editing a tender's
+  // budget or deadline showed as the SYSTEM having done it. Not merely missing:
+  // actively wrong.
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateTenderDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.tendersService.update(id, dto, userId);
   }
 
   // WALK-016/017 / BUG-067: vendor portal needs to view + download RFQ docs

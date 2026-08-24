@@ -361,7 +361,7 @@ export class TendersService {
     return this.serializeDetail(tender);
   }
 
-  async update(id: string, dto: UpdateTenderDto) {
+  async update(id: string, dto: UpdateTenderDto, actorUserId?: string) {
     const tender = await this.prisma.tender.findUnique({
       where: { id },
       select: { id: true, status: true, visibility: true, title: true, description: true, submissionCloseAt: true, clarificationCloseAt: true, departmentId: true, category: true, procurementType: true, estimatedBudget: true },
@@ -451,6 +451,7 @@ export class TendersService {
       entityType: 'Tender',
       entityId: id,
       tenderId: id,
+      actorUserId,
       beforeValue: tender,
       afterValue: { ...tender, ...data },
       riskLevel: AuditRiskLevel.LOW,
