@@ -6,6 +6,50 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-25 — Vendor portal deploy — `prod-20260825b` — icon font + clarification copy
+
+**Date/time:** 2026-08-25 · vendor host `172.16.4.11` only · `web-vendor`, **no migration, no API change**
+
+Two fixes from the production mock run, deployed together because they touch the same app.
+
+**1. Material Symbols never loaded.** The bid wizard shows a large grey `upload_file` mid-dropzone,
+plus `chevron_right`, `schedule`, `description`, `verified`, `warning`. The portal used
+`.material-symbols-outlined` in eight places without ever loading the font or declaring the class.
+
+**Adding them was not the fix, and my first attempt shipped without working.** I copied web-admin,
+which puts its `@import` rules *after* `@tailwind base`. CSS ignores any `@import` that follows a
+style rule, and `@tailwind base` expands in place into the whole Preflight reset — so the import
+landed ~26 KB into the compiled stylesheet and the browser dropped it. Caught only because I
+measured the deployed page instead of trusting that the rule was in the file. The imports had to
+move **above** the `@tailwind` directives.
+
+| Measured on the live page | Before | After |
+|---|---|---|
+| 24px `upload_file` span width | 109 px (text) | **24 px (one glyph)** |
+| `document.fonts` face count | 0 | **38** |
+
+The same measurement proved **Inter had never loaded in this portal either** — same ordering bug,
+unnoticed because system-ui is an acceptable fallback. An icon font is not.
+
+**2. Clarification placeholder promised a public reply that does not exist.** Reworded to "The reply
+goes only to you." Private replies are intended — see `docs/decisions/DECISION_LOG.md` 2026-08-25.
+
+**Sequence:** rollback tag `ctmp-web-vendor:rollback-20260825` (`422a7aa3c87e`, the running image) ·
+build on the build box with explicit `--build-arg` · **gate: exactly 3 residual `localhost:3000`,
+the documented healthy fingerprint** · `docker save | gzip -1 | ssh | docker load` · retag `latest` ·
+`up -d --no-build`. Vendor host disk 45 GB free, no prune needed.
+
+**Verified after deploy:** compiled CSS begins with both `@import` rules; login returns HTTP 200;
+all six glyphs render on the live page.
+
+**Rollback:** `docker tag ctmp-web-vendor:rollback-20260825 ctmp-web-vendor:latest` on `cts-vendor`,
+then `up -d --no-build web-vendor`.
+
+**Left open:** `web-admin/src/app/globals.css:14` has the identical dead-`@import` bug. Harmless
+today — admin uses lucide-react SVGs and Inter falls back cleanly — but it should be fixed on the
+next admin deploy rather than on its own.
+
+---
 ## 2026-08-25 — First full tender lifecycle executed on PRODUCTION — `TDR-2026-0001`, then cancelled
 
 **Date/time:** 2026-08-25 · production, browser-driven · no code change, no deploy, no migration

@@ -500,11 +500,19 @@ ordered by consequence. **All still open.**
   needs to be exact. Same class of defect as the `numeric(15,2)` money-precision bug fixed by
   migration `055`, but in the presentation layer.
 
-- [ ] **(Medium) Vendor bid wizard renders Material Symbols ligature names as literal text.**
-  `upload_file` appears in large grey type in the middle of both upload drop zones; `chevron_right`,
-  `schedule`, `description`, `verified` and `warning` appear elsewhere on the same flow. Admin
-  portal icons resolve correctly, so it is scoped to the vendor portal. This is the screen every
-  supplier uses to bid.
+- [x] **(Medium) Vendor bid wizard rendered Material Symbols ligature names as literal text.**
+  **FIXED AND DEPLOYED 2026-08-25** (`ctmp-web-vendor:prod-20260825b`). The portal never loaded the
+  font or declared the class — and adding them was not enough, because CSS drops any `@import` that
+  follows a style rule and `@tailwind base` expands in place. The imports had to move **above** the
+  `@tailwind` directives. Measured live: a 24px `upload_file` span went from 109px (text) to 24px
+  (one glyph), and `document.fonts` went from 0 faces to 38.
+
+- [ ] **(Low) `web-admin` has the same dead-`@import` bug — its Google Fonts never load either.**
+  `apps/web-admin/src/app/globals.css:14` puts the Inter and Material Symbols `@import` rules after
+  `@tailwind base` and a `@media print` block, so the browser ignores both. Admin gets away with it
+  because it renders icons as lucide-react SVGs and Inter falls back to system-ui, which looks fine.
+  Move the two `@import` lines to the top of the file, above `@tailwind`. Needs an admin build and
+  deploy, so it was not bundled with the vendor fix.
 
 - [ ] **(Low) Technical envelopes are not hash-verified at opening.** `bid_envelopes.hash_verified_at`
   is stamped for COMMERCIAL envelopes and left NULL for TECHNICAL. Technical submissions are

@@ -119,15 +119,34 @@ archive renders `23,265.75 KWD` — two decimals — in both the header line and
 card. KWD carries three decimal places (fils). This is the permanent read-only archive of past
 procurement decisions, which is where the figure matters most.
 
-### 5. The vendor bid wizard renders icon names as literal text
+### 5. Vendor bid wizard rendered icon names as literal text — FIXED AND DEPLOYED
 
-Material Symbols ligatures are not resolving on the vendor bid wizard route, so the icon *names*
-render as words: `chevron_right` in the breadcrumb, `schedule` beside the deadline, a large grey
-`upload_file` in the middle of **both** upload drop zones, `description` beside each filename,
-`verified` on the success screen and `warning` on the certification notice.
+Suppliers saw a large grey `upload_file` in the middle of both bid upload drop zones, plus
+`chevron_right`, `schedule`, `description`, `verified` and `warning` through the bid wizard.
 
-Admin portal icons render correctly, so it is specific to the vendor portal. This is the screen
-every supplier uses to bid — the first impression of the platform.
+**Root cause was not the missing import — it was where the import sat.** The portal never declared
+`.material-symbols-outlined` or loaded the font. Adding both was not enough: CSS ignores any
+`@import` that appears after a style rule, and `@tailwind base` expands in place into the whole
+Preflight reset, so an `@import` written beneath it landed ~26 KB into the compiled stylesheet and
+the browser silently dropped it. The imports had to move **above** the `@tailwind` directives.
+
+Measured on the live page rather than assumed:
+
+| | Before | After |
+|---|---|---|
+| Width of a 24px `upload_file` span | **109 px** (rendered as text) | **24 px** (one glyph) |
+| `document.fonts` face count | **0** | **38** |
+
+**This also proves Inter had never loaded in this portal.** The same ordering bug killed it, and
+nobody noticed because falling back to system-ui looks acceptable. An icon font has no acceptable
+fallback, which is the only reason the defect ever surfaced.
+
+Deployed to the vendor host on 2026-08-25 as `ctmp-web-vendor:prod-20260825b`, together with the
+clarification copy fix from finding 2. All six glyphs confirmed rendering on the live login page.
+
+**`web-admin/src/app/globals.css:14` has the identical ordering bug**, so its Inter and Material
+Symbols imports are dead too. Not fixed here — it needs its own build and deploy. Logged in the
+tracker.
 
 ### 6. Technical envelopes are not hash-verified at opening
 
