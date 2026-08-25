@@ -3,6 +3,16 @@
 @tailwind utilities;
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+/* 2026-08-25: this portal uses .material-symbols-outlined in eight places — the
+   bid wizard's two upload drop zones, its stepper, receipt and warning rows, and
+   the bid detail breadcrumb — but never loaded the font or declared the class.
+   Without them the ligature NAME renders as literal text, so suppliers saw a
+   large grey "upload_file" in the middle of both upload zones, plus
+   "chevron_right", "schedule", "description", "verified" and "warning".
+   Found by the production mock run on 2026-08-25.
+   web-admin has carried both of these since the beginning (globals.css:15) —
+   the declaration and the usage were simply in opposite apps. */
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
 @layer base {
   html {
@@ -144,4 +154,22 @@
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(0, 180, 255, 0.4);
   }
+}
+
+/* Copied verbatim from web-admin globals.css so the two portals render icons
+   identically. font-size is overridden per call site with a text-[Npx] class. */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
 }
