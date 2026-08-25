@@ -310,8 +310,30 @@ Three gaps remain, none solved:
 
 Worth deciding on (1) and (2) before go-live rather than after.
 
-**Unrelated but same host and time-critical: the TLS certificate expires 2026-09-16.** When it
-lapses both portals stop serving.
+## TLS certificate renewal — deferred by the owner (2026-08-25)
+
+The wildcard cert `*.HADICLINIC.COM.KW` expires **16 September 2026, 23:59 UTC**. Owner reviewed and
+deferred: there is time. Recorded here so it is not rediscovered on the 16th.
+
+**It lives on BOTH production hosts and must be replaced in both**, verified live 2026-08-25:
+
+| Host | Serving on | Path |
+|---|---|---|
+| Admin `10.1.27.99` | `:4202` | `infrastructure/docker/certs/` |
+| Vendor `172.16.4.11` | `:4201` | same path under `/mnt/repo/ctmp-platform` |
+
+The vendor host has **no system cert store for this domain** — its copy was transferred by hand from
+the admin host in June. So renewing on the admin host alone leaves the vendor portal serving an
+expired cert: suppliers get a browser warning while staff see nothing wrong. That is the failure
+mode to avoid.
+
+After replacing the files, recreate `ctmp-nginx` (admin) and `ctmp-vendor-nginx` (vendor) — nginx
+reads the cert at start. Confirm with:
+
+```bash
+echo | openssl s_client -connect 10.1.27.99:4202 -servername ctmp.hadiclinic.com.kw 2>/dev/null | openssl x509 -noout -enddate
+echo | openssl s_client -connect 172.16.4.11:4201 -servername vn.hadiclinic.com.kw 2>/dev/null | openssl x509 -noout -enddate
+```
 
 ## Pending backlog
 
