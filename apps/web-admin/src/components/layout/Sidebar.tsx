@@ -135,7 +135,12 @@ export function Sidebar() {
           <img
             src={assetUrl('/branding/admin_logo')}
             alt={systemName}
-            className="w-8 h-8 object-contain rounded-lg flex-shrink-0"
+            /* 2026-08-26: was w-8 h-8. The uploaded logo is a 960x960 square whose
+               artwork (building mark + Arabic + "HADI CLINIC") only fills part of
+               the canvas, so object-contain inside a 32px box left the visible
+               mark around 20px and illegible. 48px reads clearly and still leaves
+               151px for the title, which continues to wrap to two lines. */
+            className="w-12 h-12 object-contain rounded-lg flex-shrink-0"
           />
         ) : (
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">
