@@ -6,6 +6,38 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-26 — Admin deploy `prod-20260826` — sidebar logo 32px → 48px
+
+**Date/time:** 2026-08-26 · admin host only · `web-admin`, **no migration, no API change**
+
+The uploaded admin logo is a 960×960 square whose artwork fills only part of the canvas, so
+`object-contain` in a `w-8 h-8` box rendered the visible mark at roughly 20px — too small to read.
+Now `w-12 h-12`. The title still wraps to two lines; 151px remains for it. Previewed against the
+live page before building, not after deploying.
+
+**The documented build-arg gate was wrong and is now fixed.** The runbook said "exactly **11**
+residual `localhost:3000`". This build produced **9** — and the image already serving production
+also has 9. The 11 was stale. Rather than edit one number, the runbook now gates on *matching the
+running image* (7 client chunks with the fallback literal, 49 files with the prod origin) and
+explains why an absolute count drifts: it counts files containing a `|| 'http://localhost:3000'`
+fallback literal, and webpack reshuffles which chunks carry it on any content change.
+
+A gate nobody can pass is worse than no gate — the next person either blocks a good deploy or
+quietly edits the number until it passes.
+
+**Verified after cutover:** `dashboard` returns HTTP 200 and the browser’s own resource timings
+show API calls going to `https://ctmp.hadiclinic.com.kw:4202` — the empirical check the file-count
+gate was only ever a proxy for.
+
+**Not visually confirmed in the sidebar yet:** the container restart expired the session, so the
+portal redirected to login and there is no sidebar to measure. The class is baked into the shipped
+bundle (`w-12 h-12 object-contain` present, the old `w-8 h-8` string absent) and the 48px size was
+previewed live before the build. Worth one glance after signing in.
+
+**Rollback:** `docker tag ctmp-web-admin:rollback-20260826 ctmp-web-admin:latest` on `cts-prod`,
+then `up -d --no-build web-admin`. That tag is `142222836ad3`, the image this replaced.
+
+---
 ## 2026-08-25 — Vendor portal deploy — `prod-20260825b` — icon font + clarification copy
 
 **Date/time:** 2026-08-25 · vendor host `172.16.4.11` only · `web-vendor`, **no migration, no API change**

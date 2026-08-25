@@ -93,8 +93,36 @@ sudo docker build -f infrastructure/docker/web-admin.Dockerfile \
 
 > **`NEXT_PUBLIC_API_URL` must be passed explicitly.** It is inlined into the browser bundle at
 > build time; a bare build bakes `http://localhost:3000` and every browser then fails with "Failed
-> to fetch". Verify **before** transferring — the healthy fingerprint is ~43 hits for the prod
-> origin and exactly **11** residual `localhost:3000` in the admin bundle.
+> to fetch". Verify **before** transferring.
+>
+> **Do not gate on an absolute file count.** This runbook said "exactly 11 residual
+> `localhost:3000`" until 2026-08-26, when a one-line CSS change produced a build with **9** — and
+> the image already serving production turned out to have 9 as well. The 11 was stale, and a gate
+> nobody can pass is worse than no gate: the next person either blocks a good deploy or edits the
+> number to make it go away.
+>
+> The count is unstable by nature. It counts *files* containing the string, and the string is a
+> `|| 'http://localhost:3000'` fallback literal that webpack copies into whichever chunks it
+> happens to split. Any content change reshuffles the chunks and moves the number.
+>
+> **Gate on this instead** — compare the new image against the one currently running:
+>
+> ```bash
+> # on the BUILD BOX, for the new image; repeat on cts-prod for ctmp-web-admin:latest
+> CID=$(docker create ctmp-web-admin:prod-YYYYMMDD)
+> docker cp $CID:/app/apps/web-admin/.next /tmp/chk >/dev/null && docker rm -f $CID >/dev/null
+> echo "client chunks w/ localhost: $(grep -rl localhost:3000 /tmp/chk/static | wc -l)"
+> echo "files w/ prod origin:       $(grep -rl ctmp.hadiclinic.com.kw:4202 /tmp/chk | wc -l)"
+> rm -rf /tmp/chk
+> ```
+>
+> **The build is good when the new image matches the running one, and the prod-origin count is
+> large and non-zero.** As of 2026-08-26 both read: 7 client chunks with the fallback literal, 49
+> files carrying the prod origin. A bare build fails loudly — prod-origin drops to 0.
+>
+> The only check that actually proves it is after cutover: load the portal and confirm requests go
+> to the prod origin, e.g. in the console
+> `performance.getEntriesByType('resource').map(r=>r.name).find(n=>n.includes('/api/'))`.
 
 Transfer and cut over:
 
