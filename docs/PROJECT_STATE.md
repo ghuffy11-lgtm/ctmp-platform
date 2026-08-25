@@ -299,12 +299,11 @@ successes. Fixed, and the restore path is now proven (see `docs/runbooks/BACKUP_
 
 Three gaps remain, none solved:
 
-1. **No off-host copy.** Every dump sits on the machine it came from. Losing `/dev/sdb` or the host
-   loses the database and all of its backups in the same moment.
-2. **No file-volume backup at all.** `pg_dump` covers the database only. Bid documents, tender
-   documents and award minutes live in Docker volumes and are backed up nowhere. A database-only
-   restore produces rows pointing at files that no longer exist — for a platform whose bid documents
-   are SHA-256-checksummed evidence, this is the bigger exposure.
+1. ~~No off-host copy~~ — **done 2026-08-25.** Pulled nightly to the build box (02:15, 30-day
+   retention). Same site though: survives host or disk loss, not a fire. Off-site still undecided.
+2. ~~No file-volume backup~~ — **done 2026-08-25.** The nightly job now archives `app_storage`,
+   `bid_storage`, `tender_storage` and `report_storage` alongside the dump, sharing a timestamp so
+   the pair restores together. Verified: archive intact and containing a real supplier-uploaded PDF.
 3. **No agreed RPO.** Nightly dumps imply up to ~24 hours of acceptable loss; nobody has confirmed
    that is acceptable.
 

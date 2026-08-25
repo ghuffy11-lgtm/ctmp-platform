@@ -22,8 +22,31 @@ Everything below has been executed. Where a command has not been run against pro
 | Log | `backups/backup.log` |
 | Size | ~233 KB as of 2026-08-24 (production holds no tenders yet; expect this to grow substantially once it does) |
 
-**There are no off-host copies.** Every dump sits on the same machine as the database it came from.
-Disk loss or host loss takes both. See §6.
+**Both halves are taken together.** Since 2026-08-25 the nightly job writes a matching pair sharing one timestamp:
+
+| File | Contents |
+|---|---|
+| `ctmp-YYYYmmdd-HHMMSS.dump` | the database (`pg_dump -Fc`) |
+| `ctmp-files-YYYYmmdd-HHMMSS.tar.gz` | `app_storage`, `bid_storage`, `tender_storage`, `report_storage` |
+
+Restore them **as a pair** — the database references uploaded files by path, so a dump restored
+without its matching archive leaves rows pointing at evidence that is not there.
+
+`redis_data` is excluded deliberately (cache and job queue, rebuilt on start) and so is
+`postgres_data` (the logical dump is the supported path; a raw copy of a running data directory is
+not consistent).
+
+**Off-host copies exist since 2026-08-25.** `scripts/pull_prod_backups.sh` runs on the **build box**
+at 02:15 and pulls both files to `/mnt/repo/ctmp-backups` (30-day retention, deliberately longer
+than production's 14 so the off-host copy outlives the original).
+
+It **pulls** rather than pushes: production cannot SSH to the build box, and not opening that
+direction means production holds no credentials to the backup store — so compromising production
+does not let an attacker delete its own off-host backups.
+
+**The limit, stated plainly:** the build box is in the same building on the same network. This
+protects against losing the production host or its disk. It does **not** protect against fire,
+flood, theft or any site-wide event. True off-site backup remains an open decision.
 
 ---
 
@@ -174,11 +197,15 @@ here.
 
 Stated plainly so nobody assumes otherwise:
 
-1. **No off-host copy.** Every dump is on the machine it came from. Losing `/dev/sdb` or the host
-   loses the database and every backup of it in the same moment.
-2. **No file-volume backup.** Uploaded bid and tender documents are not backed up at all. A restore
-   gives you rows referring to missing files.
+1. ~~No off-host copy~~ — **addressed 2026-08-25.** Pulled nightly to the build box at 02:15.
+   Still **same site, same network**: this survives losing the production host or its disk, not a
+   fire, flood or theft. True off-site remains an open decision.
+2. ~~No file-volume backup~~ — **addressed 2026-08-25.** The nightly job archives the four storage
+   volumes alongside the dump, sharing a timestamp so the pair restores together.
 3. **§4 has never been rehearsed** against production.
+3b. **Restoring the file archive has never been rehearsed either.** The archive is verified intact
+   (`gzip -t`, contents listed, a real vendor PDF confirmed inside) but nobody has extracted it back
+   over a live volume. Same caveat as §4 — read it before you need it.
 4. **No restore-time objective.** Nobody has agreed how much data loss is acceptable. Nightly dumps
    mean up to ~24 hours.
 5. **TLS cert expires 2026-09-16** — roughly three weeks out at the time of writing. Unrelated to
