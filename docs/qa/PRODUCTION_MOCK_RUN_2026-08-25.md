@@ -94,9 +94,12 @@ Worth an explicit decision before go-live.
 is correct. This finding is only about the wording.
 
 `clarifications.service.ts:266` hardcodes `isPublic: false` on every reply, so no reply is ever
-visible to another bidder. The data model does support the alternative — migration `010` moved
-`is_public` onto each reply specifically so a thread could be shared — but nothing sets it true and
-the admin UI exposes no control. That is deliberate and matches the owner’s intent.
+visible to another bidder. The system was originally built to support both — migration `010`
+deliberately moved `is_public` onto each reply so a single answer could be marked public and shared
+with every bidder. **The public path was abandoned in practice, not by mistake:** in bidding, no
+supplier wants to clarify in public, because asking a question exposes what it does not know to its
+competitors. The tick was never used, so it was never wired into the admin UI. See
+`docs/decisions/DECISION_LOG.md` (2026-08-25).
 
 What is wrong is the placeholder on the vendor tender page
 (`apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx:406`):
@@ -109,9 +112,9 @@ whether an external maintenance bypass switch was required, the answer made it m
 vendor2’s page showed *No clarifications posted yet.* — correct behaviour, but a bidder reading
 that placeholder would reasonably expect an answer of general application to be shared.
 
-**Fix:** reword the placeholder so it says replies go only to the asking bidder. If information
-ever has to reach every bidder, that is an addendum to the tender document, not a clarification
-reply.
+**Fix:** reword the placeholder so it says replies go only to the asking bidder. Information that
+genuinely has to reach every bidder is an **addendum to the tender document** — which is the better
+instrument anyway, since it is versioned and attaches to the tender rather than to one thread.
 
 ### 3. Three different technical scores appear under the same "/ 50" label
 

@@ -18,6 +18,60 @@ Related files:
 
 ## Decisions
 
+### 2026-08-25 - Clarification replies are private only; the public path stays dormant
+
+Decision:
+
+A clarification reply goes **only to the bidder who asked**. The public option that was originally
+designed alongside it is not offered in the UI and is not coming back. The `is_public` column stays
+on the table, permanently `false`.
+
+Context:
+
+The system was built to support both. Migration `010` deliberately moved `is_public` off the thread
+and onto each individual reply, precisely so an answer could be marked public and shared with every
+bidder while the rest of the thread stayed private. The intent was that a procurement officer would
+tick "public" when an answer had general application.
+
+**In practice nobody uses it.** As the owner put it on 2026-08-25: in bidding, no one wants to
+clarify in public. A supplier asking a question is exposing what it does not know, and often what
+it is planning; broadcasting that to its competitors is a cost the asker bears alone. So the public
+tick was never used and the feature was abandoned in practice rather than by a code change.
+
+Options considered:
+
+- **Leave the column dormant and fix the copy** — chosen. Zero risk, no migration, and the column
+  costs nothing. If a future rule ever requires broadcast answers, the storage is already right.
+- **Remove `is_public` entirely** — rejected. It needs a migration on both environments to delete a
+  column that harms nothing, and it would throw away the one piece of schema that a future addendum
+  or Q&A-bulletin feature would need.
+- **Build the public toggle properly in the admin UI** — rejected. It would be building a control
+  the owner has already said will not be used.
+
+Outcome:
+
+`clarifications.service.ts:266` hardcodes `isPublic: false` on every reply, which is now the
+documented intent rather than an oversight. The remaining defect is cosmetic: the vendor tender page
+still tells suppliers "replies marked as public are visible to all bidders", advertising an option
+that will never be taken. That copy needs rewording.
+
+Impact:
+
+Information that genuinely has to reach every bidder does not travel through clarifications at all —
+it is an **addendum to the tender document**, which is the correct instrument for it anyway because
+it is versioned and attaches to the tender rather than to one thread. Anyone reviewing a tender for
+fairness should look for addenda, not for public clarification replies; there will never be any.
+
+Surfaced by the production mock run (`docs/qa/PRODUCTION_MOCK_RUN_2026-08-25.md`, finding 2), where
+an answer that made a component mandatory reached only the asking bidder. That behaviour is correct
+and intended.
+
+Related files:
+
+- `apps/api/src/modules/clarifications/clarifications.service.ts` (:266)
+- `apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx` (:406 - the placeholder to reword)
+- `database/migrations/010_clarification_visibility_per_reply.sql`
+
 ### 2026-08-24 - Registry invitations for prospective suppliers
 
 Decision:
