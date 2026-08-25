@@ -482,14 +482,9 @@ ordered by consequence. **All still open.**
   evidence: a published tender currently reaches suppliers only if they log in and look. Needs an
   explicit keep-deferred-or-build decision before go-live, not silent inheritance.
 
-- [ ] **(Low) Vendor portal placeholder promises public clarification replies that never exist.**
-  Private replies are the **intended design** (owner, 2026-08-25) and the behaviour is correct:
-  `clarifications.service.ts:266` hardcodes `isPublic: false`, so a reply only ever reaches the
-  asking bidder. But the placeholder at `apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx:406`
-  still tells suppliers "replies marked as public are visible to all bidders". Reword it to say
-  replies go only to the asker. Note that migration `010` deliberately put `is_public` on each
-  reply, so the column exists and is permanently false by design — leave it that way unless the
-  owner asks for an addendum feature.
+- [x] **(Low) Vendor page advertised a public clarification reply that does not exist.** Private
+  replies are intended (owner, 2026-08-25). Copy reworded to "The reply goes only to you."
+  **Committed, not deployed** — needs a `web-vendor` rebuild. Bundle with the icon-font fix below.
 
 - [ ] **(Medium) Three different technical scores render under the same "/ 50" label.** Criteria
   carry both `max_score` and `weight` and the screens disagree: scorecard `38/50` (raw), submitted-

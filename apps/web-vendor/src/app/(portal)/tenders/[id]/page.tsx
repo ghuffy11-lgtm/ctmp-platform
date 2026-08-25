@@ -403,7 +403,7 @@ function ClarificationsSection({ tenderId, tenderStatus }: { tenderId: string; t
       {canAsk && (
         <form onSubmit={handleAsk} className="mb-4 rounded-2xl bg-slate-900/5 border border-slate-900/10 p-4 space-y-3">
           <Textarea
-            placeholder="Ask a question about this tender. Replies marked as public are visible to all bidders; private replies only to you."
+            placeholder="Ask a question about this tender. The reply goes only to you."
             value={question}
             onChange={e => setQuestion(e.target.value)}
             rows={3}
