@@ -34,9 +34,9 @@ decimals throughout.
 
 1. **Publishing notifies nobody** — `notification_logs` gained no row. Known deferred BUG-016, but
    on production today a published tender reaches suppliers only if they log in and look.
-2. **Clarification answers are forced private, with no public option** — the vendor portal promises
-   one; the admin reply box has none. Demonstrated: an answer that made a component mandatory was
-   visible only to the asking bidder, and the competitor bid without it.
+2. **Vendor portal promises public clarification replies that never exist** — downgraded after the
+   owner confirmed private replies are intended. The behaviour is right (`isPublic: false` is
+   hardcoded); only the vendor-facing placeholder still advertises a public option. Copy fix.
 3. **Three different technical scores under one "/ 50" label** — scorecard `38/50` (raw), bid badge
    `78/50` (weighted numerator over raw denominator — above its own maximum), comparison `39/50`
    (weighted rescaled). Ranking was correct throughout; the *display* cannot be reconciled.

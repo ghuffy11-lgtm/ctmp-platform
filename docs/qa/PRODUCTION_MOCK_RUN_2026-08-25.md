@@ -77,6 +77,10 @@ used in-app modals.
 
 Ordered by how much they matter. None blocked the run.
 
+**#2 has since been downgraded to a copy fix** — the owner confirmed on 2026-08-25 that private
+clarification replies are the intended design. It keeps its position here so the numbering matches
+the tracker and the handover.
+
 ### 1. Publishing a tender notifies nobody
 
 `notification_logs` gained **no row** when the tender was published. This is the known deferred
@@ -84,16 +88,30 @@ BUG-016 (broader publish-notification dispatch), not a regression — but stated
 production today, a published tender reaches suppliers only if they happen to log in and look.
 Worth an explicit decision before go-live.
 
-### 2. Clarification answers are private, with no way to make them public
+### 2. The vendor portal promises public clarification replies the system never sends
 
-The vendor portal tells bidders *"Replies marked as public are visible to all bidders; private
-replies only to you."* The admin reply box offers **no public/private control** and states flatly
-"Replies are private to the asking vendor." The reply is stamped `PRIVATE`.
+**Private replies are the intended design — confirmed by the owner on 2026-08-25.** The behaviour
+is correct. This finding is only about the wording.
 
-This was demonstrated, not theorised: Vendor1 asked whether an external maintenance bypass switch
-was required. The answer — which made it mandatory — was visible only to Vendor1. vendor2's tender
-page showed *"No clarifications posted yet."* vendor2 then bid without a requirement its competitor
-knew about. In a real tender that is an unequal-information problem, not a cosmetic one.
+`clarifications.service.ts:266` hardcodes `isPublic: false` on every reply, so no reply is ever
+visible to another bidder. The data model does support the alternative — migration `010` moved
+`is_public` onto each reply specifically so a thread could be shared — but nothing sets it true and
+the admin UI exposes no control. That is deliberate and matches the owner’s intent.
+
+What is wrong is the placeholder on the vendor tender page
+(`apps/web-vendor/src/app/(portal)/tenders/[id]/page.tsx:406`):
+
+> *Ask a question about this tender. Replies marked as public are visible to all bidders; private
+> replies only to you.*
+
+It tells suppliers a public reply is possible. It is not. Observed during the run: Vendor1 asked
+whether an external maintenance bypass switch was required, the answer made it mandatory, and
+vendor2’s page showed *No clarifications posted yet.* — correct behaviour, but a bidder reading
+that placeholder would reasonably expect an answer of general application to be shared.
+
+**Fix:** reword the placeholder so it says replies go only to the asking bidder. If information
+ever has to reach every bidder, that is an addendum to the tender document, not a clarification
+reply.
 
 ### 3. Three different technical scores appear under the same "/ 50" label
 
