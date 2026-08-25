@@ -1,18 +1,26 @@
+/* THE @import RULES MUST STAY ABOVE @tailwind. Do not move them down.
+   CSS ignores any @import that appears after a style rule, and `@tailwind base`
+   expands in place into the whole Preflight reset — so an @import written below
+   it lands ~26 KB into the compiled stylesheet and the browser silently drops it.
+   Verified in the live page on 2026-08-25: with the imports below @tailwind,
+   `document.fonts` held ZERO faces and "upload_file" measured 109px (rendered as
+   text) instead of ~24px (rendered as one glyph).
+   That is why Inter never loaded here either — nobody noticed, because falling
+   back to system-ui looks acceptable. An icon font has no acceptable fallback,
+   which is what finally exposed it.
+   web-admin/src/app/globals.css:14 has the same ordering bug and its Google
+   Fonts are dead too; not fixed here because it needs its own deploy. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+/* Used by .material-symbols-outlined in eight places: the bid wizard's two upload
+   drop zones, its stepper, receipt and warning rows, and the bid detail
+   breadcrumb. Without it suppliers saw a large grey "upload_file" mid-dropzone
+   plus "chevron_right", "schedule", "description", "verified", "warning".
+   Found by the production mock run, 2026-08-25. */
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
-/* 2026-08-25: this portal uses .material-symbols-outlined in eight places — the
-   bid wizard's two upload drop zones, its stepper, receipt and warning rows, and
-   the bid detail breadcrumb — but never loaded the font or declared the class.
-   Without them the ligature NAME renders as literal text, so suppliers saw a
-   large grey "upload_file" in the middle of both upload zones, plus
-   "chevron_right", "schedule", "description", "verified" and "warning".
-   Found by the production mock run on 2026-08-25.
-   web-admin has carried both of these since the beginning (globals.css:15) —
-   the declaration and the usage were simply in opposite apps. */
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
 @layer base {
   html {
