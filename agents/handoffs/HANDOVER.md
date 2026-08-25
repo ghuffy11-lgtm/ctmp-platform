@@ -6,6 +6,62 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-25 — First full tender lifecycle executed on PRODUCTION — `TDR-2026-0001`, then cancelled
+
+**Date/time:** 2026-08-25 · production, browser-driven · no code change, no deploy, no migration
+
+Production had processed zero tenders since going live in June 2026. This run closes that: all 13
+workflow steps executed end to end against the live system, then **cancelled** (not purged) on the
+owner's instruction so reference `TDR-2026-0001` is permanently consumed and can never be reissued.
+
+Full write-up, including everything verified and everything not: `docs/qa/PRODUCTION_MOCK_RUN_2026-08-25.md`.
+
+**The load-bearing result — the audit chain verifies, 77 of 77 rows.** `verifyChain()` runs only at
+API boot, so it was replicated exactly (same `canonicalize()`, same payload construction) and run
+against the live rows without restarting production. The chain now carries `TENDER_CREATED` with
+`50000.000`, every BoQ price write, and `AWARD_CONFIRMED` with `23265.750` — all `Prisma.Decimal`.
+Before `prod-20260825` every one of those would have broken it. Production had verified clean only
+because it held no tenders.
+
+**Also confirmed live:** audit-trail attribution now shows `Ghuffran Anwar (PROCUREMENT_ADMIN)` and
+`Vendor1`/`vendor2`, with `system` on exactly one genuinely system-generated row and no
+`Invalid Date`; all four bid PDF checksums matched their originals byte for byte; commercial
+envelopes stayed sealed through technical opening and evaluation; quorum, chair-presence,
+scheduled-time and the ≥20-char `OpenEnvelopesDto` remarks gate all fired; award amount held three
+decimals throughout.
+
+**Six findings, none blocking.** In order of consequence:
+
+1. **Publishing notifies nobody** — `notification_logs` gained no row. Known deferred BUG-016, but
+   on production today a published tender reaches suppliers only if they log in and look.
+2. **Clarification answers are forced private, with no public option** — the vendor portal promises
+   one; the admin reply box has none. Demonstrated: an answer that made a component mandatory was
+   visible only to the asking bidder, and the competitor bid without it.
+3. **Three different technical scores under one "/ 50" label** — scorecard `38/50` (raw), bid badge
+   `78/50` (weighted numerator over raw denominator — above its own maximum), comparison `39/50`
+   (weighted rescaled). Ranking was correct throughout; the *display* cannot be reconciled.
+4. **Awarded Tenders archive drops a decimal** — renders `23,265.75` for stored `23265.750`. KWD
+   has three (fils). Commercial Comparison renders it correctly.
+5. **Vendor bid wizard leaks Material Symbols ligature names as text** — `upload_file`,
+   `chevron_right`, `schedule`, `description`, `verified`, `warning`. Vendor portal only. It is the
+   screen every supplier bids on.
+6. **Technical envelopes are not hash-verified at opening** — `hash_verified_at` is set for
+   COMMERCIAL, left NULL for TECHNICAL.
+
+**Not verified:** the rendered wording of the Award Minutes PDF. The file is a valid 119 KB PDF whose
+on-disk SHA-256 matches the DB record, but its text is subsetted-font glyph IDs and was not decoded.
+Open it once and read it.
+
+**Rollback:** nothing to roll back — no code or schema changed. The tender is `CANCELLED` and
+immutable; `audit_logs` rows 44–77 are permanent by design.
+
+**Housekeeping:** generated bid PDFs and all temporary verification scripts were removed from the
+workstation, the build box, the production host and the `ctmp-api` container. No other project on
+any host was touched.
+
+---
+---
+
 ## 2026-08-25 — Audit trail fixes SHIPPED TO PRODUCTION — `prod-20260825`
 
 **Date/time:** 2026-08-25 · admin host only · `api` + `web-admin`, **no migration**

@@ -8,13 +8,15 @@ production hosts (image tags, schema comparison). Where a claim could be checked
 ## One-paragraph summary
 
 CTMP is **deployed to production on both servers** and has been since June 2026, but is **not yet in
-service** — go-live has not happened, which is why production holds zero tenders. That is the plan,
-not a gap. (Earlier revisions of this file said "live in production since June 2026", which reads as
-*in use* and has already caused one reader to treat zero tenders as alarming.) The full tender
-lifecycle works end to end: create → internal review → approve → publish → vendor clarifications →
-bid submission (sealed technical + commercial envelopes) → technical evaluation → committee
-commercial opening → commercial comparison → optional negotiation → award recommendation → award →
-close, with a hash-chained audit trail throughout.
+service** — go-live has not happened. Production held zero tenders until 2026-08-25, when the full
+lifecycle was run once as `TDR-2026-0001` and then cancelled; that cancelled record is the only
+tender on it. That is the plan, not a gap. (Earlier revisions of this file said "live in
+production since June 2026", which reads as *in use* and has already caused one reader to treat
+zero tenders as alarming.) The full tender lifecycle works end to end: create → internal review →
+approve → publish → vendor clarifications → bid submission (sealed technical + commercial
+envelopes) → technical evaluation → committee commercial opening → commercial comparison →
+optional negotiation → award recommendation → award → close, with a hash-chained audit trail
+throughout.
 
 **As of 2026-08-24 dev and production are in step.** Identical schemas, everything through migration
 `056` on both, and nothing queued. The Arabic management area shipped to production on 2026-08-21
@@ -163,13 +165,17 @@ Two items sit with the owner by their own choice:
 
 Still outstanding from before, unrelated to the Arabic work:
 
-3. **Run the production test tender** — full runbook now written at
-   `docs/qa/PRODUCTION_LIFECYCLE_TEST.md`, including the server-side checks and the teardown.
-   Production has **zero tenders**, so no part of the live money path has been exercised with real
-   data. Runnable with the four existing production users — see the role-coverage section below.
-4. **Purge that test tender afterwards** — `SSH_ALIAS=cts-prod bash scripts/purge_tender.sh <REF>`
-   dry run, then again with `--confirm`. The script has still **never been run anywhere**, so prove
-   it on dev against `TDR-2026-0028` before pointing it at production.
+3. ~~**Run the production test tender**~~ — **DONE 2026-08-25.** The full lifecycle was executed
+   end to end on production as `TDR-2026-0001` and then cancelled. Production is no longer
+   unexercised: the live money path, the sealed-envelope controls, the committee gates and the
+   audit chain have all now been proven with real data. Results, including six open findings and
+   one thing deliberately left unverified, are in `docs/qa/PRODUCTION_MOCK_RUN_2026-08-25.md`.
+   **The headline result: the audit chain verifies across all 77 rows**, including three
+   `Prisma.Decimal` money values that would each have broken it before `prod-20260825`.
+4. **Purge is NOT the teardown that was used, and `purge_tender.sh` has still never been run.**
+   The owner chose to **cancel** `TDR-2026-0001` rather than purge it, precisely so the reference
+   is permanently consumed and can never be reissued to a genuine tender. The script therefore
+   remains unproven on every environment — prove it on dev before pointing it at production.
 
 ## Production role coverage — functional, but nobody is separated from anybody
 

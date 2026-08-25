@@ -468,3 +468,51 @@ These items emerged during Phase 7 QA work but are out of scope for Phase 7 comp
   lost anything**, so no data repair was needed; all 63 stored values verified unchanged. JS float
   accumulation was measured and ruled out (worst deviation 1.5e-8 KWD over 20,000 trials).
   **SHIPPED TO PRODUCTION 2026-08-21** with migration `054` and all three images. Applied to prod while it still had zero tenders, so no production value was ever rounded.
+
+---
+
+## Production mock run findings — 2026-08-25
+
+Six items raised by the first full tender lifecycle run on production (`TDR-2026-0001`, since
+cancelled). Full evidence in `docs/qa/PRODUCTION_MOCK_RUN_2026-08-25.md`. None blocked the run;
+ordered by consequence. **All still open.**
+
+- [ ] **(High) Publishing a tender dispatches no vendor notification.** `notification_logs` gained
+  no row on `TENDER_PUBLISHED`. This is the known deferred BUG-016, restated with production
+  evidence: a published tender currently reaches suppliers only if they log in and look. Needs an
+  explicit keep-deferred-or-build decision before go-live, not silent inheritance.
+
+- [ ] **(High) Clarification answers are forced private with no public option.** The vendor portal
+  tells bidders "replies marked as public are visible to all bidders"; the admin reply box exposes
+  no such control and stamps every reply `PRIVATE`. Demonstrated on production: an answer that made
+  an external maintenance bypass switch mandatory was visible only to the asking bidder, and the
+  competitor bid without it. Either build the public/addendum path or change the vendor-facing copy
+  so it stops promising something the system cannot do.
+
+- [ ] **(Medium) Three different technical scores render under the same "/ 50" label.** Criteria
+  carry both `max_score` and `weight` and the screens disagree: scorecard `38/50` (raw), submitted-
+  bids badge `78/50` (weighted /100 numerator against the /50 denominator — a score above its own
+  maximum), commercial comparison `39/50` (weighted rescaled). `Min. 70 to pass` is tested against
+  the weighted /100 value but sits beside "CURRENT SCORE 38 / 50", reading as an impossible
+  threshold. Ranking and pass/fail were correct throughout — this is a display defect, but on an
+  evaluation record that has to withstand challenge.
+
+- [ ] **(Medium) Awarded Tenders archive renders KWD with two decimals.** Shows `23,265.75 KWD` for
+  a stored `23265.750`. KWD carries three (fils) and Commercial Comparison renders it correctly.
+  This is the permanent read-only archive of procurement decisions — the one place the figure most
+  needs to be exact. Same class of defect as the `numeric(15,2)` money-precision bug fixed by
+  migration `055`, but in the presentation layer.
+
+- [ ] **(Medium) Vendor bid wizard renders Material Symbols ligature names as literal text.**
+  `upload_file` appears in large grey type in the middle of both upload drop zones; `chevron_right`,
+  `schedule`, `description`, `verified` and `warning` appear elsewhere on the same flow. Admin
+  portal icons resolve correctly, so it is scoped to the vendor portal. This is the screen every
+  supplier uses to bid.
+
+- [ ] **(Low) Technical envelopes are not hash-verified at opening.** `bid_envelopes.hash_verified_at`
+  is stamped for COMMERCIAL envelopes and left NULL for TECHNICAL. Technical submissions are
+  evidence too; their checksum is taken at upload and never re-checked.
+
+- [ ] **(Low) Read the Award Minutes PDF.** Generated correctly and its on-disk SHA-256 matches the
+  DB record, but its rendered wording was never verified — the text is subsetted-font glyph IDs and
+  was not decoded. Open one and confirm it says what it should.
