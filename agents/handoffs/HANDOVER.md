@@ -6,6 +6,38 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-26 — Dev rebuilt to match production (it had fallen behind)
+
+**Date/time:** 2026-08-26 · build box only · `web-admin` + `web-vendor` rebuilt and restarted
+
+For two days dev was running **older code than production**. The 2026-08-25 and 2026-08-26 fixes
+went straight to production at the owner’s instruction and dev was never rebuilt, so the box that
+exists to rehearse production was the one place the fixes were missing.
+
+| Container | Was built | Was missing |
+|---|---|---|
+| `ctmp-web-vendor` | 24 Aug 00:54 | Material Symbols font fix, clarification copy fix |
+| `ctmp-web-admin` | 24 Aug 23:12 | Sidebar logo 32px → 48px |
+
+Rebuilt with `docker compose build` (dev build args come from `.env`, so no explicit `--build-arg`
+is needed here — unlike the production path). Verified inside the images rather than assumed:
+
+- `web-vendor`: Material Symbols `@import` present in the compiled CSS; new clarification copy in
+  4 files; the old "marked as public" string gone (0 files).
+- `web-admin`: `w-12 h-12 object-contain` present in 14 files.
+
+**Git is level everywhere** — local, `origin/main` and the build box all at `8cabbbc`, clean trees.
+The build box had been two commits behind and was pulled as part of this.
+
+**Schema is level** — both environments carry `vendor_invitations` and `numeric(16,3)` money
+columns. No migration drift. Row counts differ by design (dev 29 tenders / 1,110 audit rows;
+production 1 cancelled tender / 78 audit rows), not by drift.
+
+**Worth not repeating:** deploying to production first and dev never is how dev stops being a
+rehearsal. If a hotfix has to go straight to production, rebuild dev in the same session — the dev
+build costs a couple of minutes and needs no transfer step.
+
+---
 ## 2026-08-26 — Admin deploy `prod-20260826` — sidebar logo 32px → 48px
 
 **Date/time:** 2026-08-26 · admin host only · `web-admin`, **no migration, no API change**
