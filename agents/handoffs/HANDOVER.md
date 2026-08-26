@@ -6,6 +6,48 @@ Every agent must add the newest entry at the top. Do not remove previous entries
 
 ---
 
+## 2026-08-26 — Admin sidebar logo: cropped mark prepared, NOT yet installed
+
+**Date/time:** 2026-08-26 · no deploy · one file produced for the owner to upload
+
+**The sidebar logo problem was never the CSS box.** Enlarging it 32px → 48px earlier the same day
+helped, but the real cause is the asset: `admin_logo` is the full portrait Hadi Clinic lockup
+(`viewBox="0 0 354.3 420.6"`) — minaret mark, "Hadi Clinic" script, a rule, an Arabic line and
+"HADI CLINIC". Five stacked elements. At 48px tall each band gets about 10px and none of it reads.
+The system’s own upload hint even says the sidebar wants **200×60**, a horizontal lockup; a
+portrait lockup was uploaded instead.
+
+Measured the artwork with `getBBox()` rather than guessing where to cut. It falls into four clean
+bands:
+
+| Band | y range | Content |
+|---|---|---|
+| 1 | 0 → 269.9 | the mark — minarets, crescent, "Hadi Clinic" script |
+| 2 | 274.3 → 279.7 | horizontal rule |
+| 3 | 293.1 → 351.2 | Arabic wordmark |
+| 4 | 370 → 420.5 | "HADI CLINIC" |
+
+Band 1 alone is 256.3 × 269.9 — aspect 0.95, effectively square, which is exactly what a square
+48px box wants. Cropping to it fills the box instead of letterboxing the mark into a third of it.
+
+**Produced:** `D:\Work\CTMP\logo\hadi_logo_mark.svg` — the original with one attribute changed,
+`viewBox="47.8 -2 260.3 273.9"` (2 units of padding). Verified byte-identical to the original apart
+from that attribute, so it is lossless and reversible; the text is still in the file, just outside
+the viewBox. `hadi_logo_full.svg` sits beside it as the untouched original.
+
+**Not installed, deliberately.** Pointing `branding.admin_portal_logo_storage_key` at it by raw SQL
+was refused by the tooling guardrail, and rightly — branding changes belong in the audited upload
+path. Install it through **System Configuration → Branding → Admin logo**, which needs SYSTEM_ADMIN
+(Ghuffran now holds it; log out and back in first, since permissions are baked into the JWT).
+
+A stray copy written to `/data/branding` on production while testing was removed; nothing on any
+host was left changed by this.
+
+**If the full lockup is wanted instead**, the fix is a wide sidebar header rather than a square
+one — but that is a layout change, not an asset swap, and the two text lines beside the logo
+already say "HadiClinic Tendering System Admin", so the words inside the logo are redundant there.
+
+---
 ## 2026-08-26 — Dev rebuilt to match production (it had fallen behind)
 
 **Date/time:** 2026-08-26 · build box only · `web-admin` + `web-vendor` rebuilt and restarted
